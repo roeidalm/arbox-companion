@@ -252,9 +252,11 @@ separately. The existing entity/service permissions are unchanged.
 
 See the [panel installation and usage guide](dashboard/arbox-panel.md) for
 permissions, notification links, multiple connections and troubleshooting.
-The [legacy Lovelace dashboard](dashboard/arbox-dashboard.yaml) and all existing
-entities remain available. If you previously configured an iframe with the
-same `/arbox` path, remove or rename that optional iframe before using the panel.
+The old Lovelace YAML examples have been removed; use the automatically installed
+panel instead. Existing sensors, calendars and services remain available, and
+previously installed dashboards are not deleted by an update. You can remove your
+old dashboard from HA after switching to the panel. If you configured an iframe
+with the same `/arbox` path, remove or rename it before using the panel.
 
 ## Security notes
 

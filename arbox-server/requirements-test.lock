@@ -911,9 +911,9 @@ typing-inspection==0.4.4 \
     # via
     #   fastapi
     #   pydantic
-tzdata==2026.1 \
-    --hash=sha256:4b1d2be7ac37ceafd7327b961aa3a54e467efbdb563a23655fbfe0d39cfc42a9 \
-    --hash=sha256:67658a1903c75917309e753fdc349ac0efd8c27db7a0cb406a25be4840f87f98
+tzdata==2026.3 \
+    --hash=sha256:4a1518b8993086a7982523e071643f3c0e5f213e75b21318e78bcabfff9d1415 \
+    --hash=sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931
     # via -r requirements.txt
 tzlocal==5.4.4 \
     --hash=sha256:8dbb8660838688a7b6ba4fed31d18dedf842afb4d47ca050d6d891c2c15f3be4 \

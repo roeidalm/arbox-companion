@@ -9,7 +9,7 @@
 # repo: the tag is republished whenever Alpine moves, and two builds of the
 # same git tag could otherwise ship different system libraries. Renovate keeps
 # the digest current (docker:pinDigests).
-FROM python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a AS test
+FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b728874824e6c0a27cb96fc AS test
 
 # Tests have their own fully hashed dependency graph. This stage is disposable:
 # pytest, httpx2 and their transitive dependencies are never inherited by the
@@ -32,14 +32,14 @@ RUN python -m pytest
 
 # Start again from the pristine base, not from `test`: only runtime packages
 # cross this boundary into the image users pull.
-FROM python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a AS runtime
+FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b728874824e6c0a27cb96fc AS runtime
 
 # The lock, not the six top-level pins: those left starlette, pydantic, yarl
 # and the rest floating, so two builds of the same git tag could ship
 # different code with no diff in this repo. --require-hashes also means a
 # tampered or re-uploaded wheel fails the build instead of shipping.
 # Regenerate with:
-#   docker run --rm -v "$PWD":/w -w /w python:3.12-slim \
+#   docker run --rm -v "$PWD":/w -w /w python:3.14-slim \
 #     sh -c 'pip install -q pip-tools && pip-compile --generate-hashes \
 #            --strip-extras -o requirements.lock requirements.txt'
 #
@@ -49,7 +49,7 @@ FROM python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa
 COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock \
  && (pip uninstall --yes pip setuptools wheel 2>/dev/null || true) \
- && rm -rf /root/.cache /usr/local/lib/python3.12/ensurepip
+ && rm -rf /root/.cache /usr/local/lib/python3.14/ensurepip
 
 WORKDIR /srv/arbox-server
 COPY app ./app

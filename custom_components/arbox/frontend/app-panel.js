@@ -623,18 +623,27 @@ export class ArboxAppPanel extends HTMLElement {
   }
   render_overview() {
     const next = this._data.summary?.next_class;
-    if (next) {
-      const hero = node("section", null, "hero");
-      hero.append(
-        node("p", "האימון הבא שלך", "eyebrow"),
-        node("h2", next.category_name),
-        node("p", [fmtDate(next.date), next.start_time?.slice(0, 5), next.coach_name]
-          .filter(Boolean).join(" · ")),
-        button("לפרטי האימון", () => this.openSession(next), "primary"),
-      );
-      this._content.append(hero);
-    }
-    this._content.append(this.quota());
+    const hero = node("section", null, "hero");
+    hero.append(
+      node("p", "האימון הבא שלך", "eyebrow"),
+      node("h2", next?.category_name || "מקום לאימון הבא שלך"),
+      node(
+        "p",
+        next
+          ? [fmtDate(next.date), next.start_time?.slice(0, 5), next.coach_name]
+              .filter(Boolean)
+              .join(" · ")
+          : "בחרו אימון בלוח ותנו לעצמכם זמן לתנועה.",
+      ),
+    );
+    hero.append(
+      button(
+        next ? "לפרטי האימון" : "ללוח האימונים",
+        () => (next ? this.openSession(next) : this.navigate("schedule")),
+        "primary",
+      ),
+    );
+    this._content.append(hero, this.quota());
     const pending = (this._data.journal?.entries || []).filter(
       (r) => !hasFeedback(r) && !r.dismissed_at,
     );
@@ -655,7 +664,7 @@ export class ArboxAppPanel extends HTMLElement {
         );
       this._content.append(section);
     }
-    this._content.append(node("h2", "האימונים הקרובים"));
+    this._content.append(node("h2", "בהמשך השבוע"));
     this.list(
       (this._data.me?.sessions || [])
         .filter((s) => !s.automation_skipped)

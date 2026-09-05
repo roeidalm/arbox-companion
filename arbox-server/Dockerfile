@@ -39,7 +39,7 @@ FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b7288748
 # different code with no diff in this repo. --require-hashes also means a
 # tampered or re-uploaded wheel fails the build instead of shipping.
 # Regenerate with:
-#   docker run --rm -v "$PWD":/w -w /w python:3.12-slim \
+#   docker run --rm -v "$PWD":/w -w /w python:3.14-slim \
 #     sh -c 'pip install -q pip-tools && pip-compile --generate-hashes \
 #            --strip-extras -o requirements.lock requirements.txt'
 #
@@ -49,7 +49,7 @@ FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b7288748
 COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock \
  && (pip uninstall --yes pip setuptools wheel 2>/dev/null || true) \
- && rm -rf /root/.cache /usr/local/lib/python3.12/ensurepip
+ && rm -rf /root/.cache /usr/local/lib/python3.14/ensurepip
 
 WORKDIR /srv/arbox-server
 COPY app ./app

@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- the address of this server is nobody else's business: without this,
+       clicking the studio-address or Google Calendar links hands the
+       internal hostname and port to Google in the Referer header -->
+  <meta name="referrer" content="no-referrer">
+  <!-- The API key lives in localStorage, so any script that ever ran here
+       could read it. Nothing on this page is loaded from elsewhere, so
+       'self' costs nothing today and is a real backstop tomorrow.
+       unsafe-inline is required for style: the markup below carries inline
+       style attributes, and blocking them breaks the date and quota rows. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>Arbox — לוח שיעורים</title>
+<link rel="stylesheet" href="/static/style.css?v=2.58.0">
+<link rel="stylesheet" href="/static/release-notes.css?v=1">
+</head>
+<body>
+<header>
+  <h1>🏋️ Arbox</h1>
+  <div id="studioSwitch" class="studio-switch" hidden></div>
+  <nav>
+    <button data-view="schedule" class="tab active">לוח</button>
+    <button data-view="mine" class="tab">שלי</button>
+    <button data-view="rules" class="tab">אוטומציות</button>
+    <button data-view="journal" class="tab">יומן</button>
+    <button data-view="system" class="tab">מערכת</button>
+    <button data-view="settings" class="tab">הגדרות</button>
+  </nav>
+  <span id="syncInfo" class="sync-info"></span>
+  <button id="themeToggle" class="theme-toggle" title="מצב תצוגה"></button>
+</header>
+
+<main>
+  <!-- setup (only when server has no creds) -->
+  <section id="view-setup" class="view" hidden>
+    <div class="card narrow">
+      <h2>חיבור ל‑Arbox</h2>
+      <p>ההזדהות נעשית פעם אחת ונשמרת בשרת. הסיסמה לא נשמרת בדפדפן.</p>
+      <label>שם הסטודיו (whitelabel)
+        <input id="setupWhitelabel" placeholder="Arbox" value="Arbox">
+      </label>
+      <p class="hint">השם הממותג של האפליקציה שבה את/ה מתחבר/ת — למשל Moveom.
+         מופיע בחנות האפליקציות. אם הסטודיו משתמש באפליקציית Arbox הגנרית,
+         השאר/י Arbox.</p>
+      <label>אימייל <input id="setupEmail" type="email" autocomplete="username"></label>
+      <label>סיסמה <input id="setupPassword" type="password" autocomplete="current-password"></label>
+      <button id="setupBtn" class="primary">התחבר</button>
+      <p id="setupMsg" class="msg"></p>
+    </div>
+  </section>
+
+  <!-- api key prompt (server configured but this browser has no key) -->
+  <section id="view-key" class="view" hidden>
+    <div class="card narrow">
+      <h2>מפתח API</h2>
+      <p>השרת כבר מחובר. כדי לבצע פעולות מהדפדפן הזה, הזן את מפתח ה‑API
+         (נמצא ב‑<code>settings.json</code> שבתיקיית הנתונים של השרת).</p>
+      <label>API key <input id="keyInput" type="password"></label>
+      <button id="keyBtn" class="primary">שמור</button>
+      <button id="keySkip">רק צפייה</button>
+    </div>
+  </section>
+
+  <!-- schedule -->
+  <section id="view-schedule" class="view" hidden>
+    <div class="filters">
+      <div class="week-nav">
+        <button id="prevWeek">‹ הקודם</button>
+        <span id="weekLabel"></span>
+        <button id="nextWeek">הבא ›</button>
+        <button id="todayBtn">היום</button>
+        <div class="seg cal-modes">
+          <button class="seg-btn" data-mode="day">יום</button>
+          <button class="seg-btn active" data-mode="week">שבוע</button>
+          <button class="seg-btn" data-mode="month">חודש</button>
+        </div>
+      </div>
+      <div class="refresh-bar">
+        <span class="lbl">רענן מול Arbox:</span>
+        <button class="rbtn" data-days="0">היום</button>
+        <button class="rbtn" data-days="1">מחר</button>
+        <button class="rbtn" data-days="2">מחרתיים</button>
+        <button class="rbtn" id="refreshBtn" data-week="1">השבוע המוצג</button>
+        <button class="rbtn" data-all="1">הכל (30 יום)</button>
+        <span class="range-pick">
+          <label>מ־<input id="refFrom" type="date"></label>
+          <label>עד <input id="refTo" type="date"></label>
+          <button class="rbtn" id="refRange">רענן טווח</button>
+        </span>
+      </div>
+      <div class="chips" id="daypartChips"></div>
+      <div class="chips" id="coachChips"></div>
+      <div class="chips" id="categoryChips"></div>
+    </div>
+    <details class="legend">
+      <summary>מקרא — מה כל כפתור עושה</summary>
+      <div class="legend-body">
+        <div><span class="act book">הזמן</span> יש מקום וההרשמה פתוחה — נרשם/ת מיד.</div>
+        <div><span class="act future">⏳ תזמן</span> ההרשמה עדיין סגורה — לחיצה מתזמנת
+             את ההרשמה לרגע שבו החלון נפתח. ריחוף מראה מתי בדיוק.</div>
+        <div><span class="act scheduled">✓ מתוזמן</span> כבר מתוזמן — המערכת תתפוס לבד.
+             לחיצה מבטלת. ב״שלי״ אותו כפתור מופיע כ<span class="act cancel">בטל תזמון</span>.</div>
+        <div><span class="act standby">המתנה</span> השיעור מלא — כניסה לרשימת ההמתנה.</div>
+        <div><span class="act cancel">בטל</span> ביטול הרשמה או יציאה מרשימת המתנה.</div>
+        <div><span class="badge scheduled">מתוזמן ⏳</span> תג ב״שלי״ — השיעור ממתין
+             לפתיחת ההרשמה. מופיע לצד <span class="badge booked">רשום ✓</span>
+             ו-<span class="badge standby">המתנה</span>.</div>
+        <div><span class="legend-icon">ℹ️</span> תיאור השיעור.</div>
+        <div><span class="legend-icon">🔁</span> אוטומציה חוזרת — יוצר כלל לכל שיעור דומה
+             בעתיד, <strong>לא</strong> לשיעור הבודד הזה.</div>
+      </div>
+    </details>
+    <div id="scheduleGrid" class="grid"></div>
+  </section>
+
+  <!-- mine -->
+  <section id="view-mine" class="view" hidden>
+    <div class="card" id="membershipCard"></div>
+    <div id="mineList"></div>
+    <div class="card" id="messagesCard" hidden>
+      <h2>📣 הודעות מהסטודיו</h2>
+      <div id="latestMessage"></div>
+      <details id="messagesDetails">
+        <summary class="history-summary">הודעות קודמות</summary>
+        <input id="msgSearch" placeholder="חיפוש חופשי בהודעות">
+        <div id="messagesList"></div>
+      </details>
+      <div id="messagesStats" class="rule-desc"></div>
+    </div>
+    <div class="card">
+      <details id="historyDetails">
+        <summary class="history-summary">🏋️ היסטוריית אימונים</summary>
+        <p class="hint" id="historyStats"></p>
+        <details class="hist-filters">
+          <summary class="hist-filter-toggle">🔎 סינון</summary>
+          <div class="chips" id="histOutcomeChips"></div>
+          <div class="chips" id="histPeriodChips"></div>
+          <span class="range-pick">
+            <label>מ־<input id="histFrom" type="date"></label>
+            <label>עד <input id="histTo" type="date"></label>
+          </span>
+          <div class="chips" id="histCatChips"></div>
+          <div class="chips" id="histCoachChips"></div>
+        </details>
+        <div id="historyList"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- rules -->
+  <section id="view-rules" class="view" hidden>
+    <div class="card explain">
+      <h2>מה זה אוטומציה?</h2>
+      <p>אוטומציה היא <strong>סינון + פעולה</strong>: את/ה מגדיר/ה אילו שיעורים
+         מעניינים אותך (מאמנ/ת, סוג שיעור, ימים, טווח שעות), ובוחר/ת מה השרת
+         יעשה כשהוא מוצא כזה. השרת בודק את הלו״ז בשבילך כל הזמן — גם כשאת/ה ישן/ה.</p>
+
+      <div class="mode-explain">
+        <div>
+          <span class="mode-tag">🔔 התראה לילית</span>
+          <p>כל ערב המערכת בודקת אילו הרשמות נפתחות למחרת, לפי המועד
+             שהסטודיו הגדיר לכל שיעור. אם יש התאמה — מגיעה הודעה לטלפון
+             עם כפתור לכל שיעור. לחיצה אחת = תזמון הרשמה.</p>
+          <p class="hint">מועד הפתיחה יכול להשתנות בין סטודיואים ואף בין
+             שיעורים. הלוח יכול להופיע זמן רב לפני שאפשר להירשם.</p>
+          <p class="hint">מתאים כשאת/ה רוצה להחליט בעצמך, אבל לא לזכור לבדוק.</p>
+        </div>
+        <div>
+          <span class="mode-tag autobook">🤖 הזמנה אוטומטית</span>
+          <p>השרת קורא מכל שיעור את מועד פתיחת ההרשמה שקבע הסטודיו,
+             ותופס לך מקום כשהחלון נפתח — גם כשהמועד שונה בין שיעורים.
+             אחר כך מגיעה הודעה שזה נעשה.</p>
+          <p class="hint">מתאים לשיעור קבוע שאת/ה תמיד רוצה ושנוטה להתמלא מהר.</p>
+        </div>
+      </div>
+
+      <p class="hint">שדה שנשאר ריק = ״הכל״. אוטומציה בלי מאמנ/ת ובלי קטגוריה
+         תתפוס כל שיעור בטווח השעות שבחרת. אפשר להגדיר כמה אוטומציות במקביל,
+         ולכבות כל אחת בלי למחוק אותה.</p>
+    </div>
+
+    <div class="card">
+      <h2>🏖️ חופשות</h2>
+      <p class="hint">בטווח תאריכים של חופשה המערכת לא שולחת הצעות הרשמה לשבוע
+         הבא ולא מזמינה אוטומטית — לפי מה שתסמן/י. תזכורות על אימונים שכבר
+         הזמנת ממשיכות להגיע כרגיל.
+         <strong>שני התאריכים כלולים</strong> — "עד 10.9" חוסם גם את ה-10.9 עצמו.
+         טווח שהסתיים עובר להיסטוריה מקופלת מלמטה.<br>
+         <strong>לא תישאר/י בלי הסבר:</strong> בערב שבו השקט מתחיל תישלח הודעה
+         עם אפשרות לבטל את החופשה בשתי לחיצות, וביום האחרון שלה תישלח תזכורת
+         שהאוטומציה חוזרת. ביטול חופשה מחזיר לתור גם שיעורים שדולגו בגללה —
+         תזמונים נעוצים והזמנות אוטומטיות מכלל כאחד.</p>
+      <div class="rule-row">
+        <label>מתאריך <input id="vacFrom" type="date" style="width:auto"></label>
+        <label>עד תאריך <input id="vacTo" type="date" style="width:auto"></label>
+      </div>
+      <div class="kinds">
+        <label><input type="checkbox" id="vacNotify" checked> בלי הצעות הרשמה</label>
+        <label><input type="checkbox" id="vacAutobook" checked> בלי הזמנה אוטומטית</label>
+      </div>
+      <button id="vacAdd" class="primary">הוסף חופשה</button>
+      <button id="vacCancelEdit" hidden>בטל עריכה</button>
+      <p id="vacMsg" class="msg"></p>
+      <div id="vacList"></div>
+      <details id="vacHistoryWrap" hidden>
+        <summary class="hint">היסטוריית חופשות</summary>
+        <div id="vacHistory"></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2 id="ruleFormTitle">אוטומציה חדשה</h2>
+      <label>שם <input id="ruleName" placeholder="נבנה אוטומטית מהבחירות"></label>
+      <p class="hint">השם מתמלא לבד לפי מה שתבחר/י. אפשר לכתוב שם משלך —
+         ואם תמחק/י אותו הוא יחזור להתמלא אוטומטית.</p>
+      <div class="rule-row">
+        <div><span class="lbl">מאמנ/ת</span><div class="chips" id="ruleCoaches"></div></div>
+        <div><span class="lbl">קטגוריה</span><div class="chips" id="ruleCategories"></div></div>
+      </div>
+      <div class="rule-row">
+        <div><span class="lbl">ימים</span><div class="chips" id="ruleWeekdays"></div></div>
+        <div>
+          <span class="lbl">שעות</span>
+          <input id="ruleFrom" type="time"> – <input id="ruleTo" type="time">
+        </div>
+        <div>
+          <span class="lbl">מצב</span>
+          <select id="ruleMode">
+            <option value="notify">התראה לילית</option>
+            <option value="autobook">הזמנה אוטומטית</option>
+          </select>
+        </div>
+      </div>
+      <button id="ruleSave" class="primary">שמור אוטומציה</button>
+      <button id="ruleCancelEdit" hidden>בטל עריכה</button>
+      <p id="ruleMsg" class="msg"></p>
+    </div>
+    <div id="rulesList"></div>
+  </section>
+
+  <!-- personal workout journal -->
+  <section id="view-journal" class="view" hidden>
+    <div class="journal-head">
+      <div>
+        <h2>יומן אימונים</h2>
+        <p class="hint">מקום קטן לזכור מה עבד — בלי להפוך את האימון לטופס.</p>
+      </div>
+      <div class="seg journal-modes">
+        <button class="seg-btn active" data-journal-mode="sessions">אימונים</button>
+        <button class="seg-btn" data-journal-mode="coaches">מורים</button>
+        <button class="seg-btn" data-journal-mode="exercises">תרגילים</button>
+      </div>
+    </div>
+    <details class="journal-filters">
+      <summary>🔎 סינון</summary>
+      <div class="journal-filter-grid">
+        <label>חיפוש
+          <input id="journalSearch" placeholder="שיעור, מורה או תרגיל">
+        </label>
+        <label>תקופה
+          <select id="journalPeriod">
+            <option value="all">הכול</option>
+            <option value="30">30 ימים</option>
+            <option value="90">3 חודשים</option>
+            <option value="365">שנה</option>
+          </select>
+        </label>
+        <label>סוג שיעור <select id="journalCategory"><option value="">הכול</option></select></label>
+        <label>מורה <select id="journalCoach"><option value="">הכול</option></select></label>
+        <label>תרגיל <select id="journalExercise"><option value="">הכול</option></select></label>
+        <label>משוב
+          <select id="journalFeedbackFilter">
+            <option value="">הכול</option>
+            <optgroup label="על השיעור">
+              <option value="class_positive">נהניתי</option>
+              <option value="class_neutral">ניטרלי</option>
+              <option value="class_negative">פחות נהניתי</option>
+            </optgroup>
+            <optgroup label="על המורה">
+              <option value="coach_positive">התחברתי</option>
+              <option value="coach_neutral">ניטרלי</option>
+              <option value="coach_negative">פחות התחברתי</option>
+            </optgroup>
+            <option value="not_applicable">לא רלוונטי</option>
+            <option value="documented">עם תיעוד</option>
+          </select>
+        </label>
+        <button id="journalClearFilters" type="button" class="journal-clear-filters">נקה סינון</button>
+      </div>
+    </details>
+    <div id="journalContent"></div>
+  </section>
+
+  <!-- operational activity remains first-class, separate from the personal journal -->
+  <section id="view-system" class="view" hidden>
+    <div class="journal-head">
+      <div><h2>פעילות מערכת</h2><p class="hint">סנכרונים, הרשמות, התראות ושגיאות.</p></div>
+    </div>
+    <div id="logStatus" class="status-strip"></div>
+    <div class="chips" id="logLevels"></div>
+    <div class="chips" id="logSources"></div>
+    <div class="card" id="logList"></div>
+  </section>
+
+  <!-- settings -->
+  <section id="view-settings" class="view" hidden>
+    <div class="subtabs">
+      <button class="subtab active" data-pane="profile">👤 פרופיל</button>
+      <button class="subtab" data-pane="notify">🔔 התראות</button>
+      <button class="subtab" data-pane="calendar">📅 לוח שנה</button>
+      <button class="subtab" data-pane="tracking">🏋️ מעקב</button>
+      <button class="subtab" data-pane="studio">🏠 סטודיו</button>
+      <button class="subtab" data-pane="cleanup">🧹 ניקוי</button>
+      <button class="subtab" data-pane="advanced">⚙️ מתקדם</button>
+    </div>
+
+    <div class="pane" data-pane="profile">
+      <div class="card"><h2>החשבון שלי</h2><div id="profAccount" class="kv"></div></div>
+      <div class="card"><h2>פעילות</h2><div id="profActivity" class="kv"></div></div>
+    </div>
+
+    <div class="pane" data-pane="notify" hidden>
+      <p class="pane-intro">ההודעה הלילית עם הצעות ההזמנה נשלחת לכל ערוץ מסומן.
+         כיבוי ערוץ משתיק אותו בלבד — הטוקן וההגדרות נשמרים.</p>
+
+      <div class="cards-2">
+        <div class="card">
+          <h2><label class="switch"><input type="checkbox" id="tgEnabled"> טלגרם</label></h2>
+          <label>Bot token <input id="tgToken" type="password" placeholder="123456:ABC..."></label>
+          <label>Chat ID <input id="tgChat" placeholder="123456789"></label>
+          <span class="lbl">אילו הודעות</span>
+          <div class="kinds">
+            <label><input type="checkbox" class="kind-tg" data-kind="digest"> הודעה לילית</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="autobook"> הזמנות אוטומטיות</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="standby"> רשימת המתנה</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="studio"> הודעות מהסטודיו</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="latecancel"> לפני שאי אפשר לבטל</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="log"> אירועי מערכת</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="vacation"> חופשות</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="attendance"> אישור הגעה</label>
+            <label><input type="checkbox" class="kind-tg" data-kind="membership"> עדכוני מנויים</label>
+          </div>
+          <label>אילו אירועי מערכת
+            <select id="tgLogLevel">
+              <option value="error">שגיאות בלבד</option>
+              <option value="warn">אזהרות ושגיאות</option>
+            </select>
+          </label>
+          <button data-test="telegram" class="testBtn">שלח בדיקה</button>
+        </div>
+
+        <div class="card">
+          <h2><label class="switch"><input type="checkbox" id="haEnabled"> Home Assistant</label></h2>
+          <label>Webhook URL
+            <input id="haWebhook" placeholder="http://homeassistant:8123/api/webhook/arbox_notify">
+          </label>
+          <p class="hint">webhook במקום טוקן — מפעיל רק את האוטומציה שמחוברת אליו.</p>
+          <label><input type="checkbox" id="haFeedbackInHa"> פתיחת טופס המשוב בתוך Home Assistant</label>
+          <p class="hint">דורש אינטגרציית Arbox מגרסה 2.9.0 דרך HACS. הטלפון צריך גישה רק ל־HA; אין צורך לחשוף את שרת Arbox. שמרו את ההגדרה לפני בדיקה.</p>
+          <span class="lbl">אילו הודעות</span>
+          <div class="kinds">
+            <label><input type="checkbox" class="kind-ha" data-kind="digest"> הודעה לילית</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="autobook"> הזמנות אוטומטיות</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="standby"> רשימת המתנה</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="studio"> הודעות מהסטודיו</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="latecancel"> לפני שאי אפשר לבטל</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="log"> אירועי מערכת</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="vacation"> חופשות</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="attendance"> אישור הגעה</label>
+            <label><input type="checkbox" class="kind-ha" data-kind="membership"> עדכוני מנויים</label>
+          </div>
+          <label>אילו אירועי מערכת
+            <select id="haLogLevel">
+              <option value="error">שגיאות בלבד</option>
+              <option value="warn">אזהרות ושגיאות</option>
+            </select>
+          </label>
+          <button data-test="ha" class="testBtn">שלח בדיקה</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>תזמון וסדר</h2>
+        <div class="field-row">
+          <label>שעת ההודעה הלילית
+            <input id="digestHour" type="number" min="0" max="23">
+          </label>
+          <label>ערוץ ראשון
+            <select id="notifyOrder">
+              <option value="telegram">טלגרם</option>
+              <option value="ha">Home Assistant</option>
+            </select>
+          </label>
+          <label>אסקלציה (דקות)
+            <input id="escMinutes" type="number" min="0" max="180">
+          </label>
+          <label>התראה לפני נעילת הביטול
+            <input id="lateCancel" type="number" min="0" max="1440" step="15">
+          </label>
+          <label>תזכורת לפני שיעור (דקות)
+            <input id="classReminder" type="number" min="0" max="720">
+          </label>
+        </div>
+        <p class="hint">
+          <strong>אסקלציה:</strong> הודעה עם כפתורים נשלחת קודם לערוץ הראשון, ואם לא
+          נלחץ כפתור תוך מספר הדקות שהוגדר היא נשלחת גם לשני עם ⏰ תזכורת.
+          ‏0 = שני הערוצים מקבלים מיד.<br>
+          <strong>תזכורת לפני שיעור:</strong> ‏0 = כבוי. אירוע היומן כבר נושא תזכורות
+          משלו, אז זה נחוץ רק אם בא לך גם התראה בערוצים.
+        </p>
+      </div>
+
+      <div class="pane-actions">
+        <button class="settingsSave primary">שמור הגדרות</button>
+        <p class="settingsMsg msg"></p>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="calendar" hidden>
+      <div class="card narrow">
+        <h2>לוח שנה</h2>
+      <fieldset>
+        <legend>אירועי יומן</legend>
+        <p class="hint">אחרי הזמנה מגיע קובץ יומן — בטלגרם כקובץ מצורף,
+           ובאתר ככפתור 📅 על השיעור. לחיצה אחת מוסיפה אותו ליומן שתבחר/י
+           (Google או Apple — המכשיר שואל).</p>
+        <span class="lbl">תזכורות לפני שיעור</span>
+        <div class="rule-row" style="align-items:flex-end">
+          <label>כמה <input id="alarmAmount" type="number" min="1" max="99" value="1" style="width:4.5em"></label>
+          <label>יחידה
+            <select id="alarmUnit" style="width:auto">
+              <option value="1">דקות</option>
+              <option value="60" selected>שעות</option>
+              <option value="1440">ימים</option>
+            </select>
+          </label>
+          <button id="alarmAdd">➕ הוסף</button>
+        </div>
+        <p class="hint warn-hint">⚠️ התזכורות האלה נכנסות רק דרך כפתור
+           <strong>📅 קובץ</strong>. הקישור <strong>🗓️ Google</strong> לא יכול
+           לשאת אותן — ל-API של גוגל אין פרמטר לתזכורות — ולכן אירוע שנוצר
+           דרכו יקבל את ברירת המחדל של היומן שלך (בדרך כלל 30 דקות).</p>
+        <div class="chips" id="alarmList"></div>
+        <p class="hint">כל פריט ברשימה הוא תזכורת נפרדת באירוע היומן; לחיצה על
+           פריט מסירה אותו. רשימה ריקה = אירוע בלי תזכורת. שמור/י אחרי שינוי.
+           המיקום של הסטודיו נוסף לאירוע אוטומטית.</p>
+      </fieldset>
+      </div>
+      <div class="pane-actions">
+        <button class="settingsSave primary">שמור הגדרות</button>
+        <p class="settingsMsg msg"></p>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="tracking" hidden>
+      <p class="pane-intro">המעקב הוא אופציונלי. אפשר לענות בלחיצה אחת,
+         לתעד תרגילים, או להשאיר כבוי. מידע שכבר שמרת נשאר ביומן.</p>
+      <div class="cards-2">
+        <div class="card">
+          <h2>כמה לשאול אותי</h2>
+          <label>רמת מעקב
+            <select id="journalLevel">
+              <option value="off">כבוי</option>
+              <option value="quick">מהיר — שאלה אחת</option>
+              <option value="feedback">משוב — מורה ושיעור</option>
+              <option value="full">מלא — משוב ומה עשיתי</option>
+            </select>
+          </label>
+          <p class="hint">השאלה מגיעה 30 דקות אחרי סיום האימון ונעלמת בחצות.
+             תמיד אפשר לדלג ולערוך אחר כך ביומן.</p>
+          <div class="kinds">
+            <label><input id="journalTelegram" type="checkbox"> בטלגרם</label>
+            <label><input id="journalHa" type="checkbox"> ב‑Home Assistant</label>
+          </div>
+          <p class="hint">רוצים להרגיש איך זה עובד? בחרו רמת מעקב ונסו אותה לפני השמירה.
+            הבדיקה נשלחת רק לערוץ שבחרתם, משתמשת בחיבור השמור ונשארת זמינה ל־30 דקות.
+            התשובות לא נשמרות ביומן. בדיקה חדשה באותו ערוץ מחליפה את הקודמת.</p>
+          <div class="kinds">
+            <button type="button" class="journal-test" data-channel="telegram">🧪 נסה בטלגרם</button>
+            <button type="button" class="journal-test" data-channel="ha">🧪 נסה ב־HA</button>
+          </div>
+          <p id="journalTestMsg" class="hint" role="status" aria-live="polite"></p>
+        </div>
+        <div class="card">
+          <h2>חבילות תרגילים</h2>
+          <p class="hint">המערכת מציעה חבילות לפי השיעורים בסטודיו. הן רק קיצורי דרך —
+             אפשר תמיד להוסיף תרגיל משלך.</p>
+          <div id="exercisePacks" class="pack-list"></div>
+        </div>
+        <div class="card wide exercise-manager">
+          <div class="exercise-manager-head">
+            <div><h2>קיצורי הדרך שלי</h2>
+              <p class="hint">אלה התרגילים שמופיעים ראשונים בזמן התיעוד.</p></div>
+            <button id="manageExerciseCatalog" type="button">חיפוש במאגר</button>
+          </div>
+          <div id="exerciseShortcutList" class="exercise-shortcut-list"></div>
+          <details id="hiddenExerciseDetails" class="hidden-exercises" hidden>
+            <summary>תרגילים שהוסרו (<span id="hiddenExerciseCount">0</span>)</summary>
+            <div id="hiddenExerciseList" class="exercise-shortcut-list"></div>
+          </details>
+          <hr>
+          <h3>תרגיל אישי</h3>
+          <div id="customExerciseList" class="chips"></div>
+          <div class="field-row journal-custom-row">
+            <label>שם <input id="customExerciseName" placeholder="למשל: סקוואט בולגרי"></label>
+            <label>מה מודדים
+              <select id="customExerciseMetric">
+                <option value="strength">משקל, סטים וחזרות</option>
+                <option value="reps">סטים וחזרות</option>
+                <option value="duration">זמן</option>
+                <option value="attempts">ניסיונות</option>
+                <option value="distance">מרחק</option>
+                <option value="note">טקסט חופשי</option>
+              </select>
+            </label>
+            <button id="customExerciseAdd" type="button">הוסף</button>
+          </div>
+        </div>
+      </div>
+      <div class="pane-actions">
+        <button class="settingsSave primary">שמור הגדרות</button>
+        <p class="settingsMsg msg"></p>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="studio" hidden>
+      <p class="pane-intro">כל מה ששייך לסטודיו הנבחר: מעבר בין סטודיואים,
+         מנויים, סדר השימוש בהם ומכסת הכניסות.</p>
+      <div class="cards-2 studio-settings-grid">
+        <div class="card">
+          <h2>הסטודיו הנבחר</h2>
+          <div id="profStudio" class="kv"></div>
+        </div>
+        <div class="card">
+          <h2>המנויים בסטודיו הזה</h2>
+          <div id="profMembership" class="kv"></div>
+        </div>
+        <div class="card">
+          <h2>סדר שימוש במנויים</h2>
+          <label>מנוי בעדיפות ראשונה
+            <select id="preferredMembership"></select>
+          </label>
+          <div id="membershipOptions" class="hint"></div>
+        </div>
+        <div class="card">
+          <h2>מכסת כניסות</h2>
+          <div id="profQuotaStatus" class="kv"></div>
+          <label>כניסות בחודש (מהמנוי)
+            <input id="monthlyQuota" type="number" min="0" max="99" style="width:4.5em">
+          </label>
+          <label>מכסה חריגה לחודש הנוכחי בלבד
+            <input id="quotaOverride" type="number" min="0" max="99" style="width:4.5em" placeholder="—">
+          </label>
+          <p class="hint">‏0 = חישוב אוטומטי מהמנוי. מכסה חריגה חלה רק על
+             החודש הנוכחי; בחודש הבא חוזרים למכסה הרגילה.</p>
+        </div>
+        <div class="card wide">
+          <h2>קטגוריות חסומות בסטודיו הזה</h2>
+          <div id="blockedList" class="chips"></div>
+          <div class="field-row">
+            <input id="blockedNew" placeholder="שם קטגוריה מדויק">
+            <button id="blockedAdd" type="button">הוסף</button>
+          </div>
+          <p class="hint">הרשימה מתמלאת לבד כש-Arbox מסרבת להזמנה בגלל
+             המנוי. היא נשמרת בנפרד לכל סטודיו.</p>
+        </div>
+      </div>
+      <div class="pane-actions">
+        <button class="settingsSave primary">שמור מנויים ומכסה</button>
+        <p class="settingsMsg msg"></p>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="cleanup" hidden>
+      <p class="pane-intro">כמה זמן המערכת שומרת שיעורים אצלה. שיעורים שנרשמת
+         אליהם הם ההיסטוריה שלך; השאר קיימים רק כדי להציג לוח.</p>
+
+      <div class="cards-2">
+        <div class="card">
+          <h2>שמירת נתונים</h2>
+          <div class="field-row">
+            <label>השיעורים שלי — ימים אחורה
+              <input id="retAttended" type="number" min="30" max="3650" step="30">
+            </label>
+            <label>שאר השיעורים — ימים אחורה
+              <input id="retPast" type="number" min="7" max="3650" step="7">
+            </label>
+            <label>קדימה — ימים
+              <input id="retFuture" type="number" min="30" max="62" step="1">
+            </label>
+            <label>החלטות אוטומציה — ימים אחורה
+              <input id="retDecisions" type="number" min="30" max="3650" step="30">
+            </label>
+            <label>הודעות מהסטודיו — ימים אחורה
+              <input id="retMessages" type="number" min="30" max="3650" step="30">
+            </label>
+          </div>
+          <p class="hint">הניקוי רץ כל לילה ב-03:05. <strong>שים לב:</strong>
+             חודש רחוק שמשכת בלוח יישמר רק עד הניקוי הבא — אם רוצים אותו
+             לאורך זמן, מגדילים כאן את "קדימה".</p>
+        </div>
+
+        <div class="card">
+          <h2>ייבוא היסטוריה</h2>
+          <p class="hint">מושך מ-Arbox את 12 החודשים האחרונים ושומר רק את
+             השיעורים שהיית רשומ/ה אליהם. לא דורס שום נתון קיים, ולכן בטוח
+             להריץ שוב.</p>
+          <button id="backfillBtn">📥 ייבא שנה אחורה</button>
+          <p id="backfillMsg" class="msg"></p>
+        </div>
+      </div>
+
+      <div class="pane-actions">
+        <button class="settingsSave primary">שמור הגדרות</button>
+        <p class="settingsMsg msg"></p>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="advanced" hidden>
+      <p class="pane-intro">הגדרות שנוגעות למערכת עצמה ולא לשימוש היומיומי.
+         ברוב הזמן אין צורך לגעת בהן.</p>
+
+      <div class="cards-2">
+        <div class="card">
+          <h2>מערכת</h2>
+          <label>אזור זמן
+            <select id="timezone"></select>
+          </label>
+          <p class="hint">קובע לפי איזה שעון נמדד הכל — פתיחת הרשמה, שעת
+             ההודעה הלילית, וחותמות הזמן בפעילות המערכת.</p>
+          <p class="hint" id="clockLine">שעון השרת: …</p>
+          <p class="hint" id="versionLine">גרסה: …</p>
+          <button id="releaseNotesOpen" type="button" hidden>מה חדש</button>
+        </div>
+
+        <div class="card">
+          <h2>כתובת השרת</h2>
+          <label>כפי שהטלפון רואה אותה
+            <input id="baseUrl" placeholder="http://your-host:8177">
+          </label>
+          <p class="hint" id="baseUrlHint">משמשת רק כדי לבנות קישורים שההתראות
+             של Home Assistant פותחות — קובץ יומן, או מעבר ל״שלי״.
+             <strong>שום דבר לא נכתב ליומן כלשהו</strong>: הקובץ נפתח אצלך
+             והמכשיר שואל לאיזה יומן להוסיף. בטלגרם לא נדרש כלל.</p>
+        </div>
+
+        <div class="card wide">
+          <h2>בדיקה מקצה לקצה</h2>
+          <p class="hint">שולח הודעה אמיתית בדיוק כמו ההודעה הלילית — עם
+             שיעורים אמיתיים וכפתורים פעילים. לחיצה על כפתור מריצה את כל
+             המסלול (הודעה ← כפתור ← שרת) <strong>בלי להזמין כלום</strong>.
+             ככה יודעים שהכול עובד לפני שעת האמת.</p>
+          <button id="e2eBtn">🧪 שלח בדיקה מקצה לקצה</button>
+          <p id="e2eMsg" class="msg"></p>
+        </div>
+      </div>
+
+      <div class="pane-actions">
+        <button class="settingsSave primary">שמור הגדרות</button>
+        <p class="settingsMsg msg"></p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<dialog id="reasonDialog" aria-labelledby="reasonTitle">
+  <form method="dialog" id="reasonForm">
+    <h2 id="reasonTitle">מה הסיבה?</h2>
+    <p class="hint" id="reasonHint"></p>
+    <label>סיבה
+      <select id="reasonCode" required>
+        <option value="">בחר/י…</option>
+        <option value="work">עבודה</option>
+        <option value="illness">מחלה</option>
+        <option value="injury">פציעה</option>
+        <option value="personal">אילוץ אישי/משפחתי</option>
+        <option value="fatigue">עייפות/התאוששות</option>
+        <option value="plans_changed">שינוי תוכניות</option>
+        <option value="other">אחר</option>
+        <option value="none">ללא סיבה</option>
+      </select>
+    </label>
+    <label id="reasonOtherWrap" hidden>פירוט
+      <textarea id="reasonOther" maxlength="500" rows="3"
+                placeholder="כתוב/י את הסיבה"></textarea>
+    </label>
+    <div class="dialog-actions">
+      <button value="cancel" formnovalidate>חזרה</button>
+      <button value="confirm" class="primary" id="reasonConfirm">המשך</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="journalDialog" class="journal-dialog" aria-labelledby="journalDialogTitle">
+  <form method="dialog" id="journalForm">
+    <div class="journal-dialog-head">
+      <div><h2 id="journalDialogTitle">האימון</h2><p id="journalDialogMeta" class="hint"></p></div>
+      <button value="cancel" class="icon-close" aria-label="סגור">×</button>
+    </div>
+    <div class="feedback-grid">
+      <div><span class="lbl">איך היה עם המורה?</span><div class="seg feedback-seg" data-feedback="coach">
+        <button type="button" class="seg-btn positive" data-value="positive">🙂 התחברתי</button>
+        <button type="button" class="seg-btn neutral" data-value="neutral">😐 ניטרלי</button>
+        <button type="button" class="seg-btn negative" data-value="negative">🙁 פחות</button>
+        <button type="button" class="seg-btn na" data-value="not_applicable">לא רלוונטי</button>
+      </div></div>
+      <div><span class="lbl">איך היה השיעור?</span><div class="seg feedback-seg" data-feedback="class">
+        <button type="button" class="seg-btn positive" data-value="positive">🙂 נהניתי</button>
+        <button type="button" class="seg-btn neutral" data-value="neutral">😐 ניטרלי</button>
+        <button type="button" class="seg-btn negative" data-value="negative">🙁 פחות</button>
+        <button type="button" class="seg-btn na" data-value="not_applicable">לא רלוונטי</button>
+      </div></div>
+    </div>
+    <label>כמה מילים, אם בא לך
+      <textarea id="journalNotes" rows="3" maxlength="4000" placeholder="מה עבד, מה לזכור לפעם הבאה…"></textarea>
+    </label>
+    <div class="journal-ex-head">
+      <strong>מה עשיתי</strong>
+      <button id="copyLastWorkout" type="button">העתק מהפעם הקודמת</button>
+    </div>
+    <div id="journalSuggestions" class="chips"></div>
+    <div id="journalExerciseRows"></div>
+    <button id="journalAddExercise" type="button">＋ תרגיל</button>
+    <p id="journalDialogMsg" class="msg"></p>
+    <div class="dialog-actions">
+      <button value="cancel">חזרה</button>
+      <button value="save" class="primary">שמור</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="exerciseCatalogDialog" class="exercise-catalog-dialog" aria-labelledby="exerciseCatalogTitle">
+  <form method="dialog">
+    <div class="journal-dialog-head">
+      <div><h2 id="exerciseCatalogTitle">מאגר התרגילים</h2>
+        <p id="exerciseCatalogMeta" class="hint"></p></div>
+      <button value="close" class="icon-close" aria-label="סגירה">×</button>
+    </div>
+    <div class="exercise-catalog-filters">
+      <label>חיפוש
+        <input id="exerciseCatalogSearch" autocomplete="off" placeholder="סקוואט, כתפיים, dumbbell…">
+      </label>
+      <label>תחום
+        <select id="exerciseCatalogKind"><option value="">הכול</option></select>
+      </label>
+      <label>ציוד
+        <select id="exerciseCatalogEquipment"><option value="">הכול</option></select>
+      </label>
+      <label id="exerciseCatalogHiddenWrap" class="catalog-hidden-toggle">
+        <input id="exerciseCatalogIncludeHidden" type="checkbox"> הצג גם תרגילים שהוסרו
+      </label>
+    </div>
+    <p id="exerciseCatalogStatus" class="hint"></p>
+    <div id="exerciseCatalogResults" class="exercise-catalog-results"></div>
+    <div class="dialog-actions"><button value="close">סיימתי</button></div>
+  </form>
+</dialog>
+
+<dialog id="membershipDialog" aria-labelledby="membershipDialogTitle">
+  <form method="dialog">
+    <h2 id="membershipDialogTitle">מאיזה מנוי לקחת?</h2>
+    <p class="hint" id="membershipDialogHint"></p>
+    <label>מנוי לאימון הזה בלבד
+      <select id="sessionMembership"></select>
+    </label>
+    <div class="dialog-actions">
+      <button value="cancel">חזרה</button>
+      <button value="confirm" class="primary">שמור לאימון הזה</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="scheduleConfirmDialog" aria-labelledby="scheduleConfirmTitle">
+  <form method="dialog">
+    <h2 id="scheduleConfirmTitle">אישור תזמון</h2>
+    <p id="scheduleConfirmCopy" class="confirm-copy"></p>
+    <div class="dialog-actions">
+      <button value="cancel">חזור</button>
+      <button value="confirm" class="primary">לתזמן בכל זאת</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" hidden></div>
+<script src="/static/release-notes.js?v=3"></script>
+<script src="/static/app.js?v=2.61.0"></script>
+</body>
+</html>

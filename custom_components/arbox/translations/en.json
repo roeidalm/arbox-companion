@@ -1,0 +1,79 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to arbox-server",
+        "description": "Point Home Assistant at your arbox-server container. The API key is in the server's settings.json (needed for booking actions).",
+        "data": {
+          "base_url": "Server URL",
+          "api_key": "API key"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure arbox-server",
+        "description": "Change the server URL or paste a new API key. Your entities, areas and automations are kept.",
+        "data": {
+          "base_url": "Server URL",
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach arbox-server at this URL.",
+      "server_not_configured": "The server is up but has no Arbox credentials yet — open its web UI and connect first.",
+      "invalid_auth": "The API key was rejected by arbox-server — copy it from the server's settings.json."
+    },
+    "abort": {
+      "already_configured": "This arbox-server is already configured.",
+      "wrong_server": "That URL is a different arbox-server. To use it, add it as a new integration instead.",
+      "reconfigure_successful": "arbox-server settings updated."
+    }
+  },
+  "entity": {
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
+      },
+      "my_classes": {
+        "name": "My classes"
+      }
+    },
+    "sensor": {
+      "membership": {
+        "name": "Membership"
+      },
+      "next_class": {
+        "name": "Next class"
+      },
+      "booked_classes": {
+        "name": "Booked classes"
+      },
+      "next_class_name": {
+        "name": "Next class name"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Refresh schedule"
+      },
+      "cancel_next": {
+        "name": "Cancel next class"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Arbox panel access",
+        "description": "Administrators always have full access. Action access includes viewing. These permissions apply to the Arbox panel, not existing HA entities or services. Feedback notification links retain their limited access.",
+        "data": {
+          "panel_view_users": "Users allowed to view",
+          "panel_action_users": "Users allowed to book and edit"
+        }
+      }
+    },
+    "error": {
+      "invalid_user": "Choose active Home Assistant users."
+    }
+  }
+}

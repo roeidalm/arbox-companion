@@ -1,0 +1,102 @@
+book_class:
+  name: Book a class
+  description: Book a spot in a class by schedule ID.
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: The schedule ID of the class to book.
+      required: true
+      example: 53288064
+      selector:
+        number:
+          min: 1
+          max: 999999999
+          mode: box
+    config_entry_id:
+      name: Server
+      description: >-
+        Which arbox-server to act on. Only needed when more than one is
+        configured; with a single server this can be left empty.
+      required: false
+      selector:
+        config_entry:
+          integration: arbox
+
+cancel_booking:
+  name: Cancel booking
+  description: Cancel an existing class booking.
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: The schedule ID of the booking to cancel.
+      required: true
+      example: 53288064
+      selector:
+        number:
+          min: 1
+          max: 999999999
+          mode: box
+    late_cancel:
+      name: Confirm late cancellation
+      description: >-
+        Set to true to confirm cancelling inside the studio's late-cancel
+        window (otherwise such cancellations are rejected).
+      required: false
+      default: false
+      selector:
+        boolean:
+    reason_code:
+      name: Cancellation reason
+      description: Stored only in your local training history; it is not sent to Arbox.
+      required: false
+      default: none
+      selector:
+        select:
+          options:
+            - {value: work, label: Work}
+            - {value: illness, label: Illness}
+            - {value: injury, label: Injury}
+            - {value: personal, label: Personal/family constraint}
+            - {value: fatigue, label: Fatigue/recovery}
+            - {value: plans_changed, label: Plans changed}
+            - {value: other, label: Other}
+            - {value: none, label: No reason}
+    reason_text:
+      name: Other reason
+      description: Required only when the cancellation reason is Other.
+      required: false
+      selector:
+        text:
+    config_entry_id:
+      name: Server
+      description: >-
+        Which arbox-server to act on. Only needed when more than one is
+        configured; with a single server this can be left empty.
+      required: false
+      selector:
+        config_entry:
+          integration: arbox
+
+join_standby:
+  name: Join standby
+  description: Join the standby/waitlist for a full class.
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: The schedule ID of the class to join standby for.
+      required: true
+      example: 53288064
+      selector:
+        number:
+          min: 1
+          max: 999999999
+          mode: box
+    config_entry_id:
+      name: Server
+      description: >-
+        Which arbox-server to act on. Only needed when more than one is
+        configured; with a single server this can be left empty.
+      required: false
+      selector:
+        config_entry:
+          integration: arbox

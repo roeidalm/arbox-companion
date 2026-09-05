@@ -1,0 +1,66 @@
+# Arbox booking server — standalone stack.
+#
+# Paste this whole file into Portainer (Stacks -> Add stack -> Web editor),
+# or run `docker compose up -d` next to it. Nothing else is required.
+#
+# There are NO secrets in this file and none are needed to start. On first
+# run the container serves a setup page; you enter your studio's whitelabel
+# name, email and password there once, and they are written to the data
+# volume with 0600 permissions. They never appear in the compose, the
+# environment, the image, or the logs.
+
+services:
+  arbox-server:
+    image: ghcr.io/roeidalm/arbox-server:latest
+    container_name: arbox-server
+    restart: unless-stopped
+
+    environment:
+      # Your studio's timezone. Everything is measured against this clock:
+      # when a registration window opens, when the nightly message goes out,
+      # and the timestamps in the event log.
+      TZ: ${TZ:-Asia/Jerusalem}
+
+    volumes:
+      # Credentials, settings and the SQLite cache. Back this up and you can
+      # rebuild the container from nothing; delete it and you start over.
+      # A fresh volume is created owned by the right user automatically. One
+      # made before 1.33.0 was written as root and must be handed over once —
+      # see "Upgrades" in deploy/README.md. Skip that and the container exits
+      # on startup with "Permission denied: /data/settings.json".
+      - arbox-data:/data
+
+    ports:
+      # Change the left number if 8177 is taken. Bind to 127.0.0.1 instead
+      # (127.0.0.1:8177:8000) if you reach it through a reverse proxy or a
+      # VPN rather than the LAN — the UI has an API key but no login page,
+      # so do not expose this port to the internet.
+      - "${ARBOX_PORT:-8177}:8000"
+
+    # The server runs as nobody and touches the operating system not at all:
+    # it reads and writes /data and nothing else. So it is given nothing else.
+    # Every line here is verified against a real run, not aspirational.
+    read_only: true            # the root filesystem is not writable
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL                    # no Linux capabilities at all
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # The image is rebuilt on every release, so `latest` moves often. If you
+    # would rather approve each upgrade, pin a version above
+    # (e.g. :1.32.1) and uncomment this so Watchtower leaves it alone.
+    # The server runs SQLite migrations on startup — worth a thought before
+    # letting it update itself unattended.
+    # labels:
+    #   - "com.centurylinklabs.watchtower.enable=false"
+
+volumes:
+  arbox-data:

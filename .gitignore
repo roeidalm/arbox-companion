@@ -1,0 +1,31 @@
+# Secrets / credentials
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+/tmp/
+
+# API captures / probe output — contain live JWTs and personal data
+*.har
+responses/
+
+# Local server state — created if DATA_DIR is ever pointed inside the worktree
+*.db
+*.db-wal
+*.db-shm
+data/
+credentials.json
+settings.json

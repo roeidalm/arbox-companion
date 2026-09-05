@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Test-only dependencies. This file is installed exclusively in Docker's
+# disposable `test` stage; the published runtime image uses requirements.lock.
+httpx2
+pytest
+pytest-asyncio

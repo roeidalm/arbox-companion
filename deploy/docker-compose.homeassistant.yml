@@ -1,0 +1,78 @@
+# Arbox booking server, on a shared network with Home Assistant.
+#
+# Use this instead of docker-compose.yml when HA runs in Docker on the same
+# host and you want the HA integration to reach the server by name. HA then
+# points at http://arbox-server:8000 — container to container, no host port
+# and no IP address that changes when something restarts.
+#
+# If HA is a separate compose project, mark the network external there and
+# create it once:  docker network create arbox_net
+#
+# As with the standalone file: no secrets here. Credentials are entered on
+# the setup page at first run and stored in the data volume.
+
+services:
+  arbox-server:
+    image: ghcr.io/roeidalm/arbox-server:latest
+    container_name: arbox-server        # HA resolves this name; keep it
+    restart: unless-stopped
+
+    environment:
+      TZ: ${TZ:-Asia/Jerusalem}
+
+    volumes:
+      # A fresh volume is created owned by the right user automatically. One
+      # made before 1.33.0 was written as root and must be handed over once —
+      # see "Upgrades" in deploy/README.md. Skip that and the container exits
+      # on startup with "Permission denied: /data/settings.json".
+      - arbox-data:/data
+
+    ports:
+      # Only for the browser UI. HA does not use this — it goes over the
+      # shared network. Bound to localhost by default; drop the prefix to
+      # reach it from your LAN, or leave it and use a VPN or reverse proxy.
+      - "127.0.0.1:${ARBOX_PORT:-8177}:8000"
+
+    networks:
+      - arbox_net
+
+    # The server runs as nobody and touches the operating system not at all:
+    # it reads and writes /data and nothing else. So it is given nothing else.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Delete this block if Home Assistant already runs elsewhere; then mark the
+  # network `external: true` below and attach HA to it in its own compose.
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Jerusalem}
+    volumes:
+      - ha-config:/config
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8123:8123"
+    networks:
+      - arbox_net
+
+networks:
+  arbox_net:
+    name: arbox_net
+    # external: true      # uncomment if the network is created outside this file
+
+volumes:
+  arbox-data:
+  ha-config:

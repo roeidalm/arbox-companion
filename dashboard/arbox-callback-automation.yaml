@@ -1,0 +1,54 @@
+# Home Assistant side of the arbox-server notification channel.
+#
+# The server is given ONLY a webhook URL (settings tab), e.g.
+#   http://homeassistant:8123/api/webhook/arbox_notify
+# No long-lived token: the unguessable webhook id is the secret, and it can
+# fire exactly one automation. Two automations complete the loop:
+#
+#   server --POST webhook--> [1] --> notify.mobile_app_* (buttons included)
+#   phone button pressed --> [2] --> rest_command --> server /api/ha/callback
+#
+# configuration.yaml needs the rest_command (API key from the server's
+# /data/settings.json):
+#
+#   rest_command:
+#     arbox_callback:
+#       url: "http://arbox-server:8000/api/ha/callback"
+#       method: post
+#       headers:
+#         X-Api-Key: !secret arbox_api_key
+#       content_type: "application/json"
+#       payload: '{"action": {{ action | tojson }}, "reply_text": {{ reply_text | default(\"\") | tojson }}}'
+
+# --- [1] webhook -> phone notification --------------------------------------
+- alias: "Arbox: notification webhook"
+  description: Relay arbox-server messages to the phone as actionable notifications.
+  trigger:
+    - platform: webhook
+      webhook_id: arbox_notify   # keep in sync with the URL in the server settings
+      allowed_methods: [POST]
+      local_only: true           # ha_net only — never exposed
+  action:
+    - service: notify.mobile_app_YOUR_PHONE   # <-- your device
+      data:
+        title: "{{ trigger.json.title | default('Arbox') }}"
+        message: "{{ trigger.json.message }}"
+        data:
+          actions: "{{ trigger.json.actions | default([]) }}"
+  mode: queued
+
+# --- [2] pressed button -> server -------------------------------------------
+- alias: "Arbox: forward notification actions"
+  description: Relay a tapped booking button back to arbox-server, which books.
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.action.startswith('ARBOX_') }}"
+  action:
+    - service: rest_command.arbox_callback
+      data:
+        action: "{{ trigger.event.data.action }}"
+        reply_text: "{{ trigger.event.data.reply_text | default('') }}"
+  mode: queued

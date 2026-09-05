@@ -1,0 +1,260 @@
+# On a v* tag: build the arbox-server image, push it to GHCR as the repo's
+# container artifact, and cut a GitHub Release.
+#
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# One-time after the first publish: make the ghcr.io package public
+# (repo -> Packages -> arbox-server -> Package settings -> Change visibility)
+# so `docker pull` needs no login.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  test:
+    name: test (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Verify shared feedback assets
+        run: python3 scripts/sync-feedback-frontend.py --check
+
+      - name: Test browser logic
+        run: node --test arbox-server/tests/*.cjs
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      # This target installs requirements-test.lock and runs every pytest test.
+      # It is a dead-end Docker stage: none of its packages reach `runtime`.
+      - name: Run tests
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: ./arbox-server
+          target: test
+          platforms: ${{ matrix.platform }}
+          push: false
+          cache-from: type=gha,scope=tests-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=tests-${{ matrix.arch }}
+
+  test-ha:
+    name: test (Home Assistant)
+    # This pinned HA manifest is arm64; run it natively like the local check.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Test integration against Home Assistant
+        run: >-
+          docker run --rm --entrypoint python
+          -v "$GITHUB_WORKSPACE:/work:ro" -w /work
+          ghcr.io/home-assistant/home-assistant:2026.8.3@sha256:170ad94fcbfa593dde0773a6891030fb5817e45947abf8d587c25b01203933d3
+          -m unittest discover -s tests/ha -v
+
+  build:
+    name: build (${{ matrix.arch }})
+    needs: [test, test-ha]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write     # push to ghcr.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - id: provenance
+        name: Read immutable source provenance
+        run: |
+          revision=$(git rev-parse HEAD)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          source_date=$(git show -s --format=%cI HEAD)
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+          printf 'source_date=%s\n' "$source_date" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/arbox-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: ./arbox-server
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_VERSION=${{ github.ref_name }}
+            BUILD_REVISION=${{ steps.provenance.outputs.revision }}
+            BUILD_SOURCE_DATE=${{ steps.provenance.outputs.source_date }}
+            BUILD_SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
+            BUILD_REVISION_URL=https://github.com/${{ github.repository }}/commit/${{ steps.provenance.outputs.revision }}
+            BUILD_RELEASE_URL=https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+            BUILD_IMAGE=ghcr.io/${{ github.repository_owner }}/arbox-server:${{ steps.meta.outputs.version }}
+            BUILD_RUN_URL=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/arbox-server,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=runtime-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=runtime-${{ matrix.arch }}
+
+      # Each native runner pushes an untagged, content-addressed image. The
+      # final job combines these two digests into the tagged OCI index.
+      - name: Export image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          digest="${DIGEST#sha256:}"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/$digest"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # create the GitHub Release
+      packages: write     # tag the two images in ghcr.io
+    # Actions are pinned to commit SHAs, not tags. This job holds
+    # contents:write and packages:write, and a tag is mutable: whoever can
+    # move it can push an image that every deployment pulls as :latest.
+    # Renovate keeps the SHAs current (helpers:pinGitHubActionDigests).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0      # the annotated tag object, read for the body below
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/arbox-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Create and verify the multi-platform image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/arbox-server
+          TAGS: ${{ steps.meta.outputs.tags }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          mapfile -t digests < <(find . -maxdepth 1 -type f -printf '%f\n' | sort)
+          [[ "${#digests[@]}" -eq 2 ]]
+
+          tag_args=()
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tag_args+=(--tag "$tag")
+          done <<< "$TAGS"
+
+          sources=()
+          for digest in "${digests[@]}"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+            sources+=("${IMAGE}@sha256:${digest}")
+          done
+
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          docker buildx imagetools inspect --raw "${IMAGE}:${VERSION}" | python3 -c '
+          import json, sys
+          index = json.load(sys.stdin)
+          actual = {
+              (item["platform"]["os"], item["platform"]["architecture"])
+              for item in index["manifests"]
+              if item.get("platform", {}).get("os") == "linux"
+          }
+          expected = {("linux", "amd64"), ("linux", "arm64")}
+          if actual != expected:
+              raise SystemExit(f"unexpected image platforms: {sorted(actual)}")
+          print("verified platforms: linux/amd64, linux/arm64")
+          '
+
+      # The annotated tag message is where each release's upgrade note is
+      # written. It used to be discarded — every release body was the same
+      # three lines — so a breaking change arrived unannounced, which is also
+      # what HACS shows when it offers the integration update.
+      #
+      # Every value reaches the script through env rather than being expanded
+      # into it, so nothing here can be read as shell.
+      - name: Compose the release body
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/arbox-server
+          VERSION: ${{ steps.meta.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            # a lightweight tag prints nothing here; the section below still
+            # stands on its own, so there is no empty release either way
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME"
+            echo
+            echo '## Upgrading'
+            echo
+            echo '```bash'
+            echo "docker pull ${IMAGE}:${VERSION}"
+            echo '```'
+            echo
+            echo "Permissions, pinning and backup: [deploy/README.md](https://github.com/${REPO}/blob/main/deploy/README.md#upgrades)"
+          } > release-body.md
+          cat release-body.md
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          generate_release_notes: true
+          # prepended to the generated changelog, so the upgrade note leads.
+          # VERSION, not the git ref: metadata-action publishes 1.33.0 while
+          # the ref is v1.33.0, so the old pull command named a tag that has
+          # never existed.
+          body_path: release-body.md

@@ -1,0 +1,21 @@
+# Build-context excludes. Patterns are rooted at the context, so the **/ is
+# load-bearing: __pycache__/ alone would not match app/__pycache__/, which is
+# the directory that actually exists.
+**/__pycache__/
+**/*.py[cod]
+
+# defensive: nothing here should ever hold data, but DATA_DIR is configurable
+**/*.db
+**/*.db-*
+**/settings.json
+**/credentials.json
+data/
+
+# macOS metadata. AppleDouble files travel alongside real sources through any
+# tar or archive copy, and `python -m compileall` fails on them outright —
+# they are not text, and ._settings.py sits right next to settings.py.
+**/._*
+**/.DS_Store
+
+.git/
+.gitignore

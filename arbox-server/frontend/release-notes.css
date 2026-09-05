@@ -1,0 +1,21 @@
+#releaseNotesDialog { width: min(94vw, 530px); max-height: 88dvh; padding: 0; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 20px; }
+#releaseNotesDialog::backdrop { background: rgb(0 0 0 / 38%); }
+#releaseNotesDialog .release-content { padding: 25px; }
+#releaseNotesDialog h2 { margin: 0 0 6px; font-size: 1.5rem; }
+#releaseNotesDialog .release-subtitle { color: var(--muted); margin: 0 0 22px; font-size: .9rem; }
+#releaseNotesDialog ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; }
+#releaseNotesDialog li { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; }
+#releaseNotesDialog .release-icon { font-size: 1.3rem; padding-top: 2px; }
+#releaseNotesDialog h3 { font-size: 1rem; margin: 0 0 5px; }
+#releaseNotesDialog li p { margin: 0; line-height: 1.65; color: var(--muted); font-size: .94rem; }
+#releaseNotesDialog li a { display: inline-block; margin-top: 7px; color: var(--accent); font-size: .9rem; }
+#releaseNotesDialog details { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+#releaseNotesDialog summary { cursor: pointer; color: var(--accent); padding: 5px 0; }
+#releaseNotesDialog .release-history h3 { margin: 22px 0 12px; }
+#releaseNotesDialog .release-history li h3 { margin: 0 0 5px; }
+#releaseNotesDialog .release-history ul { gap: 14px; }
+#releaseNotesDialog .release-footer { display: flex; align-items: center; gap: 16px; justify-content: space-between; border-top: 1px solid var(--line); padding: 16px 25px; background: var(--bg); }
+#releaseNotesDialog .release-footer small { color: var(--muted); font-size: .75rem; max-width: 230px; line-height: 1.5; }
+#releaseNotesDialog .release-footer button { min-width: 92px; min-height: 44px; }
+#releaseNotesDialog .release-all-link { display: inline-block; margin-top: 18px; color: var(--accent); }
+@media (max-width: 420px) { #releaseNotesDialog .release-content { padding: 20px; } #releaseNotesDialog .release-footer { padding: 15px 20px; } }

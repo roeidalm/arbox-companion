@@ -1,0 +1,37 @@
+blueprint:
+  name: Arbox — phone notifications
+  description: >-
+    Forward Arbox webhook notifications and their buttons to the Home Assistant
+    Companion app. Supports both the HA-hosted feedback panel and direct Arbox
+    links. For HA-hosted feedback, update the Arbox integration to 2.9.0+,
+    restart HA, and enable and save Open feedback inside Home Assistant in
+    Arbox settings. Direct links require a phone-reachable Arbox Server URL.
+    Other booking action buttons
+    still need the callback automation documented in arbox-callback-automation.yaml.
+  domain: automation
+  input:
+    webhook_id:
+      name: Private webhook ID
+      description: Choose a long random value. Use this same ID in the Arbox HA webhook URL.
+      selector:
+        text:
+    notify_service:
+      name: Phone notification action
+      description: "For example: notify.mobile_app_my_iphone"
+      selector:
+        text:
+trigger:
+  - platform: webhook
+    webhook_id: !input webhook_id
+    allowed_methods: [POST]
+    local_only: true
+condition: []
+action:
+  - service: !input notify_service
+    data:
+      title: "{{ trigger.json.title | default('Arbox') }}"
+      message: "{{ trigger.json.message }}"
+      data:
+        actions: "{{ trigger.json.actions | default([]) }}"
+mode: queued
+max: 10

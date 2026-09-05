@@ -683,3 +683,19 @@ blockquote {
 .membership-card .quota-legend { margin-top: 8px; }
 .membership-count { color: var(--accent); font-size: 22px; white-space: nowrap; direction: ltr; }
 @media(max-width:600px) { .quota-compact { padding:16px; } .quota-compact .section-heading { flex-wrap:wrap; } }
+
+.next-workout-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  font-size: 14px;
+  color: var(--muted);
+}
+.next-workout-empty .text-button { min-height: 40px; padding: 8px 0; }

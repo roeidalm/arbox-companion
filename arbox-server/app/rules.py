@@ -26,6 +26,8 @@ from .notify import Notifier
 from .store import NO_SCHEDULE, Store
 from .studio_context import ReentrantAsyncLock
 from .sync import FULL_WINDOW_DAYS, Syncer
+from .membership_policy import MembershipPolicy
+from .quota_planner import plan_quota, REASONS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +39,12 @@ CATCHUP_GRACE_HOURS = 6
 
 # how long a quota reading stays good enough to serve without asking Arbox
 QUOTA_TTL_SECONDS = 600
+
+
+class PlanningBlocked(ArboxError):
+    """A retained intent needs user input; it must not become a failed attempt."""
+    def __init__(self, reason: str):
+        super().__init__(reason, status=409)
 
 # transient upstream failures tolerated before a booking is called off. Six
 # five-minute ticks is half an hour of retrying a class that stays bookable
@@ -307,6 +315,7 @@ class RulesEngine:
         self.syncer = syncer
         self.notifier = notifier
         self.settings = notifier.settings
+        self.membership_policy = MembershipPolicy(store, client, syncer)
         self.journal_preview = JournalPreview(notifier)
         self.feedback_form = FeedbackForm(store, notifier)
         self._journal_lock = asyncio.Lock()
@@ -369,7 +378,7 @@ class RulesEngine:
         plans: list[dict] = []
         seen: set[int] = set()
         stored = await self.store.planned_sessions(start, end)
-        for raw in [*stored, *(extra_plans or [])]:
+        for raw in [*(extra_plans or []), *stored]:
             plan = dict(raw)
             sid = int(plan["schedule_id"])
             if sid in seen or not start <= plan.get("date", "") <= end:
@@ -422,220 +431,252 @@ class RulesEngine:
         ))
         return plans
 
+    async def uncertain_sessions(self) -> list[dict]:
+        """Interrupted writes remain visible, including unpinned manual actions.
+
+        These are reconciliation records, not instructions to book again.
+        Keep past sessions visible until their outcome is resolved too.
+        """
+        pending = await self.store.get_meta(self.membership_policy.key(0) + ':uncertain') or {}
+        rows = []
+        for sid, operation in pending.items():
+            session = await self.store.get_session(int(sid)) or operation.get('session')
+            if session and session.get('user_booked') is None and session.get('user_in_standby') is None:
+                rows.append({**session, 'membership_user_id': operation['membership_user_id'],
+                             'planning_source': 'uncertain'})
+        return rows
+
+    async def _quota_commitments(self, members: list[dict]) -> list[dict]:
+        """The identical charge ledger for rendering, early probes and booking."""
+        commitments = await self.store.quota_commitments(
+            '0001-01-01', '9999-12-31', datetime.now().strftime('%Y-%m-%d %H:%M'))
+        indexed = {r['schedule_id']: r for r in commitments}
+        for member in members:
+            history = await self.store.get_meta(self.membership_policy.key(member['id']) + ':history') or {}
+            for row in history.get('charges', []):
+                if row['schedule_id'] not in indexed:
+                    indexed[row['schedule_id']] = row
+                elif (indexed[row['schedule_id']].get('status') == 'cancelled_late'
+                      and indexed[row['schedule_id']].get('membership_user_id') is None):
+                    indexed[row['schedule_id']]['membership_user_id'] = member['id']
+        for row in await self.uncertain_sessions():
+            if row['schedule_id'] not in indexed:
+                indexed[row['schedule_id']] = {**row, 'commitment': 'uncertain'}
+        return list(indexed.values())
+
     async def quota_status(
         self, force: bool = False, target_date: str | date | None = None,
         extra_plans: list[dict] | None = None,
     ) -> dict | None:
-        """Entries used vs the configured monthly quota. None = quota off.
-
-        Cached for QUOTA_TTL_SECONDS: this used to fire a live Arbox call on
-        every render of the "my classes" view, several times the designed
-        polling cadence. force=True after a booking, where the number the
-        user is about to read is the one that just changed.
-
-        Used and reserved are deliberately separate. Standbys don't reserve
-        an entry until promoted.
-        """
-        import time as _time
-
-        # The persisted cache is the dashboard's current-month snapshot. A
-        # future class needs its own month and validity calculation, so it is
-        # deliberately computed fresh and never overwrites that snapshot.
-        if not force and target_date is None and not extra_plans:
-            cached = await self.store.get_meta("quota_cache")
-            if cached and _time.time() - float(cached.get("at") or 0) < QUOTA_TTL_SECONDS:
-                return cached.get("data")
-        today = date.today()
-        if isinstance(target_date, date):
-            anchor = target_date
-        elif target_date:
-            try:
-                anchor = date.fromisoformat(target_date)
-            except ValueError:
-                anchor = today
-        else:
-            anchor = today
-        month_start = anchor.replace(day=1)
-        month_key = month_start.isoformat()[:7]
-        next_month = (month_start + timedelta(days=32)).replace(day=1)
-        month_end = next_month - timedelta(days=1)
-        inventory = await self.store.get_meta("memberships") or []
-        memberships = await self._active_memberships(anchor)
-        # Compatibility only for databases that predate the memberships list.
-        # If an inventory exists but none of it covers the target date, do not
-        # resurrect the legacy preferred membership past its expiry.
-        if not memberships and not inventory:
-            membership = await self.store.get_meta("membership") or {}
-            memberships = [membership] if membership else []
-        commitments = await self.store.quota_commitments(
-            month_start.isoformat(), month_end.isoformat(),
-            datetime.now().strftime("%Y-%m-%d %H:%M"))
-        preferred = self.settings.preferred_membership_id or self.syncer.membership_user_id
-        by_id = {m.get("id"): {"membership": m, "used": 0, "reserved": 0,
-                                "standby": 0} for m in memberships}
-        fallback_bucket = by_id.get(preferred) or next(iter(by_id.values()), None)
-        for row in commitments:
-            mid = row.get("membership_user_id")
-            bucket = by_id.get(mid) or fallback_bucket
-            if bucket:
-                bucket[row["commitment"]] += 1
-
-        details = []
-        explicit = self.settings.quota_for_month(month_key)
-        explicit_applied = False
-        for m in memberships:
-            bucket = by_id[m.get("id")]
-            finite = m.get("sessions_on_purchase")
-            if finite is not None:
-                total = int(finite or 0)
-                source_name = "card"
-            else:
-                total = int(m.get("plan_quota") or 0)
-                if explicit > 0 and not explicit_applied:
-                    total = explicit
-                    explicit_applied = True
-                    source_name = "settings"
-                else:
-                    source_name = "plan"
-            committed = bucket["used"] + bucket["reserved"]
-            available = max(0, total - committed) if total > 0 else None
-            if m.get("sessions_left") is not None:
-                left = max(0, int(m.get("sessions_left") or 0))
-                available = left if available is None else min(available, left)
-            details.append({
-                **m, "quota": total, "quota_source": source_name,
-                "used": bucket["used"], "reserved": bucket["reserved"],
-                "pending_standby": bucket["standby"], "available": available,
-                "planned": 0,
-            })
-        detail_by_id = {d.get("id"): d for d in details}
-        planning_left = {d.get("id"): d.get("available") for d in details}
-        plan_allocations: dict[str, int] = {}
-        uncovered_plans: list[int] = []
-        planned_intents = await self._planned_sessions(
-            month_start.isoformat(), month_end.isoformat(), extra_plans)
-        for plan in planned_intents:
-            eligible = [
-                d for d in details
-                if self._membership_valid_on(d, plan["date"])
-            ]
-            explicit_id = plan.get("membership_user_id")
-            eligible.sort(key=lambda m: (
-                0 if explicit_id is not None and m.get("id") == explicit_id else
-                1 if m.get("id") == preferred else 2,
-                m.get("end") or "9999-12-31", m.get("id") or 0,
-            ))
-            chosen = next((m for m in eligible
-                           if planning_left.get(m.get("id")) is None
-                           or int(planning_left.get(m.get("id")) or 0) > 0), None)
-            if not chosen:
-                uncovered_plans.append(int(plan["schedule_id"]))
-                continue
-            mid = int(chosen["id"])
-            plan_allocations[str(plan["schedule_id"])] = mid
-            detail_by_id[mid]["planned"] += 1
-            if planning_left[mid] is not None:
-                planning_left[mid] = max(0, int(planning_left[mid]) - 1)
-        for detail in details:
-            detail["available_after_planned"] = planning_left[detail.get("id")]
-        quota = sum(d["quota"] for d in details)
-        used = sum(d["used"] for d in details)
-        reserved = sum(d["reserved"] for d in details)
-        planned = sum(d["planned"] for d in details)
-        planned_scheduled = sum(
-            1 for p in planned_intents if p.get("planning_source") == "scheduled")
-        planned_autobook = sum(
-            1 for p in planned_intents if p.get("planning_source") == "autobook")
-        planned_total = len(planned_intents)
-        standbys = sum(d["pending_standby"] for d in details)
-        available_total = sum(int(d.get("available") or 0) for d in details)
-        available_after_planned = sum(
-            int(d.get("available_after_planned") or 0) for d in details)
-        if quota <= 0 and not details:
+        """Compute from one evidence-backed ledger. Rendering never calls Arbox."""
+        anchor = target_date.isoformat() if isinstance(target_date, date) else target_date or date.today().isoformat()
+        members = await self.store.get_meta("memberships") or []
+        plans = await self._planned_sessions(date.today().isoformat(), "9999-12-31", extra_plans)
+        pending_rows = await self.uncertain_sessions()
+        if not members and not plans and not pending_rows:
             return None
-        out = {
-            "quota": quota,
-            "quota_source": "memberships",
-            "used": used,
-            "reserved": reserved,
-            "planned": planned,
-            "planned_total": planned_total,
-            "planned_scheduled": planned_scheduled,
-            "planned_autobook": planned_autobook,
-            "remaining": available_total if quota else None,
-            "available_after_planned": available_after_planned if quota else None,
-            "pending_standby": standbys,
-            "month": month_start.isoformat()[:7],
-            "overcommitted": bool(uncovered_plans or
-                                  (quota and used + reserved + planned + standbys > quota)),
-            "memberships": details,
-            "plan_allocations": plan_allocations,
-            "uncovered_plans": uncovered_plans,
-        }
-        if target_date is None and not extra_plans:
-            await self.store.set_meta(
-                "quota_cache", {"at": _time.time(), "data": out})
-        return out
+        details = [{**m, "policy": await self.membership_policy.get(m)} for m in members]
+        import time
+        for detail in details:
+            history = await self.store.get_meta(self.membership_policy.key(detail["id"]) + ":history") or {}
+            if not history.get("ok") or time.time() - history.get("checked_at", 0) > 86400:
+                detail["policy"] = {**detail["policy"], "state": "needs_review",
+                                    "reason": "היסטוריית המנוי טרם אומתה — נדרש סנכרון"}
+        commitments = await self._quota_commitments(members)
+        uncertain = await self.store.get_meta(self.membership_policy.key(0) + ":uncertain") or {}
+        planned_ids = {p['schedule_id'] for p in plans}
+        plans.extend(row for row in pending_rows if row['schedule_id'] not in planned_ids)
+        return plan_quota(details, commitments, plans, anchor[:7], uncertain, anchor=anchor)
+
+    async def refresh_planning_evidence(self, *, force_history: bool = False) -> None:
+        """Read-only review; failures are cached, never retried on every render."""
+        import time
+        async with self._membership_lock:
+            members = await self.store.get_meta("memberships") or []
+            await self.membership_policy.refresh(members)
+            for member in members:
+                key = self.membership_policy.key(member["id"]) + ":history"
+                previous = await self.store.get_meta(key) or {}
+                ttl = 300 if member.get('active') else 86400
+                if (not force_history or not member.get('active')) and time.time() - previous.get("checked_at", 0) < ttl:
+                    continue
+                evidence = {"checked_at": time.time(), "charges": previous.get('charges', [])}
+                try:
+                    groups = await self.client.membership_schedules(member["id"])
+                    await self.store.reconcile_membership_history(member["id"], groups)
+                    evidence["ok"] = True
+                    evidence['charges'] = [
+                        {'schedule_id': r['id'], 'date': r['date'], 'membership_user_id': member['id'],
+                         'commitment':'used'} for r in groups['lateCancellation']]
+                except (ArboxError, ValueError) as err:
+                    evidence.update(ok=False, error=str(err))
+                await self.store.set_meta(key, evidence)
+            # A positive upstream result resolves an interrupted write. Absence
+            # is not proof of rejection and never automatically permits a retry.
+            key = self.membership_policy.key(0) + ":uncertain"
+            pending = await self.store.get_meta(key) or {}
+            for sid in list(pending):
+                session = await self.store.get_session(int(sid)) or {}
+                if session.get("user_booked") is not None or session.get("user_in_standby") is not None:
+                    pending.pop(sid)
+            await self.store.set_meta(key, pending)
+
+    async def review_plans(self) -> None:
+        async with self._membership_lock:
+            await self.migrate_learned_blocks()
+            await self.refresh_planning_evidence()
+            await self.preflight_plans()
+            await self.reconcile_planned_quota()
+
+    async def migrate_learned_blocks(self) -> None:
+        key = self.membership_policy.key(0) + ":legacy_blocks_migrated"
+        if await self.store.get_meta(key):
+            return
+        cur = await self.store.db.execute(
+            "SELECT DISTINCT s.category_name FROM events e JOIN sessions s "
+            "ON s.schedule_id=e.schedule_id WHERE e.source='autobook' "
+            "AND e.message='חסמתי קטגוריה · ' || s.category_name "
+            "AND (? IS NULL OR s.box_id=?)",
+            (self.store.active_box_id, self.store.active_box_id))
+        learned = {r[0] for r in await cur.fetchall()}
+        blocked = getattr(self.settings, "blocked_categories", [])
+        if learned.intersection(blocked):
+            self.settings.update({"blocked_categories": [c for c in blocked if c not in learned]})
+        # Do not erase past decisions or revive old failed attempts on upgrade.
+        await self.store.set_meta(key, True)
+
+    async def preflight_plans(self) -> None:
+        """One early attempt for an existing intent, never an arbitrary class.
+
+        There is no dry-run endpoint. Even far outside the documented window a
+        surprising success is a real booking: persist it and stop. Timing-only
+        rejection is NOT proof that this membership permits the category.
+        """
+        from .membership_policy import fingerprint
+        import time
+        plans = await self._planned_sessions(date.today().isoformat(), "9999-12-31")
+        members = await self.store.get_meta("memberships") or []
+        history_key = self.membership_policy.key(0) + ":probes"
+        probes = await self.store.get_meta(history_key) or {}
+        recent = sum(time.time() - p.get("at", 0) < 86400 for p in probes.values())
+        for plan in plans:
+            if recent >= 2:
+                break
+            # Pin rows deliberately carry only cached presentation fields;
+            # resolve the full session before evaluating the safety boundary.
+            session = await self.store.get_session(plan["schedule_id"]) or {}
+            advance = session.get("advance_hours")
+            if not isinstance(advance, (int, float)) or advance <= 0 or not session.get("category_id"):
+                continue
+            start = datetime.fromisoformat(f"{session['date']}T{session['start_time']}")
+            bonus = max((int(m.get("extra_advance_hours") or 0) for m in members), default=0)
+            if opening_moment(start, advance + bonus) < datetime.now() + timedelta(hours=24):
+                continue
+            for member in members:
+                if recent >= 2:
+                    break
+                if not self._membership_valid_on(member, session["date"]):
+                    continue
+                if plan.get("membership_user_id") not in (None, member["id"]):
+                    continue
+                policy = await self.membership_policy.get(member)
+                # Explicit evidence/manual decisions are never probed again.
+                if (policy.get("categories_known") or not policy.get("quota_known")
+                        or policy.get("contradiction") or policy.get("source") == "manual"):
+                    continue
+                probe_id = f"{member['id']}:{fingerprint(member)}:{session['category_id']}"
+                if probe_id in probes:
+                    continue
+                verified = await self.store.get_meta(self.membership_policy.key(member["id"]) + ":history") or {}
+                if not verified.get("ok") or time.time() - verified.get('checked_at', 0) > 86400:
+                    continue
+                # Test quota independently from the unknown eligibility. A
+                # surprising real booking must still fit the actual ledger.
+                details = [{**m, "policy": await self.membership_policy.get(m)} for m in members]
+                for d in details:
+                    if d["id"] == member["id"]:
+                        d["policy"] = {**policy, "state": "ready", "category_ids": [session["category_id"]]}
+                commitments = await self._quota_commitments(members)
+                pending_key = self.membership_policy.key(0) + ":uncertain"
+                pending = await self.store.get_meta(pending_key) or {}
+                # Do not consume other capacity while any write needs reconciliation.
+                if pending:
+                    continue
+                projected_plans = [{**p, "membership_user_id": member["id"]} if p["schedule_id"] == plan["schedule_id"] else p for p in plans]
+                projected = plan_quota(details, commitments, projected_plans, session["date"][:7])
+                if projected["plan_allocations"].get(str(session["schedule_id"])) != member["id"]:
+                    continue
+                probes[probe_id] = {"at": time.time(), "schedule_id": session["schedule_id"]}
+                await self.store.set_meta(history_key, probes)
+                recent += 1
+                pending[str(session["schedule_id"])] = {
+                    "membership_user_id": member["id"], "action": "preflight",
+                    "session": {k: v for k, v in session.items() if k != 'raw_json'}}
+                await self.store.set_meta(pending_key, pending)
+                try:
+                    updated = await self.client.book(session["schedule_id"], member["id"])
+                except ArboxError as err:
+                    if not err.transient:
+                        pending.pop(str(session["schedule_id"]), None)
+                        await self.store.set_meta(pending_key, pending)
+                    await self.membership_policy.learn_rejection(member, session, err)
+                    probes[probe_id]["messages"] = err.messages()
+                    probes[probe_id]["status"] = err.status
+                    await self.store.set_meta(history_key, probes)
+                    continue
+                if not updated or updated.get("id") != session['schedule_id'] or updated.get('user_booked') is None:
+                    continue  # unknown outcome stays paused
+                updated["_selected_membership_id"] = member["id"]
+                await self.store.upsert_sessions([updated])
+                await self.store.record_booking_success(session["schedule_id"], "book", "preflight", member["id"])
+                await self.store.mark_watch(session["schedule_id"], "booked")
+                await self.store.mark_autobook(session["schedule_id"], "booked")
+                pending.pop(str(session["schedule_id"]), None)
+                await self.store.set_meta(pending_key, pending)
+                await self.notifier.send(f"🎯 האימון המתוכנן הוזמן כבר בבדיקה המוקדמת: {fmt_class(session)}", kind="autobook")
+                return  # refresh balances before any further probe
 
     async def reconcile_planned_quota(self) -> None:
-        """Notify once when future intent crosses or returns under capacity."""
-        status = await self.quota_status(force=True)
-        if not status:
-            return
-        box_id = self.syncer.box_id or "default"
-        meta_key = f"quota_plan_conflict:{box_id}"
-        previous = await self.store.get_meta(meta_key)
-        uncovered = [int(x) for x in status.get("uncovered_plans") or []]
-        fingerprint = json.dumps({
-            "month": status.get("month"), "uncovered": uncovered,
-            "quota": status.get("quota"),
-        }, sort_keys=True)
-        if uncovered:
-            if previous == fingerprint:
-                return
-            lines = [
-                "⚠️ אין מספיק כניסות לכל התכנונים",
-                f"בחודש {status['month']} יש {status['quota']} כניסות, "
-                f"ומתוכננים {status.get('planned_total', status.get('planned', 0))} אימונים "
-                f"נוספים אחרי {status['used']} שכבר נוצלו"
-                + (f" ו-{status['reserved']} שמורים" if status.get("reserved") else "") + ".",
-                "",
-                "האימונים האחרונים בסדר פתיחת ההרשמה נשארו ללא כיסוי:",
-            ]
-            for sid in uncovered[:5]:
-                session = await self.store.get_session(sid)
-                lines.append(f"• {fmt_class(session) if session else sid}")
-            if len(uncovered) > 5:
-                lines.append(f"• ועוד {len(uncovered) - 5}")
-            lines += ["", "לא אנסה להזמין אימון ללא כניסה פנויה. "
-                      "אפשר לבטל תזמון, לשנות אוטומציה או להוסיף מכסה."]
-            if await self.notifier.send("\n".join(lines), kind="membership"):
-                await self.store.set_meta(meta_key, fingerprint)
-            return
-        if previous:
-            if await self.notifier.send(
-                    "✅ כל האימונים המתוכננים שוב מכוסים במכסה.",
-                    kind="membership"):
-                await self.store.set_meta(meta_key, None)
+        """Persist state transitions, so ticks and restarts cannot repeat alerts."""
+        plans = await self._planned_sessions(date.today().isoformat(), "9999-12-31")
+        key = self.membership_policy.key(0) + ":plan_alerts"
+        previous = await self.store.get_meta(key) or {}
+        current, problems = {}, []
+        held_key = self.membership_policy.key(0) + ':held_plans'
+        held = await self.store.get_meta(held_key) or {}
+        for month in sorted({p["date"][:7] for p in plans}):
+            status = await self.quota_status(target_date=month + "-01") or {}
+            for plan in (p for p in plans if p["date"][:7] == month):
+                sid = str(plan["schedule_id"])
+                state = (status.get("plan_states") or {}).get(sid, {})
+                if state.get("state") not in (None, "ready"):
+                    current[sid] = state.get("state")
+                    held.setdefault(sid, plan['date'])
+                    if previous.get(sid) != current[sid]:
+                        problems.append(f"• {fmt_class(plan)}\n  {state.get('reason')}")
+        # Save before sending: an uncertain delivery must not become a flood.
+        await self.store.set_meta(key, current)
+        await self.store.set_meta(held_key, {sid: day for sid, day in held.items() if day >= date.today().isoformat()})
+        if problems:
+            await self.store.log_event("warn", "quota", "תכנונים דורשים בדיקה",
+                                       "\n".join(problems), notified=True)
+            buttons = [[{"text": "בדיקת המנויים", "uri": "/arbox#mine", "ha_only": True}]]
+            base = getattr(self.settings, "base_url", "")
+            if base.startswith(("https://", "http://")):
+                buttons[0].append({"text": "בדיקת המנויים", "uri": base.rstrip("/") + "/mine", "tg_only": True})
+            await self.notifier.send(
+                "⚠️ תכנונים דורשים בדיקה\n" + "\n".join(problems) +
+                "\n\nהתכנון נשמר. לתיקון: Arbox ← שלי ← פירוט המנויים. "
+                "אפשר לבחור שיעורים ומכסה למנוי, לשנות מנוי או לבטל תכנון.",
+                buttons, kind="membership")
 
     async def _membership_candidates(
         self, target_date: str | date | None = None,
         schedule_id: int | None = None,
     ) -> list[dict]:
-        status = await self.quota_status(target_date=target_date)
-        members = list((status or {}).get("memberships") or [])
-        allocation = (status or {}).get("plan_allocations", {}).get(str(schedule_id))
-        if allocation is not None:
-            return [m for m in members if m.get("id") == allocation]
-        if schedule_id is not None and schedule_id in (
-                (status or {}).get("uncovered_plans") or []):
-            return []
-        preferred = self.settings.preferred_membership_id or self.syncer.membership_user_id
-        members.sort(key=lambda m: (
-            0 if m.get("id") == preferred else 1,
-            m.get("end") or "9999-12-31", m.get("id") or 0))
-        return [m for m in members if m.get("available") is None
-                or int(m.get("available") or 0) > 0]
+        status = await self.quota_status(target_date=target_date) or {}
+        allocation = status.get("plan_allocations", {}).get(str(schedule_id))
+        return [m for m in status.get("memberships", []) if m["id"] == allocation]
 
     async def perform_membership_action(
         self, session: dict, action: str, membership_override: int | None = None,
@@ -647,53 +688,61 @@ class RulesEngine:
     async def _perform_membership_action(
         self, session: dict, action: str, membership_override: int | None = None,
     ) -> tuple[dict, int]:
-        """Book/join using the first viable membership, safely falling back."""
+        """Serialize capacity checks and writes; never retry an unknown outcome."""
         await self.syncer.ensure_identity()
-        if not await self.store.get_meta("memberships"):
-            await self.syncer.refresh_membership()
-        candidates = await self._membership_candidates(
-            session.get("date"), session.get("schedule_id"))
-        if membership_override is not None:
-            candidates = [m for m in candidates
-                          if m.get("id") == membership_override]
-        if not candidates:
-            raise ArboxError("המנוי שנבחר אינו פעיל או שאין בו כניסות זמינות"
-                             if membership_override else
-                             "אין מנוי פעיל עם כניסות זמינות")
-        restricted: list[ArboxError] = []
-        for membership in candidates:
-            mid = int(membership["id"])
+        await self.syncer.refresh_membership()
+        await self.refresh_planning_evidence(force_history=True)
+        sid = session["schedule_id"]
+        fresh = await self.store.get_session(sid)
+        if not fresh:
+            raise PlanningBlocked('האימון אינו נמצא בסטודיו הפעיל. רעננו את התצוגה')
+        if fresh.get("user_booked") is not None or fresh.get("user_in_standby") is not None:
+            raise PlanningBlocked("כבר קיימת הרשמה או המתנה לאימון. רעננו את התצוגה")
+        plan = {**fresh, "membership_user_id": membership_override,
+                "ignore_vacation": True, "created_at": datetime.now().isoformat()}
+        # Replace any existing intent for this class for the explicit selection.
+        # The selected membership still has to fit all the other commitments.
+        members = await self.store.get_meta("memberships") or []
+        tried = set()
+        while True:
+            status = await self.quota_status(target_date=session["date"], extra_plans=[plan]) or {}
+            state = status.get("plan_states", {}).get(str(sid), {})
+            mid = status.get("plan_allocations", {}).get(str(sid))
+            if mid is None or mid in tried:
+                raise PlanningBlocked(state.get("reason") or REASONS["needs_review"])
+            tried.add(mid)
+            member = next(m for m in members if m["id"] == mid)
+            key = self.membership_policy.key(0) + ":uncertain"
+            pending = await self.store.get_meta(key) or {}
+            # The marker survives process termination during an upstream write.
+            pending[str(sid)] = {"membership_user_id": mid, "action": action,
+                                 "at": datetime.now().isoformat(),
+                                 "session": {k: v for k, v in fresh.items() if k != 'raw_json'}}
+            await self.store.set_meta(key, pending)
             try:
-                updated = (await self.client.book(session["schedule_id"], mid)
-                           if action == "book" else
-                           await self.client.join_standby(session["schedule_id"], mid))
+                updated = (await self.client.book(sid, mid) if action == "book" else
+                           await self.client.join_standby(sid, mid))
             except ArboxError as err:
-                if err.error_name() == "classTypeRestricts" and membership_override is None:
-                    restricted.append(err)
-                    continue
+                if err.transient:
+                    raise PlanningBlocked(REASONS["uncertain"]) from err
+                pending.pop(str(sid), None)
+                await self.store.set_meta(key, pending)
+                if await self.membership_policy.learn_rejection(member, fresh, err):
+                    if membership_override is None:
+                        continue
+                    raise PlanningBlocked("המנוי שנבחר נדחה לסוג האימון. נדרשת בדיקת התאמה") from err
                 raise
-            if updated:
-                updated["_selected_membership_id"] = mid
-                if updated.get("id"):
-                    await self.store.upsert_sessions([updated])
+            if not updated or updated.get("id") != sid or updated.get(
+                    "user_booked" if action == "book" else "user_in_standby") is None:
+                raise PlanningBlocked(REASONS["uncertain"])
+            updated["_selected_membership_id"] = mid
+            await self.store.upsert_sessions([updated])
+            await self.store.record_booking_success(sid, action, "membership", mid)
+            pending.pop(str(sid), None)
+            await self.store.set_meta(key, pending)
+            await self.store.set_meta(self.membership_policy.key(mid) + ":history", None)
             await self.store.set_meta("quota_cache", None)
-            previous = await self.store.get_meta("effective_membership_id")
-            await self.store.set_meta("effective_membership_id", mid)
-            if previous and int(previous) != mid:
-                old = next((m for m in await self._active_memberships()
-                            if m.get("id") == int(previous)), {})
-                await self.notifier.send(
-                    f"🎟️ עברתי להשתמש ב-{membership.get('plan') or mid}"
-                    + (f" במקום {old.get('plan')}" if old else ""),
-                    kind="membership")
-            asyncio.create_task(self._refresh_memberships_quietly())
             return updated, mid
-        # Every active option rejected this category; only now is a global
-        # block true rather than an accidental property of the first plan.
-        if restricted:
-            await self._learn_block(restricted[-1], session)
-            raise restricted[-1]
-        raise ArboxError("לא נמצא מנוי מתאים להזמנה")
 
     async def _refresh_memberships_quietly(self) -> None:
         try:
@@ -705,116 +754,15 @@ class RulesEngine:
     async def _validate_watch_membership(
         self, watch: dict, session: dict, *, notify: bool = True,
     ) -> tuple[int | None, bool]:
-        """Repair a scheduled class before any upstream booking is attempted.
-
-        A saved explicit choice is a preference, not a reason to lose the
-        class after that membership expires or runs out. Replacing it here is
-        safe: no Arbox action has happened yet. This is intentionally separate
-        from post-request fallback, which remains forbidden after ambiguous
-        errors to avoid duplicate bookings.
-        """
         chosen = watch.get("membership_user_id")
-        candidates = await self._membership_candidates(
-            session.get("date"), session.get("schedule_id"))
-        if chosen is None:
-            if candidates:
-                return None, True
-        else:
-            selected = next((m for m in candidates if m.get("id") == chosen), None)
-            if selected:
-                return int(chosen), True
-            if candidates:
-                replacement = candidates[0]
-                replacement_id = int(replacement["id"])
-                await self.store.set_watch_membership(
-                    session["schedule_id"], replacement_id)
-                if notify:
-                    inventory = await self.store.get_meta("memberships") or []
-                    old = next((m for m in inventory if m.get("id") == chosen), {})
-                    class_date = session.get("date") or "תאריך האימון"
-                    if old.get("end") and old["end"] < class_date:
-                        reason = f"פג ב-{old['end']} לפני האימון"
-                    elif old.get("start") and old["start"] > class_date:
-                        reason = f"עדיין לא בתוקף ב-{class_date}"
-                    elif old and not old.get("active"):
-                        reason = "כבר אינו פעיל"
-                    else:
-                        reason = "אינו זמין לאימון הזה"
-                    await self.notifier.send(
-                        "⚠️ עדכנתי מנוי בתזמון מראש\n"
-                        f"{_fmt_session(session)}\n"
-                        f"{old.get('plan') or chosen} {reason}.\n"
-                        f"העברתי ל-{replacement.get('plan') or replacement_id}. "
-                        "אין צורך לעשות דבר.",
-                        kind="membership")
-                return replacement_id, True
-
-        # No valid membership exists for the class date. Keep the pin pending
-        # and alert once per exact class/choice/inventory state, so a later
-        # membership refresh can repair it without the user recreating it.
-        fingerprint = self._membership_fingerprint(
-            await self.store.get_meta("memberships") or [])
-        alert_key = f"{session.get('schedule_id')}:{chosen}:{fingerprint}"
-        alerted = await self.store.get_meta("membership_watch_alerts") or []
-        if notify and alert_key not in alerted:
-            await self.notifier.send(
-                "⚠️ צריך לבחור מנוי לתזמון\n"
-                f"{_fmt_session(session)}\n"
-                "אין כרגע מנוי תקף עם כניסה זמינה בתאריך האימון. "
-                "השארתי את התזמון בהמתנה כדי שלא ילך לאיבוד.",
-                kind="membership")
-            alerted.append(alert_key)
-            await self.store.set_meta("membership_watch_alerts", alerted[-100:])
-        return (int(chosen) if chosen is not None else None), False
+        status = await self.quota_status(target_date=session["date"]) or {}
+        ready = status.get("plan_states", {}).get(str(session["schedule_id"]), {}).get("state") == "ready"
+        if not ready and notify:
+            await self.reconcile_planned_quota()
+        return chosen, ready
 
     async def _reconcile_pending_memberships(self) -> None:
-        changes: list[tuple[dict, int]] = []
-        uncovered: list[tuple[str, dict]] = []
-        inventory = await self.store.get_meta("memberships") or []
-        fingerprint = self._membership_fingerprint(inventory)
-        alerted = await self.store.get_meta("membership_watch_alerts") or []
-        for watch in await self.store.list_watchlist(pending_only=True):
-            session = await self.store.get_session(watch["schedule_id"])
-            if session and session.get("date") >= date.today().isoformat():
-                selected, ready = await self._validate_watch_membership(
-                    watch, session, notify=False)
-                if ready and watch.get("membership_user_id") is not None \
-                        and selected != watch.get("membership_user_id"):
-                    changes.append((session, int(selected)))
-                elif not ready:
-                    key = (f"{session.get('schedule_id')}:"
-                           f"{watch.get('membership_user_id')}:{fingerprint}")
-                    if key not in alerted:
-                        uncovered.append((key, session))
-        if not changes and not uncovered:
-            return
-
-        lines = ["⚠️ עדכנתי את כיסוי התזמונים מראש"]
-        if changes:
-            grouped: dict[int, int] = {}
-            for _, membership_id in changes:
-                grouped[membership_id] = grouped.get(membership_id, 0) + 1
-            for membership_id, count in grouped.items():
-                plan = next((m.get("plan") for m in inventory
-                             if m.get("id") == membership_id), membership_id)
-                lines.append(f"• {count} תזמונים הועברו אוטומטית ל-{plan}")
-        if uncovered:
-            lines.append(f"• {len(uncovered)} תזמונים נשארו ללא כיסוי:")
-            for _, session in uncovered[:5]:
-                lines.append(
-                    f"  {session.get('date')} · "
-                    f"{(session.get('start_time') or '?')[:5]} · "
-                    f"{session.get('category_name') or 'שיעור'}")
-            if len(uncovered) > 5:
-                lines.append(f"  ועוד {len(uncovered) - 5}")
-            lines.append("לא אנסה להזמין אותם ללא כניסה פנויה. "
-                         "צריך לבחור אילו תזמונים להשאיר או להוסיף מנוי.")
-        else:
-            lines.append("הכול מכוסה ואין צורך לעשות דבר.")
-        delivered = await self.notifier.send("\n".join(lines), kind="membership")
-        if delivered and uncovered:
-            alerted.extend(key for key, _ in uncovered)
-            await self.store.set_meta("membership_watch_alerts", alerted[-100:])
+        await self.review_plans()
 
     @staticmethod
     def _membership_fingerprint(memberships: list[dict]) -> str:
@@ -834,8 +782,7 @@ class RulesEngine:
         previous = await self.store.get_meta(fingerprint_key)
         active = await self._active_memberships()
         fingerprint = self._membership_fingerprint(active)
-        await self._reconcile_pending_memberships()
-        await self.reconcile_planned_quota()
+        await self.review_plans()
 
         if len(active) == 1:
             if self.settings.preferred_membership_id != active[0].get("id"):
@@ -852,9 +799,6 @@ class RulesEngine:
 
         if previous == fingerprint:
             return
-        total = sum(int(m.get("sessions_on_purchase")
-                        if m.get("sessions_on_purchase") is not None
-                        else m.get("plan_quota") or 0) for m in active)
         try:
             old_ids = {m.get("id") for m in json.loads(previous or "[]")}
         except (TypeError, json.JSONDecodeError):
@@ -892,8 +836,7 @@ class RulesEngine:
                       + (f" · {m.get('plan_quota')} כניסות בחודש"
                          if m.get('plan_quota') else "")
                       for m in existing]
-        if total:
-            lines += ["", f"סה״כ החודש: {total} כניסות"]
+        lines += ["", "המכסה נבדקת לכל מנוי ולסוגי השיעורים שהוא מכסה. הפירוט זמין ב־Arbox ← שלי."]
         buttons = []
         callback_ids = []
         if len(active) > 1:
@@ -1000,10 +943,12 @@ class RulesEngine:
                 s["schedule_id"] for s in candidates
                 if await self.store.vacation_blocks(s["date"], "autobook")
             }
+            planned = await self._planned_sessions(today.isoformat(), horizon)
+            planned_ids = {p["schedule_id"] for p in planned}
             covered = [
                 s for s in candidates
                 if s["schedule_id"] not in auto_paused_ids
-                and any(rule_matches(r, s) for r in auto_rules)
+                and s["schedule_id"] in planned_ids
             ]
             matches = [s for s in candidates if s not in covered]
 
@@ -1027,15 +972,20 @@ class RulesEngine:
                         s.get("user_booked") is not None
                         or s.get("user_in_standby") is not None)
                 ]
+                planned_on_target = [p for p in planned if p["date"] in target_dates
+                                     and p["schedule_id"] not in {c["schedule_id"] for c in covered}]
+                if planned_on_target:
+                    future += ["", "כבר מתוכנן לך באותו יום (טרם הוזמן):"]
+                    future += ["• " + opening_label(p) for p in planned_on_target]
                 if booked_on_target:
                     future += ["", "כבר יש לך באותו יום:"]
                     future += ["• " + opening_label(s) for s in booked_on_target]
 
                 if covered:
                     auto_label = (
-                        "🤖 יוזמן אוטומטית — אין צורך לעשות דבר"
+                        "🤖 מתוכנן להזמנה אוטומטית — בכפוף לכיסוי המנוי והמכסה"
                         if len(covered) == 1 else
-                        "🤖 יוזמנו אוטומטית — אין צורך לעשות דבר"
+                        "🤖 מתוכננים להזמנה אוטומטית — בכפוף לכיסוי המנוי והמכסה"
                     )
                     future += ["", auto_label]
                     future += ["• " + opening_label(s) for s in covered]
@@ -1051,8 +1001,7 @@ class RulesEngine:
                             future.append("⚠️ ההצעות למטה יחרגו מהמכסה")
                         if q["overcommitted"]:
                             future.append(
-                                f"⚠️ יש לך {q['pending_standby']} המתנות פתוחות — "
-                                "אישור שלהן יחרוג מהכניסות שנותרו")
+                                "⚠️ יש תכנונים ללא מכסה מתאימה. בדקו את הפירוט לפי מנוי ב׳שלי׳")
                     if auto_paused_ids:
                         future += ["", "🏖️ ההזמנה האוטומטית מושבתת בתאריך הזה "
                                    "בגלל חופשה."]
@@ -1395,16 +1344,23 @@ class RulesEngine:
                 # nothing to book yet; queue it so the one-shot job takes it
                 # the instant registration opens
                 await self.store.watch(schedule_id, allow_standby=True)
+                await self.review_plans()
                 await self.schedule_openings()
                 _, why = registration_open(session or {}, datetime.now())
                 await self.store.log_event(
                     "info", "watchlist", f"תוזמן מההודעה הלילית · {label}",
                     why, schedule_id)
-                return f"🎯 תוזמן! ניתפוס אותו ברגע שההרשמה תיפתח — {why}"
+                q = await self.quota_status(target_date=session['date']) or {}
+                state = q.get('plan_states', {}).get(str(schedule_id), {})
+                return f"🎯 התכנון נשמר — {state.get('reason', why)}"
             else:
                 return "פעולה לא מוכרת"
+        except PlanningBlocked as err:
+            await self.store.restore_prompt(cid)
+            return f"⚠️ {err}. לתיקון: Arbox ← שלי ← פירוט המנויים"
         except ArboxError as err:
-            # transient upstream failure — re-arm the button so a second
+            # Explicit upstream refusal can be retried by the user; unknown
+            # outcomes are handled by PlanningBlocked and its persistent marker.
             # press can retry instead of hitting "already handled"
             await self.store.restore_prompt(cid)
             _LOGGER.error("Callback %s failed: %s", data, err)
@@ -2018,6 +1974,9 @@ class RulesEngine:
                 return
             else:
                 return  # not actionable yet; try again next tick
+        except PlanningBlocked:
+            await self.reconcile_planned_quota()
+            return
         except ArboxError as err:
             if err.error_name() == "registerScheduleDisabled":
                 return  # window not really open yet — retry on the next tick
@@ -2046,29 +2005,14 @@ class RulesEngine:
         await self.send_calendar_file(sid)
 
     async def _learn_block(self, err: ArboxError, s: dict) -> bool:
-        """Remember a category the membership cannot book.
-
-        Arbox names it in the error itself, so this learns the truth instead of
-        guessing from the schedule — where nothing distinguishes such a class
-        (it even reports enable_registration_time 0, i.e. "always open").
-        """
-        if err.error_name() != "classTypeRestricts":
-            return False
-        name = err.error_value().get("class") or s.get("category_name")
-        if not name or not self.settings.block_category(name):
-            return True
-        await self.store.log_event(
-            "warn", "autobook", f"חסמתי קטגוריה · {name}",
-            "המנוי שלך לא כולל אותה — לא ננסה יותר. אפשר להסיר בהגדרות",
-            s.get("schedule_id"))
-        _LOGGER.info("Blocked category %r after classTypeRestricts", name)
-        return True
+        # Eligibility is recorded with the exact attempted membership in the
+        # central action path. A class refusal is never a global category ban.
+        return False
 
     def _blocked(self, s: dict) -> bool:
-        # A restriction learned with one plan is not globally true after a
-        # second plan arrives; the central selector will try each one.
-        return (len(getattr(self.syncer, "memberships", [])) <= 1
-                and self.settings.is_blocked(s.get("category_name")))
+        # Explicit user blocks are independent of membership eligibility.
+        # Legacy automatic blocks are migrated only with matching log evidence.
+        return self.settings.is_blocked(s.get("category_name"))
 
     async def schedule_openings(self) -> None:
         """Register a one-shot job at each upcoming opening moment.
@@ -2188,6 +2132,7 @@ class RulesEngine:
         now = datetime.now()
         skipped = await self.store.automation_skip_ids()
         sessions = await self.store.get_sessions(date_from=date.today().isoformat())
+        held = await self.store.get_meta(self.membership_policy.key(0) + ':held_plans') or {}
         for s in sessions:
             if s["schedule_id"] in skipped:
                 continue
@@ -2195,6 +2140,8 @@ class RulesEngine:
                 continue
             matched = [r for r in rules if rule_matches(r, s)]
             if not matched:
+                continue
+            if await self.store.autobook_attempted(s["schedule_id"]):
                 continue
             is_open, _ = registration_open(s, now)
             if not is_open:
@@ -2212,7 +2159,7 @@ class RulesEngine:
                     continue
                 grace = (opening_moment(start, advance)
                          + timedelta(hours=CATCHUP_GRACE_HOURS))
-                if now > grace and not _arrived_after(s, matched, grace):
+                if now > grace and not _arrived_after(s, matched, grace) and str(s['schedule_id']) not in held:
                     # A backlog is only a backlog if we could have acted at
                     # the time. A rule written today, or a class the studio
                     # published after its own window opened, never had that
@@ -2261,6 +2208,8 @@ class RulesEngine:
         list, where "why was I never booked?" is asked. info, not warn — this
         is a decision, not a failure, and info is never pushed to a channel.
         """
+        if await self.store.autobook_attempted(s["schedule_id"]):
+            return
         await self.store.mark_autobook(
             s["schedule_id"], "missed — window opened before the rule ran")
         await self.store.log_event(
@@ -2308,6 +2257,9 @@ class RulesEngine:
             await self.notifier.send(f"🤖 הוזמן אוטומטית: {label}", kind="autobook")
             await self.send_calendar_file(s["schedule_id"])
             _LOGGER.info("Autobooked %s", s["schedule_id"])
+        except PlanningBlocked:
+            await self.reconcile_planned_quota()
+            return
         except ArboxError as err:
             if err.error_name() == "registerScheduleDisabled":
                 # fired a hair before the 168h window opened (clock skew) —

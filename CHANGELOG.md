@@ -3,6 +3,25 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.51.0
+
+- Match each planned workout to an eligible membership before reserving its
+  capacity. Count bookings, pending pins and recurring occurrences together,
+  deduplicate workouts and retain uncovered intentions for correction.
+- Reconcile actual membership attribution from the owned-membership schedule
+  history. Punch cards retain their lifetime allowance across month boundaries;
+  recurring limits require explicit evidence or a manual definition.
+- Add the shared membership policy editor to My in the app and HA panel 3.2.0.
+  Show evidence, unresolved category names, missing quotas and paused plans.
+  Update the server first, then HACS, and review membership definitions.
+- Review newly discovered plans before registration opens, with bounded early
+  attempts only for desired classes outside a verified closed window. Preserve
+  ambiguous results across restarts and require reconciliation before retrying.
+- Record missed-window decisions once, keep notification state across restarts,
+  and include existing future plans in the nightly digest's same-day section.
+- Remove only legacy automatic global category blocks identified in log evidence.
+  New eligibility evidence is scoped to account, studio and membership instance.
+
 ## 1.48.1
 
 - Arbox integration 2.9.0 includes the feedback form inside Home Assistant. The

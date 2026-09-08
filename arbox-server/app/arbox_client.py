@@ -36,14 +36,21 @@ class ArboxError(Exception):
         # moment used to be recorded as a permanent refusal and cost the class.
         self.transient = transient or (status is not None and status >= 500)
 
-    def _first_message(self) -> dict:
+    def messages(self) -> list[dict]:
+        """All named refusals, in order. A 425 can carry several constraints."""
         if not isinstance(self.body, dict):
-            return {}
+            return []
         err = self.body.get("error") or {}
-        for item in err.get("messageToUser") or []:
-            if isinstance(item, dict) and item.get("name"):
-                return item
-        return {}
+        if not isinstance(err, dict):
+            return []
+        return [item for item in err.get("messageToUser") or []
+                if isinstance(item, dict) and item.get("name")]
+
+    def message(self, name: str) -> dict:
+        return next((m for m in self.messages() if m["name"] == name), {})
+
+    def _first_message(self) -> dict:
+        return next(iter(self.messages()), {})
 
     def error_name(self) -> str | None:
         """The upstream error code, e.g. 'registerScheduleDisabled'."""
@@ -292,6 +299,22 @@ class ArboxClient:
     async def memberships(self, box_id: int) -> list[dict]:
         r = await self._request("GET", f"/api/v2/boxes/{box_id}/memberships/1/false")
         return r.get("data", [])
+
+    async def membership_details(self, type_id: int, location_id: int) -> dict:
+        r = await self._request("GET", f"/api/v2/shop/item/{type_id}/{location_id}")
+        data = r.get("data", r) if isinstance(r, dict) else None
+        if not isinstance(data, dict):
+            raise ArboxError("Membership details had an unexpected shape")
+        return data
+
+    async def membership_schedules(self, membership_id: int) -> dict:
+        # This POST is a read used by Arbox's own membership details screen.
+        r = await self._request("POST", "/api/v2/membershipUser/schedules",
+                                {"membership_user_id": membership_id})
+        if not isinstance(r, dict) or not all(
+                isinstance(r.get(key), list) for key in ("past", "future", "lateCancellation")):
+            raise ArboxError("Membership schedule history had an unexpected shape")
+        return r
 
     async def schedule_between(
         self, box_id: int, location_id: int, start_date: str, end_date: str

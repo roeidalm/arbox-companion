@@ -203,8 +203,7 @@ function chooseSessionMembership(s) {
   const defaultMembership = defaultMembershipForSession(s);
   const def = document.createElement("option");
   def.value = "";
-  def.textContent = `ברירת מחדל — ${defaultMembership ?
-    membershipName(defaultMembership.id) : "אין מנוי תקף"}`;
+  def.textContent = "בחירה אוטומטית לפי התאמה ומכסה";
   select.appendChild(def);
   for (const m of eligibleMemberships(s)) {
     const o = document.createElement("option");
@@ -1099,6 +1098,9 @@ function membershipPicker(s, act) {
 function statusBadge(s) {
   const b = document.createElement("span");
   b.className = "badge";
+  if (s.planning && s.planning.state !== 'ready' && !s.user_booked && !s.user_in_standby) {
+    b.className += ' blocked'; b.textContent = '⚠ דורש בדיקה'; b.title = s.planning.reason; return b;
+  }
   if (s.user_booked != null) { b.classList.add("booked"); b.textContent = "רשום ✓"; }
   else if (s.user_in_standby != null) {
     b.classList.add("standby");
@@ -1133,6 +1135,11 @@ function actionButton(s) {
     return b;
   };
   const note = s.registration_note || "";
+
+  if (s.planning?.state === 'uncertain') {
+    const b = mk('blocked', 'נדרש בירור', 'בדקו את מצב ההזמנה בלשונית שלי לפני פעולה נוספת', () => {});
+    b.disabled = true; return b;
+  }
 
   if (s.blocked) {
     const b = mk("blocked", "לא זמין", "המנוי שלך לא כולל את הקטגוריה הזו — " +
@@ -1300,15 +1307,18 @@ $("#refRange").addEventListener("click", () => {
 /* ----------------------------------------------------------------- mine */
 
 async function loadMine() {
+  const studio = state.selectedStudioId;
   let data;
   try { data = await api("/api/me"); }
   catch (e) { toast("שגיאה: " + e.message); return; }
+  if (studio !== state.selectedStudioId) return;
   // /api/me already marks the pinned rows, so the separate watchlist call
   // this used to wait for was a second round-trip for data already here
   state.watchlist = new Set(
     data.sessions.filter((s) => s.watched).map((s) => s.schedule_id));
   if (data.memberships) state.memberships = data.memberships;
   if (state.memberships.length > 1) await loadWatchlist();
+  if (studio !== state.selectedStudioId) return;
   loadMessages(); // non-blocking; fills its own card
 
   const m = data.membership;
@@ -1319,23 +1329,30 @@ async function loadMine() {
     const p = document.createElement("div");
     p.textContent = `${m.plan || ""} · ${m.price || ""}₪ · ${m.active ? "פעיל" : "לא פעיל"}`;
     $("#membershipCard").append(h, p);
-    api("/api/quota").then((q) => {
-      if (!q || !q.quota) return;
-      const line = document.createElement("div");
-      line.className = q.remaining === 0 || q.overcommitted ? "rule-desc" : "hint";
-      const usedWord = q.used === 1 ? "נוצלה" : "נוצלו";
-      const planned = q.planned_total ?? q.planned ?? 0;
-      line.textContent = `🎟️ ${q.used}/${q.quota} ${usedWord}` +
-        (q.reserved ? ` · ${q.reserved} ${q.reserved === 1 ? "שמורה" : "שמורות"}` : "") +
-        (q.planned_scheduled ? ` · ${q.planned_scheduled} מתוזמנות` : "") +
-        (q.planned_autobook ? ` · ${q.planned_autobook} אוטומטיות` : "") +
-        (!q.planned_scheduled && !q.planned_autobook && planned
-          ? ` · ${planned} ${planned === 1 ? "מתוכננת" : "מתוכננות"}` : "") +
-        (q.pending_standby ? ` · ${q.pending_standby} בהמתנה` : "");
-      if (q.uncovered_plans?.length) line.textContent += " ⚠️ יש תזמונים ללא כיסוי";
-      else if (q.overcommitted) line.textContent += " ⚠️ המכסה אינה מכסה את כל ההתחייבויות";
-      $("#membershipCard").append(line);
-    }).catch(() => {});
+    Promise.all([api('/api/quota'), api('/api/membership-policies'), import('/static/membership-policy.js')]).then(([q, policies, ui]) => {
+      if (!q || studio !== state.selectedStudioId) return;
+      const line = document.createElement('p');
+      line.textContent = `${q.used} נוצלו החודש · ${q.reserved} מוזמנים · ${q.planned_total} בתכנון`;
+      if (q.uncovered_plans?.length) line.textContent += ` · ${q.uncovered_plans.length} ללא כיסוי`;
+      if (q.unresolved_plans?.length) line.textContent += ` · ${q.unresolved_plans.length} דורשים השלמה`;
+      if (q.unattributed_sessions?.length) line.textContent += ` · ${q.unattributed_sessions.length} אימונים טרם שויכו למנוי`;
+      $('#membershipCard').append(line);
+      for (const member of policies.memberships) {
+        const data = q.memberships.find(x => x.id === member.id);
+        if (!data) continue;
+        const card = document.createElement('article'); card.style.cssText = 'padding:16px 0;border-top:1px solid var(--border,#ddd)';
+        const heading = document.createElement('h3'); heading.textContent = member.plan;
+        const counts = document.createElement('p'); counts.textContent = `${data.used}/${data.quota ?? '—'} נוצלו · ${data.reserved} מוזמנים · ${data.planned} בתכנון · ${data.available_after_planned ?? '—'} פנויים אחרי התכנון`;
+        const period = document.createElement('small'); period.textContent = `תקופת המכסה: ${data.period_start} – ${data.period_end}`;
+        card.append(heading, counts, period, ui.policySummary({...member, policy: data.policy}, () => ui.policyDialog({member, categories: policies.categories,
+          save: async values => {
+            if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את ההגדרה מחדש');
+            await api(`/api/membership-policies/${member.id}`, {method:'PUT', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify(values)});
+            toast('הגדרת המנוי נשמרה'); await loadMine();
+          }})));
+        $('#membershipCard').append(card);
+      }
+    }).catch(e => toast('לא ניתן לטעון את פירוט המנויים: ' + e.message));
   }
 
   const list = $("#mineList");
@@ -1345,7 +1362,7 @@ async function loadMine() {
   // class hours out for anyone reading this from another timezone
   const nowStamp = studioNowStamp();
   const upcoming = data.sessions.filter((s) =>
-    `${s.date} ${(s.end_time || s.start_time || "").slice(0, 5)}` > nowStamp);
+    s.planning?.state === 'uncertain' || `${s.date} ${(s.end_time || s.start_time || "").slice(0, 5)}` > nowStamp);
   if (!upcoming.length) {
     const c = document.createElement("div");
     c.className = "card";
@@ -1369,12 +1386,34 @@ async function loadMine() {
     const t2 = document.createElement("div");
     t2.textContent = (s.category_name || "") + (s.coach_name ? " · " + s.coach_name : "");
     grow.append(t1, t2);
+    if (s.planning) {
+      const note = document.createElement('p');
+      note.textContent = [s.planning.reason, membershipName(s.planning.membership_user_id)].filter(Boolean).join(' · ');
+      grow.append(note);
+    }
+    if (s.planning?.state === 'uncertain') {
+      const studio = state.selectedStudioId;
+      for (const [label, confirm_not_booked] of [['בדיקת מצב ההזמנה',false],['בדקתי בארבוקס: האימון לא מוזמן',true]]) {
+        const check = document.createElement('button'); check.textContent = label;
+        check.onclick = async () => {
+          if (confirm_not_booked && !confirm('לחדש את התכנון? יש לאשר רק אחרי שבדקתם בארבוקס שאין הרשמה או המתנה לאימון.')) return;
+          check.disabled = true;
+          try {
+            const result = await api(`/api/planning/${s.schedule_id}/reconcile`, {method:'POST',headers:{'X-Arbox-Studio-Id':String(studio)},body:JSON.stringify({confirm_not_booked})});
+            toast(result.quota_note); await loadMine();
+          } catch(e) { toast(e.message); check.disabled = false; }
+        };
+        grow.append(check);
+      }
+    }
+
     c.appendChild(grow);
     const badge = statusBadge(s);
     if (badge) c.appendChild(badge);
     if (!s.automation_skipped) c.appendChild(calendarLinks(s.schedule_id));
-    const act = s.planning_source === "autobook" ? occurrenceSkipButton(s) : actionButton(s);
-    const pick = s.planning_source === "autobook" ? null : membershipPicker(s, act);
+    const uncertain = s.planning?.state === 'uncertain';
+    const act = uncertain ? null : s.planning_source === "autobook" ? occurrenceSkipButton(s) : actionButton(s);
+    const pick = uncertain || s.planning_source === "autobook" ? null : membershipPicker(s, act);
     if (pick) c.appendChild(pick);
     if (act) c.appendChild(act);
     list.appendChild(c);
@@ -2922,18 +2961,23 @@ async function loadProfile() {
   kvRow(act, "ממוצע שבועי", a.weekly_average);
   const quotaStatus = $("#profQuotaStatus");
   quotaStatus.innerHTML = "";
-  if (q && q.quota) {
+  if (q) {
     const planned = q.planned_total ?? q.planned ?? 0;
     kvRow(quotaStatus, "מצב נוכחי",
-          `${q.used}/${q.quota} נוצלו` +
+          `${q.used} נוצלו החודש` +
           (q.reserved ? ` · ${q.reserved} שמורות` : "") +
           (q.planned_scheduled ? ` · ${q.planned_scheduled} מתוזמנות` : "") +
           (q.planned_autobook ? ` · ${q.planned_autobook} אוטומטיות` : "") +
           (!q.planned_scheduled && !q.planned_autobook && planned
             ? ` · ${planned} מתוכננות` : "") +
-          ` · פנויות אחרי תזמונים ${q.available_after_planned ?? q.remaining}`,
-          q.overcommitted || (q.available_after_planned ?? q.remaining) === 0
+          (q.uncovered_plans?.length ? ` · ${q.uncovered_plans.length} תכנונים ללא כיסוי` : '') +
+          (q.unresolved_plans?.length ? ` · ${q.unresolved_plans.length} דורשים השלמה` : ''),
+          q.overcommitted || q.unresolved_plans?.length
             ? "warn" : "");
+    for (const item of q.memberships || []) {
+      kvRow(quotaStatus, item.plan || 'מנוי',
+        `${item.used}/${item.quota ?? '—'} נוצלו · ${item.reserved} מוזמנים · ${item.planned} בתכנון · ${item.available_after_planned ?? '—'} פנויים אחרי התכנון`);
+    }
   }
 
 

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
+from .rules import PlanningBlocked
 from .arbox_client import ArboxAuthError, ArboxError
 from .ical import build_calendar, google_calendar_url
 from .journal import (
@@ -234,6 +235,10 @@ async def schedule(
               if r["enabled"] and r["mode"] == "autobook"]
              if has_key(request, x_api_key) else [])
     vacations = await s.store.list_vacations() if rules else []
+    if has_key(request, x_api_key):
+        states = ((await s.rules_engine.quota_status()) or {}).get("plan_states", {})
+        for row in sessions:
+            row["planning"] = states.get(str(row["schedule_id"]))
     return {
         "sessions": _annotate(
             sessions, lambda name: s.rules_engine._blocked({"category_name": name}),
@@ -356,14 +361,20 @@ async def me(request: Request, x_api_key: str | None = Header(None)):
     vacations = await s.store.list_vacations() if rules else []
     sessions = await s.store.my_sessions(
         include_watched=True, date_from=date.today().isoformat())
-    if rules:
+    if has_key(request, x_api_key):
         seen = {row["schedule_id"] for row in sessions}
         plans = await s.rules_engine._planned_sessions(
             date.today().isoformat(), "9999-12-31", include_skipped=True)
-        sessions.extend(row for row in plans
-                        if row["planning_source"] == "autobook"
-                        and row["schedule_id"] not in seen)
+        for row in [*plans, *await s.rules_engine.uncertain_sessions()]:
+            if row["schedule_id"] not in seen:
+                sessions.append(row)
+                seen.add(row["schedule_id"])
         sessions.sort(key=lambda row: (row["date"], row.get("start_time") or ""))
+    if has_key(request, x_api_key):
+        quota = await s.rules_engine.quota_status() or {}
+        states = quota.get("plan_states", {})
+        for row in sessions:
+            row["planning"] = states.get(str(row["schedule_id"]))
     return {
         "membership": (await s.store.get_meta("membership")
                        if has_key(request, x_api_key) else None),
@@ -529,7 +540,8 @@ async def calendar_event_google(request: Request, schedule_id: int):
 
 
 @router.get("/quota")
-async def quota(request: Request):
+async def quota(request: Request, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
     q = await ctx(request).rules_engine.quota_status()
     return q or {"quota": 0}
 
@@ -649,6 +661,8 @@ async def _do_action(
                 )
         except HTTPException:
             raise
+        except PlanningBlocked as err:
+            raise HTTPException(409, str(err))
         except ArboxError as err:
             # a manual attempt teaches us the same thing an automatic one would
             await s.rules_engine._learn_block(err, session)
@@ -705,13 +719,12 @@ async def _do_action(
         fresh.pop("raw_json", None)
     quota_note = None
     if kind in ("book", "standby"):
-        q = await s.rules_engine.quota_status(force=True)
-        if q and kind == "book" and q["remaining"] == 0:
-            quota_note = (f"שים לב: כל {q['quota']} הכניסות של {q['month']} "
-                          "כבר נוצלו או שמורות")
-        elif q and kind == "standby" and q["overcommitted"]:
-            quota_note = (f"שים לב: עם ההמתנה הזו יש לך יותר התחייבויות "
-                          f"({q['used']}+{q['pending_standby']}) מכניסות ({q['quota']})")
+        q = await s.rules_engine.quota_status(target_date=session['date']) or {}
+        chosen = next((m for m in q.get('memberships', []) if m['id'] == membership_id), {})
+        if chosen.get('available') == 0:
+            quota_note = f"כל הכניסות במכסה של {chosen.get('plan') or 'המנוי שנבחר'} נוצלו או שמורות לתקופה הזו"
+        if q.get('overcommitted'):
+            quota_note = 'יש תכנונים נוספים ללא כיסוי במנוי המתאים. בדקו את פירוט המנויים בלשונית שלי'
         if quota_note:
             await s.store.log_event("warn", "quota", quota_note,
                                     fmt_class(session), schedule_id)
@@ -1125,8 +1138,7 @@ class WatchBody(BaseModel):
     # set only after the user is shown the conflict and confirms — a vacation
     # gates automation, it should never veto a deliberate choice
     ignore_vacation: bool = False
-    # Set only after the projected quota warning was shown and accepted. The
-    # first request is a read-only preflight and stores nothing.
+    # Legacy clients may send this, but it never bypasses a quota gate.
     confirm_over_quota: bool = False
     membership_user_id: int | None = None
 
@@ -1156,79 +1168,47 @@ async def add_watch(request: Request, body: WatchBody,
     """Pin a class — including one whose registration window is still shut."""
     require_key(request, x_api_key)
     s = ctx(request)
-    sess = await s.store.get_session(body.schedule_id)
-    if not sess:
-        raise HTTPException(404, f"unknown schedule_id {body.schedule_id}")
-    if s.rules_engine._blocked(sess):
-        raise HTTPException(
-            409, f"blocked_category: אין טעם לתזמן את "
-                 f"{sess.get('category_name')} — המנוי שלך לא כולל אותה")
-    # a pin that a vacation will veto must say so NOW — discovering it days
-    # later, when the window opened and nothing happened, is the worst case
-    conflict = None
-    if not body.ignore_vacation and \
-            await s.store.vacation_blocks(sess["date"], "autobook"):
-        conflict = (f"⚠️ {sess['date']} נמצא בתוך חופשה שחוסמת הזמנה אוטומטית.\n"
-                    f"לתזמן בכל זאת רק את השיעור הזה? (החופשה תמשיך לחסום את השאר)")
-        # nothing is stored yet — the client decides and re-posts with the flag
-        return {
-            "ok": False,
-            "needs_confirm": True,
-            "confirm_kind": "vacation",
-            "conflict": conflict,
-        }
-    if body.membership_user_id:
-        active = await s.rules_engine._active_memberships(sess.get("date"))
-        if not any(m.get("id") == body.membership_user_id for m in active):
+    async with s.syncer.exclusive():
+        sess = await s.store.get_session(body.schedule_id)
+        if not sess:
+            raise HTTPException(404, f"unknown schedule_id {body.schedule_id}")
+        if s.rules_engine._blocked(sess):
             raise HTTPException(
-                422, "selected membership is not valid on the class date")
-    projected = await s.rules_engine.quota_status(
-        force=True, target_date=sess["date"], extra_plans=[{
-            **sess,
-            "membership_user_id": body.membership_user_id,
-            "ignore_vacation": body.ignore_vacation,
-            "created_at": datetime.now().isoformat(),
-        }])
-    if projected and projected.get("overcommitted") and not body.confirm_over_quota:
-        lines = [
-            "⚠️ חריגה מהמכסה",
-            f"{projected.get('used', 0)} נוצלו · "
-            f"{projected.get('reserved', 0)} מוזמנים · "
-            f"{projected.get('planned_total', projected.get('planned', 0))} מתוכננים · "
-            f"מכסה {projected.get('quota', 0)}",
-        ]
-        uncovered = projected.get("uncovered_plans") or []
-        if uncovered:
-            lines += ["", "האימון שיישאר ללא כיסוי:"]
-            uncovered_session = await s.store.get_session(uncovered[0])
-            if uncovered_session:
-                lines += [
-                    fmt_when(uncovered_session),
-                    " · ".join(filter(None, [
-                        uncovered_session.get("category_name") or "שיעור",
-                        uncovered_session.get("coach_name"),
-                    ])),
-                ]
-            else:
-                lines.append(str(uncovered[0]))
-        lines += ["", "לתזמן בכל זאת?"]
-        return {
-            "ok": False,
-            "needs_confirm": True,
-            "confirm_kind": "quota",
-            "conflict": "\n".join(lines),
-            "uncovered_plans": uncovered,
-        }
-    await s.store.watch(body.schedule_id, body.allow_standby,
-                        body.ignore_vacation, body.membership_user_id)
-    await s.rules_engine.schedule_openings()   # arm the exact-moment job now
-    # if the window is already open there is no reason to wait for a tick
-    await s.rules_engine.watchlist_tick()
-    await s.rules_engine.reconcile_planned_quota()
-    sess = await s.store.get_session(body.schedule_id)
-    return {"ok": True, "registration_open": sess.get("registration_opens"),
-            "note": registration_open(sess, datetime.now())[1],
-            "overrode_vacation": body.ignore_vacation}
+                409, f"blocked_category: אין טעם לתזמן את "
+                     f"{sess.get('category_name')} — המנוי שלך לא כולל אותה")
+        # a pin that a vacation will veto must say so NOW — discovering it days
+        # later, when the window opened and nothing happened, is the worst case
+        conflict = None
+        if not body.ignore_vacation and \
+                await s.store.vacation_blocks(sess["date"], "autobook"):
+            conflict = (f"⚠️ {sess['date']} נמצא בתוך חופשה שחוסמת הזמנה אוטומטית.\n"
+                        f"לתזמן בכל זאת רק את השיעור הזה? (החופשה תמשיך לחסום את השאר)")
+            # nothing is stored yet — the client decides and re-posts with the flag
+            return {
+                "ok": False,
+                "needs_confirm": True,
+                "confirm_kind": "vacation",
+                "conflict": conflict,
+            }
+        if body.membership_user_id:
+            active = await s.rules_engine._active_memberships(sess.get("date"))
+            if not any(m.get("id") == body.membership_user_id for m in active):
+                raise HTTPException(
+                    422, "selected membership is not valid on the class date")
+        await s.store.watch(body.schedule_id, body.allow_standby,
+                            body.ignore_vacation, body.membership_user_id)
+        await s.rules_engine.review_plans()
+        await s.rules_engine.schedule_openings()   # arm the exact-moment job now
+        # if the window is already open there is no reason to wait for a tick
+        await s.rules_engine.watchlist_tick()
+        await s.rules_engine.reconcile_planned_quota()
+        sess = await s.store.get_session(body.schedule_id)
+        projected = await s.rules_engine.quota_status(target_date=sess["date"])
+        return {"ok": True, "registration_open": sess.get("registration_opens"),
+                "note": registration_open(sess, datetime.now())[1],
+                "overrode_vacation": body.ignore_vacation,
+                "planning": (projected or {}).get("plan_states", {}).get(str(body.schedule_id)),
+                "quota_note": ((projected or {}).get("plan_states", {}).get(str(body.schedule_id), {}).get("reason"))}
 
 
 @router.delete("/watchlist/{schedule_id}")
@@ -1355,7 +1335,7 @@ async def save_rule(request: Request, body: RuleBody,
     s = ctx(request)
     rid = await s.store.save_rule(body.model_dump())
     await s.rules_engine.schedule_openings()
-    await s.rules_engine.reconcile_planned_quota()
+    await s.rules_engine.review_plans()
     return {"ok": True, "id": rid}
 
 
@@ -1607,3 +1587,72 @@ async def ha_callback(request: Request, x_api_key: str | None = Header(None)):
         except Exception as err:  # noqa: BLE001 — feedback is best-effort
             _LOGGER.warning("HA feedback notification failed: %s", err)
     return {"ok": True, "result": result}
+
+
+class MembershipPolicyBody(BaseModel):
+    category_ids: list[int]
+    limits: list[dict]
+    fingerprint: str
+
+
+class PlanningReconcileBody(BaseModel):
+    confirm_not_booked: bool = False
+
+
+@router.post('/planning/{schedule_id}/reconcile')
+async def reconcile_uncertain_booking(request: Request, schedule_id: int, body: PlanningReconcileBody,
+                                      x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    async with s.syncer.exclusive():
+        session = await s.store.get_session(schedule_id)
+        if not session:
+            session = next((row for row in await s.rules_engine.uncertain_sessions()
+                            if row['schedule_id'] == schedule_id), None)
+        if not session:
+            raise HTTPException(404, 'האימון לא נמצא בסטודיו הפעיל')
+        try:
+            await s.syncer.sync_range(session['date'], session['date'])
+            await s.rules_engine.refresh_planning_evidence(force_history=True)
+        except ArboxError as err:
+            raise HTTPException(502, 'לא ניתן לאמת את מצב האימון כרגע') from err
+        current = await s.store.get_session(schedule_id) or {}
+        booked = current.get('user_booked') is not None or current.get('user_in_standby') is not None
+        key = s.rules_engine.membership_policy.key(0) + ':uncertain'
+        pending = await s.store.get_meta(key) or {}
+        if booked or body.confirm_not_booked:
+            pending.pop(str(schedule_id), None)
+            await s.store.set_meta(key, pending)
+            await s.rules_engine.reconcile_planned_quota()
+            await s.rules_engine.schedule_openings()
+            return {'ok': True, 'quota_note': 'ההרשמה נמצאה' if booked else 'ההשהיה הוסרה. התכנון ייבדק שוב לפי ההתאמה והמכסה'}
+        return {'ok': True, 'quota_note': 'לא נמצאה הרשמה בסנכרון. ההשהיה נשארה עד שתאשרו שבדקתם גם בארבוקס'}
+
+
+@router.get("/membership-policies")
+async def membership_policies(request: Request, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    members = await s.store.get_meta("memberships") or []
+    return {"memberships": [{**m, "policy": await s.rules_engine.membership_policy.get(m)} for m in members],
+            "categories": await s.rules_engine.membership_policy.catalog()}
+
+
+@router.put("/membership-policies/{membership_id}")
+async def save_membership_policy(request: Request, membership_id: int, body: MembershipPolicyBody,
+                                 x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    async with s.syncer.exclusive():
+        members = await s.store.get_meta("memberships") or []
+        member = next((m for m in members if m["id"] == membership_id), None)
+        if member is None:
+            raise HTTPException(404, "המנוי לא נמצא בסטודיו הפעיל")
+        try:
+            policy = await s.rules_engine.membership_policy.save_manual(
+                member, body.category_ids, body.limits, body.fingerprint)
+        except ValueError as err:
+            raise HTTPException(409, str(err))
+        await s.rules_engine.reconcile_planned_quota()
+        await s.rules_engine.schedule_openings()
+    return {"ok": True, "policy": policy}

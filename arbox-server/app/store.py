@@ -508,8 +508,10 @@ class Store:
         rows = [flatten_session(s, extra_advance_hours, box_id) for s in sessions]
         placeholders = ", ".join(f":{c}" for c in SESSION_COLS)
         updates = ", ".join(
-            ("membership_user_id=COALESCE(excluded.membership_user_id,"
-             "sessions.membership_user_id)" if c == "membership_user_id"
+            ("membership_user_id=COALESCE(excluded.membership_user_id,CASE WHEN "
+             "(excluded.user_booked IS NULL OR excluded.user_booked=sessions.user_booked) "
+             "AND (excluded.user_in_standby IS NULL OR excluded.user_in_standby=sessions.user_in_standby) "
+             "THEN sessions.membership_user_id END)" if c == "membership_user_id"
              else f"{c}=excluded.{c}")
             for c in SESSION_COLS if c != "schedule_id"
         )
@@ -829,7 +831,7 @@ class Store:
         """Pending one-class schedules that may consume future capacity."""
         cur = await self.db.execute(
             "SELECT s.schedule_id,s.date,s.start_time,s.end_time,"
-            "s.category_name,s.coach_name,s.registration_opens,"
+            "s.category_id,s.category_name,s.coach_name,s.registration_opens,"
             "w.membership_user_id,w.ignore_vacation,w.created_at "
             "FROM watchlist w JOIN sessions s ON s.schedule_id=w.schedule_id "
             "WHERE w.result IS NULL AND s.date>=? AND s.date<=? "
@@ -841,6 +843,56 @@ class Store:
             (start, end, self.active_box_id, self.active_box_id),
         )
         return [dict(r) for r in await cur.fetchall()]
+
+    async def reconcile_membership_history(self, membership_id: int, groups: dict) -> None:
+        """Attribute only the account's own rows from membershipUser/schedules.
+
+        Do not overwrite schedule availability with the less detailed membership
+        view. Missing booked classes are restored so they remain visible in My.
+        """
+        # Validate the whole response before applying any attribution.
+        for group in ("past", "future", "lateCancellation"):
+            for row in groups[group]:
+                if not isinstance(row, dict) or not row.get("id") or not row.get("date"):
+                    raise ValueError("Invalid membership history row")
+                if row.get("membership_user_fk") != membership_id:
+                    raise ValueError("Membership history belongs to another membership")
+                if self.active_box_id and row.get("box_fk") != self.active_box_id:
+                    raise ValueError("Membership history belongs to another studio")
+        for group in ("past", "future", "lateCancellation"):
+            for row in groups[group]:
+                existing = await self.get_session(row["id"])
+                booking_id = row.get('user_booked')
+                if group == 'future' and booking_id is not None:
+                    # A cancelled cycle must not return through a stale read,
+                    # even when the calendar row has since been removed.
+                    cur = await self.db.execute(
+                        "SELECT 1 FROM training_events WHERE schedule_id=? AND booking_id=? "
+                        "AND event_type IN ('cancelled_safe','cancelled_late') LIMIT 1",
+                        (row['id'], booking_id))
+                    if await cur.fetchone():
+                        continue
+                if not existing:
+                    await self.upsert_sessions([{**row, "_selected_membership_id": membership_id}],
+                                               box_id=self.active_box_id)
+                    if group == 'future' and booking_id is not None:
+                        await self.record_booking_success(row['id'], 'book', 'membership_sync', membership_id)
+                else:
+                    if group == 'future' and booking_id is not None:
+                        await self.db.execute(
+                            "UPDATE sessions SET user_booked=?,user_in_standby=NULL,"
+                            "membership_user_id=?,booking_option='cancelScheduleUser' WHERE schedule_id=?",
+                            (booking_id, membership_id, row['id']))
+                        if existing.get('user_booked') != booking_id:
+                            await self.record_booking_success(row['id'], 'book', 'membership_sync', membership_id)
+                        continue
+                    # Only assign the booking cycle actually returned upstream.
+                    if (existing.get("user_booked") is not None and
+                            existing.get("user_booked") == row.get("user_booked")):
+                        await self.db.execute(
+                            "UPDATE sessions SET membership_user_id=? WHERE schedule_id=?",
+                            (membership_id, row["id"]))
+        await self.db.commit()
 
     async def training_history(self, now: Any | None = None) -> list[dict]:
         """Completed commitments and cancellations, newest first.
@@ -1162,6 +1214,17 @@ class Store:
         else:
             event_type = "standby_rejoined" if was_cancelled else "standby_joined"
             booking_id = session.get("user_in_standby")
+        if booking_id is not None and not was_cancelled:
+            cur = await self.db.execute(
+                "SELECT id,event_type,booking_id,source FROM training_events "
+                "WHERE schedule_id=? ORDER BY id DESC LIMIT 1", (schedule_id,))
+            last = await cur.fetchone()
+            types = ("booked", "rebooked") if action == "book" else ("standby_joined", "standby_rejoined")
+            if last and last["booking_id"] == booking_id and last["event_type"] in types:
+                if last["source"] == "membership" and source != "membership":
+                    await self.db.execute("UPDATE training_events SET source=? WHERE id=?", (source, last["id"]))
+                    await self.db.commit()
+                return last["event_type"]
         await self._insert_training_event(
             schedule_id, event_type, source, booking_id=booking_id,
             membership_user_id=membership_user_id,

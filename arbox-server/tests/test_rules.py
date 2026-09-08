@@ -15,6 +15,7 @@ from app.rules import (
 )
 from app.sync import Syncer
 from app.store import Store
+from test_membership_policy import engine as prepared_engine, seed_policies, raw
 
 
 BASE_SESSION = {
@@ -148,7 +149,7 @@ async def test_multi_membership_quota_separates_used_and_reserved(tmp_path, monk
              "sessions_on_purchase": 5, "sessions_left": 5},
         ])
         base = {
-            "coach": {}, "box_categories": {"name": "Movement"}, "series": {},
+            "coach": {}, "box_categories": {"id": 2, "name": "Movement"}, "series": {},
             "end_time": "09:30", "user_in_standby": None,
             "booking_option": "cancelScheduleUser",
         }
@@ -164,7 +165,9 @@ async def test_multi_membership_quota_separates_used_and_reserved(tmp_path, monk
         )
         notifier = SimpleNamespace(settings=settings, on_callback=None, on_message=None)
         syncer = SimpleNamespace(membership_user_id=10, memberships=[])
-        status = await RulesEngine(store, object(), syncer, notifier).quota_status(True)
+        engine = RulesEngine(store, object(), syncer, notifier)
+        await seed_policies(engine)
+        status = await engine.quota_status(True)
         assert status["quota"] == 10
         assert status["used"] == 1
         assert status["reserved"] == 1
@@ -173,11 +176,11 @@ async def test_multi_membership_quota_separates_used_and_reserved(tmp_path, monk
         october = await RulesEngine(
             store, object(), syncer, notifier).quota_status(
                 True, target_date="2026-10-03")
-        assert october["quota"] == 5
+        assert october["quota"] == 10
         assert october["used"] == 0
         assert october["reserved"] == 0
-        assert october["remaining"] == 5
-        assert [m["id"] for m in october["memberships"]] == [10]
+        assert october["remaining"] == 10
+        assert [m["id"] for m in october["memberships"]] == [10,20]
 
         expired_card = {
             "id": 20, "active": True, "start": "2026-09-02",
@@ -186,171 +189,57 @@ async def test_multi_membership_quota_separates_used_and_reserved(tmp_path, monk
         }
         await store.set_meta("memberships", [expired_card])
         await store.set_meta("membership", expired_card)
-        assert await RulesEngine(
-            store, object(), syncer, notifier).quota_status(
-                True, target_date="2026-10-03") is None
+        remaining = await RulesEngine(store, object(), syncer, notifier).quota_status(True, target_date="2026-10-03")
+        assert remaining["memberships"][0]["end"] == "2026-10-01"
     finally:
         await store.close()
 
 
 @pytest.mark.asyncio
-async def test_membership_selector_falls_back_only_on_explicit_restriction():
-    class FakeStore:
-        def __init__(self):
-            self.meta = {"memberships": [{"id": 10}, {"id": 20}]}
-
-        async def get_meta(self, key, default=None):
-            return self.meta.get(key, default)
-
-        async def set_meta(self, key, value):
-            self.meta[key] = value
-
-        async def upsert_sessions(self, rows):
-            self.updated = rows
-
-    restriction = rules_module.ArboxError(
-        "not in plan", status=409,
-        body={"error": {"messageToUser": [{
-            "name": "classTypeRestricts", "value": {"class": "Movement"},
-        }]}})
-    client = SimpleNamespace(book=AsyncMock(side_effect=[
-        restriction, {"id": 77, "user_booked": 88},
-    ]))
-    settings = SimpleNamespace(preferred_membership_id=10)
-    notifier = SimpleNamespace(
-        settings=settings, on_callback=None, on_message=None,
-        send=AsyncMock(return_value=True))
-    syncer = SimpleNamespace(
-        membership_user_id=10, memberships=[{"id": 10}, {"id": 20}],
-        ensure_identity=AsyncMock(), refresh_membership=AsyncMock())
-    store = FakeStore()
-    engine = RulesEngine(store, client, syncer, notifier)
-    engine.quota_status = AsyncMock(return_value={"memberships": [
-        {"id": 10, "available": 5}, {"id": 20, "available": 5},
-    ]})
-
-    updated, membership_id = await engine.perform_membership_action(
-        {"schedule_id": 77, "category_name": "Movement"}, "book")
-    await asyncio.sleep(0)
-
-    assert membership_id == 20
-    assert updated["_selected_membership_id"] == 20
-    assert [call.args[1] for call in client.book.await_args_list] == [10, 20]
+async def test_membership_selector_falls_back_only_on_explicit_restriction(prepared_engine):
+    engine = prepared_engine
+    restriction = rules_module.ArboxError('not in plan', status=425, body={'error': {'messageToUser': [
+        {'name':'classTypeRestricts','value':{'class':'Class 1','allowedText':'Class 2'}}]}})
+    engine.client.book.side_effect = [restriction, raw(user_booked=88)]
+    _, mid = await engine.perform_membership_action(await engine.store.get_session(77), 'book')
+    assert mid == 10
+    assert engine.client.book.await_args_list == [call(77,20),call(77,10)]
+    assert engine.settings.blocked_categories == []
 
 
 @pytest.mark.asyncio
-async def test_explicit_membership_override_never_silently_falls_back():
-    class FakeStore:
-        meta = {"memberships": [{"id": 10}, {"id": 20}]}
-
-        async def get_meta(self, key, default=None):
-            return self.meta.get(key, default)
-
-        async def set_meta(self, key, value):
-            self.meta[key] = value
-
-    restriction = rules_module.ArboxError(
-        "not in plan", status=409,
-        body={"error": {"messageToUser": [{
-            "name": "classTypeRestricts", "value": {"class": "Movement"},
-        }]}})
-    client = SimpleNamespace(book=AsyncMock(side_effect=restriction))
-    settings = SimpleNamespace(preferred_membership_id=10)
-    notifier = SimpleNamespace(settings=settings, on_callback=None, on_message=None)
-    syncer = SimpleNamespace(membership_user_id=10, memberships=[],
-                             ensure_identity=AsyncMock())
-    engine = RulesEngine(FakeStore(), client, syncer, notifier)
-    engine.quota_status = AsyncMock(return_value={"memberships": [
-        {"id": 10, "available": 5}, {"id": 20, "available": 5},
-    ]})
-
-    with pytest.raises(rules_module.ArboxError):
-        await engine.perform_membership_action(
-            {"schedule_id": 77, "category_name": "Movement"}, "book", 10)
-
-    client.book.assert_awaited_once_with(77, 10)
+async def test_explicit_membership_override_never_silently_falls_back(prepared_engine):
+    engine = prepared_engine
+    engine.client.book.side_effect = rules_module.ArboxError('not in plan', status=425, body={'error': {'messageToUser': [
+        {'name':'classTypeRestricts','value':{'class':'Class 1','allowedText':'Class 2'}}]}})
+    with pytest.raises(rules_module.PlanningBlocked):
+        await engine.perform_membership_action(await engine.store.get_session(77), 'book', 20)
+    engine.client.book.assert_awaited_once_with(77,20)
 
 
 @pytest.mark.asyncio
-async def test_default_selector_uses_membership_valid_on_class_date():
-    class FakeStore:
-        meta = {"memberships": [{"id": 10}, {"id": 20}]}
-
-        async def get_meta(self, key, default=None):
-            return self.meta.get(key, default)
-
-        async def set_meta(self, key, value):
-            self.meta[key] = value
-
-        async def upsert_sessions(self, rows):
-            self.updated = rows
-
-    client = SimpleNamespace(book=AsyncMock(return_value={"id": 77}))
-    settings = SimpleNamespace(preferred_membership_id=10)
-    notifier = SimpleNamespace(
-        settings=settings, on_callback=None, on_message=None,
-        send=AsyncMock(return_value=True))
-    syncer = SimpleNamespace(
-        membership_user_id=10, memberships=[], ensure_identity=AsyncMock(),
-        refresh_membership=AsyncMock())
-    engine = RulesEngine(FakeStore(), client, syncer, notifier)
-    engine.quota_status = AsyncMock(return_value={"memberships": [
-        {"id": 20, "available": 5, "plan": "המנוי הרגיל"},
-    ]})
-
-    _, membership_id = await engine.perform_membership_action(
-        {"schedule_id": 77, "date": "2026-10-03", "category_name": "Movement"},
-        "book")
-
-    assert membership_id == 20
-    engine.quota_status.assert_awaited_with(target_date="2026-10-03")
-    client.book.assert_awaited_once_with(77, 20)
+async def test_default_selector_uses_membership_valid_on_class_date(prepared_engine):
+    engine = prepared_engine
+    members = await engine.store.get_meta('memberships')
+    members[1]['end'] = '2026-09-30'
+    await engine.store.set_meta('memberships',members)
+    await engine.store.upsert_sessions([raw(day='2026-10-03')],box_id=73)
+    engine.client.book.return_value = raw(day='2026-10-03',user_booked=88)
+    _, mid = await engine.perform_membership_action(await engine.store.get_session(77),'book')
+    assert mid == 10
+    engine.client.book.assert_awaited_once_with(77,10)
 
 
 @pytest.mark.asyncio
-async def test_saved_invalid_override_is_repaired_before_booking():
-    class FakeStore:
-        def __init__(self):
-            self.meta = {"memberships": [
-                {"id": 10, "plan": "כרטיסייה", "end": "2026-10-01"},
-                {"id": 20, "plan": "המנוי הרגיל", "end": None},
-            ]}
-            self.saved = None
-
-        async def get_meta(self, key, default=None):
-            return self.meta.get(key, default)
-
-        async def set_meta(self, key, value):
-            self.meta[key] = value
-
-        async def set_watch_membership(self, schedule_id, membership_id):
-            self.saved = (schedule_id, membership_id)
-            return True
-
-    store = FakeStore()
-    settings = SimpleNamespace(preferred_membership_id=10)
-    notifier = SimpleNamespace(
-        settings=settings, on_callback=None, on_message=None,
-        send=AsyncMock(return_value=True))
-    syncer = SimpleNamespace(membership_user_id=10, memberships=[])
-    engine = RulesEngine(store, object(), syncer, notifier)
-    engine._membership_candidates = AsyncMock(return_value=[
-        {"id": 20, "plan": "המנוי הרגיל", "available": 5},
-    ])
-    session = {
-        "schedule_id": 77, "date": "2026-10-03", "start_time": "10:00",
-        "end_time": "11:00", "category_name": "Movement",
-    }
-
-    selected, ready = await engine._validate_watch_membership(
-        {"schedule_id": 77, "membership_user_id": 10}, session)
-
-    assert (selected, ready) == (20, True)
-    assert store.saved == (77, 20)
-    text = notifier.send.await_args.args[0]
-    assert "פג ב-2026-10-01 לפני האימון" in text
-    assert "העברתי ל-המנוי הרגיל" in text
-    assert "אין צורך לעשות דבר" in text
+async def test_saved_invalid_override_stays_pending_until_user_repairs_it(prepared_engine):
+    engine = prepared_engine
+    await engine.store.watch(78,membership_user_id=20)
+    selected,ready = await engine._validate_watch_membership(
+        {'schedule_id':78,'membership_user_id':20},await engine.store.get_session(78))
+    assert (selected,ready) == (20,False)
+    assert (await engine.store.list_watchlist())[0]['membership_user_id'] == 20
+    engine.client.book.assert_not_awaited()
+    engine.notifier.send.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -381,7 +270,7 @@ async def test_plans_claim_capacity_in_opening_order_and_reconcile_once(
         await store.set_meta("membership", regular)
         base = {
             "time": "10:00", "end_time": "11:00", "coach": {},
-            "box_categories": {"name": "Movement"}, "series": {},
+            "box_categories": {"id": 2, "name": "Movement"}, "series": {},
             "enable_registration_time": 168, "booking_option": "insertScheduleUser",
             "user_booked": None, "user_in_standby": None,
         }
@@ -390,7 +279,7 @@ async def test_plans_claim_capacity_in_opening_order_and_reconcile_once(
             await store.upsert_sessions([{
                 **base, "id": sid, "date": f"2026-10-{3 + offset:02d}",
             }])
-            await store.watch(sid, membership_user_id=20)
+            await store.watch(sid)
 
         settings = SimpleNamespace(
             preferred_membership_id=20,
@@ -401,6 +290,7 @@ async def test_plans_claim_capacity_in_opening_order_and_reconcile_once(
             send=AsyncMock(return_value=True))
         syncer = SimpleNamespace(membership_user_id=20, memberships=[])
         engine = RulesEngine(store, object(), syncer, notifier)
+        await seed_policies(engine)
 
         status = await engine.quota_status(True, target_date="2026-10-03")
         assert status["quota"] == 5
@@ -411,15 +301,12 @@ async def test_plans_claim_capacity_in_opening_order_and_reconcile_once(
         }
         assert status["uncovered_plans"] == list(range(105, 110))
 
-        await engine._reconcile_pending_memberships()
+        await engine.reconcile_planned_quota()
+        await engine.reconcile_planned_quota()
         watches = await store.list_watchlist(pending_only=True)
-        assert [w["membership_user_id"] for w in watches[:5]] == [10] * 5
-        assert [w["membership_user_id"] for w in watches[5:]] == [20] * 5
+        assert all(w['membership_user_id'] is None for w in watches)
         notifier.send.assert_awaited_once()
-        text = notifier.send.await_args.args[0]
-        assert "5 תזמונים הועברו אוטומטית" in text
-        assert "5 תזמונים נשארו ללא כיסוי" in text
-        assert "לא אנסה להזמין אותם" in text
+        assert 'דורשים בדיקה' in notifier.send.await_args.args[0]
     finally:
         await store.close()
 
@@ -453,7 +340,7 @@ async def test_quota_plans_autobook_rules_but_excludes_vacation(
         base = {
             "time": "09:30", "end_time": "10:30",
             "coach": {"first_name": "ליאור", "last_name": "מרפי"},
-            "box_categories": {"name": "Flex- Back\\Arches"}, "series": {},
+            "box_categories": {"id": 3, "name": "Flex- Back\\Arches"}, "series": {},
             "enable_registration_time": 168,
             "booking_option": "insertScheduleUser",
             "user_booked": None, "user_in_standby": None,
@@ -478,6 +365,7 @@ async def test_quota_plans_autobook_rules_but_excludes_vacation(
         syncer = SimpleNamespace(
             membership_user_id=10, memberships=[], box_id=7315)
         engine = RulesEngine(store, object(), syncer, notifier)
+        await seed_policies(engine)
 
         status = await engine.quota_status(True)
         assert status["planned_autobook"] == 2
@@ -595,11 +483,12 @@ async def test_late_cancel_warning_retries_until_delivery(monkeypatch):
 
 
 class DigestStore:
-    def __init__(self, sessions=None, rules=None, blocked=None):
+    def __init__(self, sessions=None, rules=None, blocked=None, plans=None):
         self.sessions = sessions or {}
         self.rules = rules or []
         self.blocked = blocked or set()
         self.prompts = []
+        self.plans = plans or []
 
     async def get_sessions(self, date_from=None, date_to=None, mine=False, **kwargs):
         rows = [
@@ -616,6 +505,11 @@ class DigestStore:
                 or s.get("user_in_standby") is not None
             ]
         return rows
+
+    async def automation_skip_ids(self): return set()
+    async def planned_sessions(self, start, end):
+        return [p for p in self.plans if start <= p['date'] <= end]
+    async def autobook_attempted(self, sid): return False
 
     async def list_rules(self):
         return self.rules
@@ -694,6 +588,23 @@ def fixed_digest_clock(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_digest_shows_pinned_morning_class_alongside_evening_suggestions(monkeypatch):
+    fixed_digest_clock(monkeypatch)
+    morning = digest_session(40, '2026-09-09', '09:30', 'Movement', coach='Noa', advance_hours=72)
+    evening = digest_session(41, '2026-09-09', '20:15', 'HS', coach='Noa')
+    rule = {'enabled':True, 'mode':'notify', 'categories':[], 'coaches':[], 'weekdays':[]}
+    store = DigestStore({'2026-09-09':[morning, evening]}, [rule], plans=[morning])
+    notifier = DigestNotifier()
+    engine = RulesEngine(store, object(), DigestSyncer(), notifier)
+    engine.quota_status = AsyncMock(return_value=None)
+    await engine.nightly_digest()
+    text = notifier.sent[0][0]
+    assert 'כבר מתוכנן לך באותו יום (טרם הוזמן)' in text
+    assert '09:30' in text and 'Movement' in text and 'Noa' in text
+    assert [p[0][1] for p in store.prompts] == [41]
+
+
+@pytest.mark.asyncio
 async def test_nightly_message_combines_tomorrow_and_future_sections(monkeypatch):
     fixed_digest_clock(monkeypatch)
     notify_rule = {
@@ -733,7 +644,7 @@ async def test_nightly_message_combines_tomorrow_and_future_sections(monkeypatch
     assert "📌 מחר\n• 20:15 · Booked · Dana" in text
     assert "⏳ עדיין בהמתנה\n• 18:00 · Waitlisted · Dana · מקום 3" in text
     assert "🗓️ ההרשמה נפתחת מחר ליום רביעי, 9.9" in text
-    assert "🤖 יוזמן אוטומטית — אין צורך לעשות דבר" in text
+    assert "🤖 מתוכנן להזמנה אוטומטית — בכפוף לכיסוי המנוי והמכסה" in text
     assert "🔔 תזכורת להזמנה — השיעור הזה לא יוזמן אוטומטית" in text
     assert "כדי לתזמן הזמנה, בחר שיעור:" in text
     assert len(buttons) == 2  # one manual action row + HA batch-info row
@@ -817,7 +728,7 @@ async def test_future_only_all_automatic_needs_no_buttons(monkeypatch):
     assert len(notifier.sent) == 1
     text, buttons, kind, _ = notifier.sent[0]
     assert "📌 מחר" not in text
-    assert "🤖 יוזמן אוטומטית — אין צורך לעשות דבר" in text
+    assert "🤖 מתוכנן להזמנה אוטומטית — בכפוף לכיסוי המנוי והמכסה" in text
     assert "🔔 תזכורת להזמנה" not in text
     assert buttons is None
     assert kind == "digest"

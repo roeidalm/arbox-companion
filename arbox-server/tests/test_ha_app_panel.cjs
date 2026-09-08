@@ -172,7 +172,7 @@ test("overlapping refreshes coalesce without invalidating slow reads", async () 
   };
   const first = panel.load();
   const second = panel.load();
-  assert.equal(count, 3);
+  assert.equal(count, 4);
   resolve();
   await Promise.all([first, second]);
   assert.equal(panel.context().studio_id, 8);

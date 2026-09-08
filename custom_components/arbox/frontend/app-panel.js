@@ -1,6 +1,7 @@
 import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.1.0";
-import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.1.0';
+import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.2.0';
 import {renderJournal, journalSignature} from './panel-journal.js?v=3.1.0';
+import {policySummary, policyDialog} from './membership-policy.js';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
@@ -70,6 +71,7 @@ export function sessionStatus(s) {
     return [STATUS[s.status] || s.status, hasFeedback(s) ? "reviewed" : ""];
   if (s.user_booked) return ["✓ מוזמן", "booked"];
   if (s.user_in_standby) return ["בהמתנה", "waiting"];
+  if (s.planning && s.planning.state !== 'ready') return ["⚠ דורש בדיקה", "warning"];
   if (s.watched) return ["⏳ מתוזמן", "planned"];
   if (s.automation_skipped) return ["⏭ דולג הפעם", "skipped"];
   if (s.autobook_blocked_by_vacation) return ["🏖 חופשה", "vacation"];
@@ -320,9 +322,9 @@ export class ArboxAppPanel extends HTMLElement {
     const generation = ++this._generation;
     const tab = this._tab;
     const resources = {
-      overview: ["summary", "me", "journal"],
+      overview: ["summary", "me", "journal", "membership_policies"],
       schedule: ["summary", "schedule", "facets"],
-      mine: ["summary", "me"],
+      mine: ["summary", "me", "membership_policies"],
       journal: ["summary", "history", "journal"],
       automations: ["summary", "rules", "vacations", "facets"],
     }[tab];
@@ -577,7 +579,7 @@ export class ArboxAppPanel extends HTMLElement {
     const wrap = node("section", null, "quota-card quota-compact");
     const heading = node("div", null, "section-heading");
     heading.append(node("h2", "המנויים והמכסה שלי"));
-    if (q) heading.append(node("strong", `${q.used ?? 0} / ${q.quota ?? "—"}`, "quota-number"));
+    if (q) heading.append(node("strong", `${q.used ?? 0} אימונים החודש`, "quota-number"));
     wrap.append(heading);
     const metrics = (values, personal = false) => {
       const labels = personal
@@ -599,7 +601,9 @@ export class ArboxAppPanel extends HTMLElement {
         const part = node("span", null, kind); part.style.flexGrow = String(count); bar.append(part);
       }
       wrap.append(bar, metrics(q));
-      if (q.overcommitted) wrap.append(node("p", "התכנון עולה על המכסה הזמינה", "warning"));
+      if (q.overcommitted) wrap.append(node("p", "יש תכנונים ללא מכסה במנוי המתאים", "warning"));
+      if (q.unresolved_plans?.length) wrap.append(node("p", `${q.unresolved_plans.length} תכנונים דורשים השלמה — ההרשמה שלהם מושהית`, "warning"));
+      if (q.unattributed_sessions?.length) wrap.append(node("p", `${q.unattributed_sessions.length} אימונים טרם שויכו למנוי. נדרש סנכרון ובירור`, "warning"));
     } else wrap.append(node("p", "לא קיימת מכסה מחושבת למנוי הזה."));
     const members = this._data.summary?.memberships || [];
     const details = node("details", null, "membership-details");
@@ -614,12 +618,27 @@ export class ArboxAppPanel extends HTMLElement {
       if (data) title.append(node("b", `${data.used ?? 0} / ${data.quota ?? "—"}`, "membership-count"));
       card.append(title);
       card.append(node("small", [m.active === false ? "לא פעיל" : "פעיל", m.recurring ? "מנוי מתחדש" : "כרטיסייה", m.end ? `בתוקף עד ${fmtDate(m.end)}` : ""].filter(Boolean).join(" · "), "muted"));
-      if (data) card.append(metrics(data, true));
+      if (data) {
+        card.append(metrics(data, true));
+        card.append(node("small", `תקופת המכסה: ${data.period_start} – ${data.period_end}`, "muted"));
+        const configured = this._data.membership_policies?.memberships?.find(x => x.id === m.id) || data;
+        card.append(policySummary({...configured, policy: {...configured.policy, ...(data.policy?.state !== "ready" ? {state: data.policy.state, reason: data.policy.reason} : {})}}, this.canWrite() ? () => this.editMembershipPolicy(configured) : null));
+      }
       else card.append(node("p", "לא קיימת מכסה מחושבת למנוי הזה.", "muted"));
       details.append(card);
     }
     if (members.length) wrap.append(details);
     return wrap;
+  }
+  editMembershipPolicy(member) {
+    const context = {...this.context()};
+    const entry = this._entry.entry_id;
+    policyDialog({host: this.shadowRoot, member,
+      categories: this._data.membership_policies?.categories || [],
+      save: async data => {
+        if (entry !== this._entry.entry_id) throw new Error("חיבור Arbox השתנה. פתחו את ההגדרה מחדש");
+        return this.act('membership_policy_save', {...data, membership_id: member.id}, context, {close: false});
+      }});
   }
   render_overview() {
     const next = this._data.summary?.next_class;
@@ -976,11 +995,12 @@ export class ArboxAppPanel extends HTMLElement {
       node("span", sessionStatus(s)[0], "badge"),
       node("p", s.category_bio || "הסטודיו לא הוסיף תיאור לשיעור הזה."),
     );
+    const planning = s.planning || this._data.summary?.quota?.plan_states?.[String(s.schedule_id)];
     const past =
       this._tab === "journal" ||
       s.booking_option === "past" ||
       `${s.date}T${s.end_time || s.start_time}` < this.studioNow();
-    if (past) {
+    if (past && planning?.state !== 'uncertain') {
       const saved =
         (this._data.journal?.entries || []).find(
           (r) => r.schedule_id === s.schedule_id,
@@ -1072,6 +1092,16 @@ export class ArboxAppPanel extends HTMLElement {
     if (!this.canWrite()) {
       body.append(node("p", "החשבון שלך מוגדר לצפייה בלבד.", "muted"));
       return;
+    }
+    if (planning) {
+      const label = this._data.summary?.memberships?.find(m => m.id === planning.membership_user_id)?.plan;
+      body.append(node("p", [planning.reason, label].filter(Boolean).join(" · "), planning.state === "ready" ? "muted" : "warning"));
+      if (planning.state === 'uncertain') {
+        body.append(button('בדיקת מצב ההזמנה', () => this.act('planning_reconcile', {schedule_id:s.schedule_id}, context)),
+          button('בדקתי בארבוקס: האימון לא מוזמן', () => this.confirm('לחדש את התכנון? יש לאשר רק אחרי שבדקתם בארבוקס שאין הרשמה או המתנה לאימון.',
+            () => this.act('planning_reconcile', {schedule_id:s.schedule_id, confirm_not_booked:true}, context))));
+        return;
+      }
     }
     let membership;
     const members = (this._data.summary?.memberships || []).filter(

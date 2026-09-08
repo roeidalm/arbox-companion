@@ -28,4 +28,6 @@ test('status handles null booking fields and distinguishes skipped and vacation 
  assert.equal(calendarStatus({autobook_blocked_by_vacation:true,autobook_match:true}).key,'vacation');
  assert.equal(calendarStatus({planning_source:'scheduled'}).key,'scheduled');
  assert.equal(calendarStatus({planning_source:'autobook'}).key,'automatic');
+ assert.equal(calendarStatus({planning_source:'autobook',planning:{state:'no_capacity'}}).key,'review');
+ assert.equal(calendarStatus({planning_source:'uncertain',planning:{state:'uncertain'}}).key,'review');
 });

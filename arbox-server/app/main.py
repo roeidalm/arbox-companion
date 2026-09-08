@@ -106,6 +106,7 @@ async def lifespan(app: FastAPI):
     notifier.studio_context = lambda: (syncer.studio_name, syncer.studio_count)
     rules_engine = RulesEngine(store, client, syncer, notifier)
     syncer.on_standby_promoted = rules_engine.on_standby_promoted
+    syncer.on_sync = rules_engine.review_plans
 
     app.state.settings = settings
     app.state.store = store

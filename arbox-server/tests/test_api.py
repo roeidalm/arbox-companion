@@ -233,7 +233,7 @@ def test_calendar_marks_rule_match_as_vacation_not_autobook():
     assert annotated["autobook_blocked_by_vacation"] is True
 
 
-def test_scheduling_over_quota_requires_confirmation_before_storing(client):
+def test_scheduling_over_quota_preserves_intent_but_never_bypasses_gate(client):
     day = (date.today() + timedelta(days=14)).isoformat()
     store = client.app.state.store
     client.portal.call(store.upsert_sessions, [{
@@ -248,6 +248,7 @@ def test_scheduling_over_quota_requires_confirmation_before_storing(client):
         "quota": 5, "used": 1, "reserved": 0,
         "planned": 4, "planned_total": 5,
         "overcommitted": True, "uncovered_plans": [8801],
+        "plan_states": {"8801": {"state":"no_capacity", "reason":"המכסה מלאה — ההרשמה מושהית"}},
     })
     engine.schedule_openings = AsyncMock()
     engine.watchlist_tick = AsyncMock()
@@ -258,12 +259,10 @@ def test_scheduling_over_quota_requires_confirmation_before_storing(client):
         "schedule_id": 8801, "allow_standby": True,
     })
     assert warning.status_code == 200
-    assert warning.json()["needs_confirm"] is True
-    assert warning.json()["confirm_kind"] == "quota"
-    assert warning.json()["conflict"].startswith("⚠️ חריגה מהמכסה\n")
-    assert "1 נוצלו · 0 מוזמנים · 5 מתוכננים · מכסה 5" in warning.json()["conflict"]
-    assert warning.json()["conflict"].endswith("לתזמן בכל זאת?")
-    assert client.portal.call(store.list_watchlist) == []
+    assert warning.json()['ok'] is True
+    assert warning.json()['planning']['state'] == 'no_capacity'
+    assert 'מושהית' in warning.json()['quota_note']
+    assert len(client.portal.call(store.list_watchlist)) == 1
 
     accepted = client.post("/api/watchlist", headers=headers, json={
         "schedule_id": 8801, "allow_standby": True,

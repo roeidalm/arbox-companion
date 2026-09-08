@@ -55,6 +55,20 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 "action": "skip", "studio_id": 8, "data": data})
         self.server._session.request.assert_not_called()
 
+    async def test_membership_editor_requires_action_access_and_uses_fixed_path(self):
+        self.entry.options[api.VIEW_USERS] = ['user']
+        msg = {'id':1, 'entry_id':'one', 'action':'membership_policy_save', 'studio_id':8,
+               'data':{'membership_id':20, 'category_ids':[1], 'limits':[{'count':5,'period':'month'}], 'fingerprint':'revision'}}
+        await api.ws_action.__wrapped__(self.hass,self.conn,msg)
+        self.server._session.request.assert_not_called()
+        self.entry.options[api.ACTION_USERS] = ['user']
+        await api.ws_action.__wrapped__(self.hass,self.conn,msg)
+        args,kw = self.server._session.request.call_args
+        self.assertEqual(args,('PUT','http://internal-arbox:8000/api/membership-policies/20'))
+        self.assertEqual(kw['headers']['X-Arbox-Studio-Id'],'8')
+        self.assertEqual(kw['json']['fingerprint'],'revision')
+        self.server._session.request.assert_called_once()
+
     async def test_read_cannot_trigger_refresh_and_readonly_cannot_mutate(self):
         self.entry.options[api.VIEW_USERS] = ["user"]
         await api.ws_read.__wrapped__(self.hass, self.conn, {"id": 1, "entry_id": "one",

@@ -42,6 +42,7 @@ class Syncer:
         self.store = store
         self.settings = settings
         self.on_standby_promoted = on_standby_promoted
+        self.on_sync = None
         self._lock = ReentrantAsyncLock()
         self.box_id: int | None = None
         self.location_id: int | None = None
@@ -280,19 +281,22 @@ class Syncer:
         """
         assert self.box_id
         memberships = await self.client.memberships(self.box_id)
-        active = [m for m in memberships if m.get("active")] or memberships
-        if not active:
+        if not memberships:
             await self.store.set_meta("memberships", [])
+            await self.store.set_meta("membership", None)
+            self.memberships = []
+            self.membership_user_id = None
             return None
-        snapshots = self._membership_snapshots(active)
+        snapshots = self._membership_snapshots(memberships)
         await self.store.set_meta("memberships", snapshots)
         self.memberships = snapshots
 
         preferred = self.settings.preferred_membership_id if self.settings else None
         legacy = self.membership_user_id
+        available = [m for m in snapshots if m.get('active')] or snapshots
         selected = next(
             (m for wanted in (preferred, legacy) if wanted
-             for m in snapshots if m.get("id") == wanted), snapshots[0])
+             for m in available if m.get("id") == wanted), available[0])
         self.membership_user_id = selected["id"]
         await self.store.set_meta("membership", selected)
         identity = await self.store.get_meta("identity") or {}
@@ -357,6 +361,9 @@ class Syncer:
             "info", "sync", f"סנכרון · {len(sessions)} שיעורים", f"{start}–{end}")
 
         await self._detect_standby_promotions(before, sessions)
+        await self.store.set_meta("quota_cache", None)
+        if self.on_sync:
+            await self.on_sync()
         return len(sessions)
 
     async def _detect_standby_promotions(

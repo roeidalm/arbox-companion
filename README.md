@@ -64,8 +64,8 @@ Upstream refresh is tiered by how fast each thing actually changes:
 - full 14-day window: 2×/day (one `betweenDates` range call), plus a nightly
   roll at 03:05 that drops past days
 - next 48h (free spots, standby position): every 30 min
-- membership inventory: daily, one hour before the nightly digest; all active
-  memberships are tracked and a preferred one is used first
+- membership inventory: daily, one hour before the nightly digest, and before
+  booking; selection follows verified class eligibility and available capacity
 - `⟳` in the UI / `?refresh=1` on the API: stale-while-revalidate background sync
 
 ### Rules & notifications
@@ -89,6 +89,60 @@ Restoring returns the occurrence to the normal booking-window and quota rules.
 HA booked/next-class sensors continue to show actual registrations only.
 
 Standby promotions are detected on every sync and announced.
+
+### Membership eligibility and safe planning
+
+Open **My → membership details → class types and quota** in the app or the HA
+panel. Each membership shows its own used entries, reservations, waiting lists,
+plans and remaining capacity, with the source and validity of its restrictions.
+The monthly overview counts unique workouts; a punch card's allowance covers
+its whole validity period. Unattributed bookings are shown for reconciliation
+and are never charged to a guessed default membership. Waiting lists reserve
+capacity conservatively because the studio can promote them independently.
+
+Restrictions are read from Arbox's membership shop details when available.
+Some studio-issued cards are absent there. Explicit registration errors can
+provide the allowed class names; only unique exact normalized matches to the
+studio's category IDs are used. Unmatched names stay visible. Plan titles are
+not quota evidence, and legacy global quota overrides do not authorize a
+booking. Unsupported formats require an explicit manual definition in the same
+screen. Weekly limits require the studio's actual week start; no weekly-to-monthly
+conversion is made. Manual definitions are scoped to the account, studio,
+membership instance and revision, and must be confirmed again if it changes.
+
+Review happens when a plan is saved, after newly published classes are synced,
+and during the daily membership review. Therefore the warning arrives as soon
+as the system knows the desired occurrence, not at registration opening. It
+cannot warn about a class the studio has not published yet. A plan without
+verified eligibility or enough capacity remains visible as **needs review**;
+the server cannot be told to bypass capacity. Skipping an occurrence or removing
+a pin frees its planned capacity without cancelling an actual registration.
+
+For an existing desired plan with verified quota but unknown eligibility, the
+server may make one early registration attempt per membership revision/category,
+with a maximum of two such attempts per day. It requires a known registration
+window still more than 24 hours away, including advance-registration bonuses.
+This is **not a dry-run API**: an unexpected success is saved as a real booking
+of that desired class and announced. A timing-only rejection does not establish
+eligibility; users can complete missing information immediately. Failed shop
+reads are cached for a day; automatic eligibility older than seven days requires
+review. Existing authentication tokens are reused.
+
+Before booking, the server serializes the operation, refreshes membership history
+and checks the same ledger used by the UI. An interrupted write stays paused
+across restarts and reserves capacity until reconciled. From that class, use
+**Check booking status**, or explicitly confirm you checked Arbox and it is not
+booked before resuming. An absence in a sync never triggers an automatic retry.
+External bookings and studio-side changes can still occur between the check and
+the write; Arbox remains the final authority.
+
+Upgrade the server through its tagged workflow image and Compose first, then
+update the integration to **3.2.0** through HACS and restart HA. No dashboard YAML,
+manual HA file replacement or new browser-to-server access is required. View-only
+HA users cannot edit policy definitions. Older automatically learned global
+category blocks are removed only when their original log evidence identifies
+them; manual blocks and historical decisions remain. Previously failed attempts
+are not silently replayed on upgrade.
 
 Five minutes before a booked class the server asks whether you arrived. The
 answer remains live until midnight; no answer defaults to attended and is

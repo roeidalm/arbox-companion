@@ -15,6 +15,7 @@ export function calendarRange(date, view) {
 export function calendarStatus(s) {
   if(s.user_booked!=null)return {key:'booked',label:'מוזמן',icon:'✓'};
   if(s.user_in_standby!=null)return {key:'waiting',label:'בהמתנה',icon:'◷'};
+  if(s.planning && s.planning.state !== 'ready')return {key:'review',label:'דורש בדיקה',icon:'⚠'};
   if(s.watched||s.planning_source==='scheduled')return {key:'scheduled',label:'מתוזמן',icon:'⌛'};
   if(s.automation_skipped)return {key:'skipped',label:'דולג הפעם',icon:'↷'};
   if(s.autobook_blocked_by_vacation)return {key:'vacation',label:'חופשה',icon:'☀'};
@@ -32,7 +33,7 @@ export function calendarSignature(panel){return JSON.stringify([panel._date,pane
 function counts(rows) {
   const result={};for(const s of rows){const status=calendarStatus(s);if(status)result[status.key]=(result[status.key]||0)+1;}return result;
 }
-const STATES=[['booked','מוזמנים','✓'],['waiting','בהמתנה','◷'],['scheduled','מתוזמנים','⌛'],['automatic','אוטומטיים','↻'],['skipped','דולגו','↷'],['vacation','בחופשה','☀']];
+const STATES=[['booked','מוזמנים','✓'],['waiting','בהמתנה','◷'],['review','דורשים בדיקה','⚠'],['scheduled','מתוזמנים','⌛'],['automatic','אוטומטיים','↻'],['skipped','דולגו','↷'],['vacation','בחופשה','☀']];
 function badges(rows,compact=false){
   const n=el('div',null,'pc-counts'),c=counts(rows);
   for(const [key,text,icon]of STATES)if(c[key]){const b=el('span',`${icon} ${c[key]}${compact?'':` ${text}`}`,`pc-state pc-${key}`);b.title=`${c[key]} ${text}`;b.setAttribute('aria-label',b.title);n.append(b);}return n;
@@ -45,7 +46,7 @@ function list(panel,rows,target){
   }
 }
 export function renderCalendar(panel,{mine=false}={}) {
-  if(!panel.shadowRoot.querySelector('link[data-calendar-style]')){const css=el('link');css.rel='stylesheet';css.href=new URL('./panel-calendar.css?v=3.1.0',import.meta.url).href;css.dataset.calendarStyle='';panel.shadowRoot.append(css);}
+  if(!panel.shadowRoot.querySelector('link[data-calendar-style]')){const css=el('link');css.rel='stylesheet';css.href=new URL('./panel-calendar.css?v=3.2.0',import.meta.url).href;css.dataset.calendarStyle='';panel.shadowRoot.append(css);}
   const view=(mine?panel._mineView:panel._view)||(mine?'all':'day');
   const today=panel.studioNow().slice(0,10),anchor=panel._date||today;
   const setView=v=>{if(mine)panel._mineView=v;else panel._view=v;panel._selectedDay=anchor;panel.load();};

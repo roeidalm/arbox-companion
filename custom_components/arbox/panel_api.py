@@ -21,9 +21,12 @@ READS = {
     "facets": ("/facets", set()), "history": ("/history", set()),
     "journal": ("/journal", set()), "rules": ("/rules", set()),
     "vacations": ("/vacations", set()), "watchlist": ("/watchlist", set()),
+    "membership_policies": ("/membership-policies", set()),
 }
 # Method, path, path identifier, permitted JSON fields. Identifiers must be integers.
 ACTIONS = {
+    "planning_reconcile": ("POST", "/planning/{id}/reconcile", "schedule_id", {"confirm_not_booked"}),
+    "membership_policy_save": ("PUT", "/membership-policies/{id}", "membership_id", {"category_ids", "limits", "fingerprint"}),
     "book": ("POST", "/book", None, {"schedule_id", "membership_user_id"}),
     "standby": ("POST", "/standby", None, {"schedule_id", "membership_user_id"}),
     "cancel": ("POST", "/cancel", None, {"schedule_id", "late_cancel", "reason_code", "reason_text"}),

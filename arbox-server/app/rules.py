@@ -26,7 +26,7 @@ from .notify import Notifier
 from .store import NO_SCHEDULE, Store
 from .studio_context import ReentrantAsyncLock
 from .sync import FULL_WINDOW_DAYS, Syncer
-from .membership_policy import MembershipPolicy
+from .membership_policy import MembershipPolicy, eligible
 from .quota_planner import plan_quota, REASONS
 
 _LOGGER = logging.getLogger(__name__)
@@ -204,6 +204,43 @@ def fmt_class(s: dict) -> str:
     if s.get("coach_name"):
         bits.append(s["coach_name"])
     return " · ".join(bits)
+
+
+def planning_notice(problems: list[tuple[dict, dict, dict]]) -> tuple[str, list[str]]:
+    """A short notice; show a quota fraction only for one matching monthly plan."""
+    capacity = all(state.get('state') == 'no_capacity' for _, state, _ in problems)
+    heading = '🎟️ אין יתרה במנוי לאימונים האלה' if capacity else '⏸️ אימונים דורשים בדיקה'
+    breakdown = ''
+    matches = {}
+    if capacity and len({s['date'][:7] for s, _, _ in problems}) == 1:
+        for session, _, quota in problems:
+            for member in quota.get('memberships', []):
+                if (member.get('active') and eligible(member, session)
+                        and (not member.get('start') or member['start'] <= session['date'])
+                        and (not member.get('end') or member['end'] >= session['date'])
+                        and session.get('membership_user_id') in (None, member['id'])):
+                    matches[member['id']] = member
+        if len(matches) == 1:
+            m = next(iter(matches.values()))
+            committed = sum(m.get(k, 0) for k in ('used', 'reserved', 'planned', 'standby', 'uncertain'))
+            if m.get('period') == 'month' and m.get('quota') is not None and committed >= m['quota']:
+                heading = f"🎟️ המכסה החודשית מלאה — {committed}/{m['quota']}"
+                breakdown = f"{m['used']} נוצלו · {m['reserved']} מוזמנים · {m['planned']} " + ('מתוכנן' if m['planned'] == 1 else 'מתוכננים')
+                if m.get('standby'): breakdown += f" · {m['standby']} בהמתנה"
+                if m.get('uncertain'): breakdown += f" · {m['uncertain']} בבירור"
+    count = len(problems)
+    subject = 'אימון אחד נשאר' if count == 1 else 'שני אימונים נשארו' if count == 2 else f'{count} אימונים נשארו'
+    introduction = subject + ' ללא כיסוי:' if capacity else 'נדרשת בדיקה לפני ההרשמה:'
+    lines = [heading] + ([breakdown] if breakdown else []) + ['', introduction]
+    bold = [heading, introduction]
+    for session, state, _ in problems:
+        when = fmt_when(session)
+        lines += ['', when, ' · '.join(filter(None, [session.get('category_name') or 'שיעור', session.get('coach_name')]))]
+        bold.append(when)
+        if not capacity:
+            lines.append(state.get('reason') or 'יש לבדוק את פרטי המנוי')
+    footer = 'נשמרו בתכנון · ממתינים למכסה' if capacity else 'נשמרו בתכנון · ההרשמה מושהית'
+    return '\n'.join(lines) + '\n\n\n' + footer, bold
 
 
 def fmt_vac_range(v: dict) -> str:
@@ -653,22 +690,19 @@ class RulesEngine:
                     current[sid] = state.get("state")
                     held.setdefault(sid, plan['date'])
                     if previous.get(sid) != current[sid]:
-                        problems.append(f"• {fmt_class(plan)}\n  {state.get('reason')}")
+                        problems.append((plan, state, status))
         # Save before sending: an uncertain delivery must not become a flood.
         await self.store.set_meta(key, current)
         await self.store.set_meta(held_key, {sid: day for sid, day in held.items() if day >= date.today().isoformat()})
         if problems:
             await self.store.log_event("warn", "quota", "תכנונים דורשים בדיקה",
-                                       "\n".join(problems), notified=True)
-            buttons = [[{"text": "בדיקת המנויים", "uri": "/arbox#mine", "ha_only": True}]]
+                                       "\n".join(f"{fmt_class(p)} · {state.get('reason')}" for p, state, _ in problems), notified=True)
+            buttons = [[{"text": "מעבר לבדיקה ותיקון", "uri": "/arbox#mine", "ha_only": True}]]
             base = getattr(self.settings, "base_url", "")
             if base.startswith(("https://", "http://")):
-                buttons[0].append({"text": "בדיקת המנויים", "uri": base.rstrip("/") + "/mine", "tg_only": True})
-            await self.notifier.send(
-                "⚠️ תכנונים דורשים בדיקה\n" + "\n".join(problems) +
-                "\n\nהתכנון נשמר. לתיקון: Arbox ← שלי ← פירוט המנויים. "
-                "אפשר לבחור שיעורים ומכסה למנוי, לשנות מנוי או לבטל תכנון.",
-                buttons, kind="membership")
+                buttons[0].append({"text": "מעבר לבדיקה ותיקון", "uri": base.rstrip("/") + "/mine", "tg_only": True})
+            text, bold = planning_notice(problems)
+            await self.notifier.send(text, buttons, kind="membership", telegram_bold=bold)
 
     async def _membership_candidates(
         self, target_date: str | date | None = None,

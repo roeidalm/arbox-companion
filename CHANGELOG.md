@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.51.1
+
+- Make planning notices easier to read: separate workout details, show the
+  relevant monthly capacity, and offer one clear review action. Keep the footer
+  short and preserve notification deduplication when upgrading.
+
 ## 1.51.0
 
 - Match each planned workout to an eligible membership before reserving its

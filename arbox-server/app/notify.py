@@ -157,6 +157,7 @@ class Notifier:
         buttons: list[list[dict]] | None = None,
         kind: str = "system",
         is_answered=None,
+        telegram_bold: list[str] | None = None,
     ) -> bool:
         """Send by kind through the channel orchestration.
 
@@ -175,10 +176,10 @@ class Notifier:
         except (TypeError, ValueError):
             esc = 0
         if not buttons or esc <= 0 or len(eligible) < 2 or is_answered is None:
-            return await self._send_to(eligible, text, buttons)
-        delivered = await self._send_to(eligible[:1], text, buttons)
+            return await self._send_to(eligible, text, buttons, telegram_bold=telegram_bold)
+        delivered = await self._send_to(eligible[:1], text, buttons, telegram_bold=telegram_bold)
         task = asyncio.create_task(
-            self._escalate(eligible[1:], text, buttons, esc, is_answered)
+            self._escalate(eligible[1:], text, buttons, esc, is_answered, telegram_bold)
         )
         self._esc_tasks.add(task)
         task.add_done_callback(self._esc_tasks.discard)
@@ -269,7 +270,8 @@ class Notifier:
                 raise RuntimeError(f"Telegram sendDocument: {body}")
 
     async def _send_to(
-        self, names: list[str], text: str, buttons: list[list[dict]] | None
+        self, names: list[str], text: str, buttons: list[list[dict]] | None,
+        *, telegram_bold: list[str] | None = None,
     ) -> bool:
         """Deliver to each channel; True if at least one took it.
 
@@ -278,7 +280,7 @@ class Notifier:
         the message carrying it is dead with no way back.
         """
         coros = [
-            self._send_telegram(text, buttons) if n == "telegram"
+            self._send_telegram(text, buttons, **({'bold_lines': telegram_bold} if telegram_bold else {})) if n == "telegram"
             else self._send_ha(text, buttons)
             for n in names
         ]
@@ -299,7 +301,7 @@ class Notifier:
         return len(failed) < len(names)
 
     async def _escalate(
-        self, rest: list[str], text: str, buttons, minutes: int, is_answered
+        self, rest: list[str], text: str, buttons, minutes: int, is_answered, telegram_bold=None
     ) -> None:
         await asyncio.sleep(minutes * 60)
         try:
@@ -309,7 +311,7 @@ class Notifier:
         except Exception as err:  # noqa: BLE001 — escalate anyway
             _LOGGER.error("is_answered check failed: %s", err)
         _LOGGER.info("Escalating unanswered message to: %s", rest)
-        await self._send_to(rest, f"⏰ תזכורת — טרם נענה:\n{text}", buttons)
+        await self._send_to(rest, f"⏰ תזכורת — טרם נענה:\n{text}", buttons, telegram_bold=telegram_bold)
 
     async def send_test(self, channel: str) -> str:
         text = "🏋️ Arbox server — הודעת בדיקה"
@@ -343,7 +345,8 @@ class Notifier:
             raise ValueError("unknown preview channel")
 
     async def _send_telegram(
-        self, text: str, buttons: list[list[dict]] | None, force: bool = False
+        self, text: str, buttons: list[list[dict]] | None, force: bool = False,
+        *, bold_lines: list[str] | None = None,
     ) -> None:
         tg = self.settings.telegram
         if not (tg.get("bot_token") and tg.get("chat_id")):
@@ -353,6 +356,18 @@ class Notifier:
         if not tg.get("enabled") and not force:
             return
         payload: dict = {"chat_id": tg["chat_id"], "text": text}
+        if bold_lines:
+            # Telegram offsets count UTF-16 units, including emoji surrogates.
+            # Entities keep upstream class names as plain text, not markup.
+            offset, entities = 0, []
+            for line in text.splitlines(keepends=True):
+                content = line.rstrip('\r\n')
+                if content in bold_lines:
+                    entities.append({'type': 'bold', 'offset': offset,
+                                     'length': len(content.encode('utf-16-le')) // 2})
+                offset += len(line.encode('utf-16-le')) // 2
+            if entities:
+                payload['entities'] = entities
         rows = [[_telegram_button(b) for b in row if not b.get("ha_only")]
                 for row in (buttons or [])]
         rows = [r for r in rows if r]

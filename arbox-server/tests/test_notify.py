@@ -25,6 +25,35 @@ def test_telegram_button_rejects_an_unusable_shape():
         _telegram_button({"text": "Broken"})
 
 
+async def test_notice_formatting_uses_utf16_entities_without_parsing_class_names(tmp_path):
+    from unittest.mock import AsyncMock
+    from app.notify import Notifier
+    from app.settings import Settings
+
+    settings = Settings(str(tmp_path))
+    settings.update({'telegram': {'enabled': True, 'bot_token': 'test', 'chat_id': 'test'}})
+    sent = []
+    class Response:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def json(self, **kwargs): return {'ok': True}
+    class Transport:
+        def post(self, url, json):
+            sent.append(json)
+            return Response()
+    notifier = Notifier(settings)
+    notifier._http = AsyncMock(return_value=Transport())
+    heading, when = '🎟️ המכסה מלאה', 'חמישי 24.9 · 10:00'
+    text = f'{heading}\n\n{when}\nHS & <Movement>\n\n\nנשמרו בתכנון · ממתינים למכסה'
+    await notifier._send_telegram(text, None, bold_lines=[heading, when])
+    payload = sent[0]
+    assert payload['text'] == text
+    assert 'parse_mode' not in payload
+    encoded = text.encode('utf-16-le')
+    rendered = [encoded[e['offset']*2:(e['offset']+e['length'])*2].decode('utf-16-le') for e in payload['entities']]
+    assert rendered == [heading, when]
+
+
 async def test_journal_uses_one_selected_channel_without_escalation(tmp_path):
     from unittest.mock import AsyncMock
     from app.notify import Notifier

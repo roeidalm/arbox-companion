@@ -306,7 +306,7 @@ async def test_plans_claim_capacity_in_opening_order_and_reconcile_once(
         watches = await store.list_watchlist(pending_only=True)
         assert all(w['membership_user_id'] is None for w in watches)
         notifier.send.assert_awaited_once()
-        assert 'דורשים בדיקה' in notifier.send.await_args.args[0]
+        assert 'ללא כיסוי' in notifier.send.await_args.args[0]
     finally:
         await store.close()
 

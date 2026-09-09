@@ -136,7 +136,7 @@ booked before resuming. An absence in a sync never triggers an automatic retry.
 External bookings and studio-side changes can still occur between the check and
 the write; Arbox remains the final authority.
 
-Upgrade the server to **1.52.0 or newer** through its tagged workflow image and Compose first, then
+Upgrade the server to **1.52.1 or newer** through its tagged workflow image and Compose first, then
 update the integration to **3.3.0** through HACS and restart HA. No dashboard YAML,
 manual HA file replacement or new browser-to-server access is required. View-only
 HA users cannot edit policy definitions. Older automatically learned global

@@ -164,17 +164,22 @@ test("overlapping refreshes coalesce without invalidating slow reads", async () 
   panel.render = () => {};
   let resolve;
   const waiting = new Promise((r) => (resolve = r));
-  let count = 0;
-  panel.read = async () => {
-    count++;
+  const reads = [];
+  panel.read = async (resource) => {
+    reads.push(resource);
     await waiting;
     return { data: {}, context: { studio_id: 8 }, can_write: true };
   };
   const first = panel.load();
+  const firstBatch = [...reads];
+  assert.ok(firstBatch.includes("watchlist"));
+  assert.equal(new Set(firstBatch).size, firstBatch.length);
   const second = panel.load();
-  assert.equal(count, 4);
+  assert.deepEqual(reads, firstBatch, "overlapping refresh must reuse the pending batch");
   resolve();
   await Promise.all([first, second]);
+  assert.deepEqual(reads, firstBatch, "completion must not trigger duplicate reads");
+  assert.deepEqual(Object.keys(panel._data), firstBatch);
   assert.equal(panel.context().studio_id, 8);
 });
 

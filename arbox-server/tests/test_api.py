@@ -304,3 +304,30 @@ def test_completed_session_can_be_classified_from_history(client):
     assert events[-1]["schedule_id"] == 7001
     assert events[-1]["event_type"] == "missed"
     assert events[-1]["reason_text"] == "stuck at work"
+
+
+def test_ha_calendar_export_preserves_event_alarms_location_and_auth(client):
+    headers = {"X-Api-Key": api_key(client)}
+    assert client.get('/api/calendar/export?schedule_id=987').status_code == 401
+    assert client.get('/api/calendar/export?schedule_id=987', headers=headers).status_code == 404
+    store = client.app.state.store
+    client.portal.call(store.upsert_sessions, [{
+        'id': 987, 'date': '2026-09-16', 'time': '08:00', 'end_time': '09:15',
+        'coach': {'id': 1, 'first_name': 'Coach', 'last_name': None},
+        'box_categories': {'id': 2, 'name': 'Movement'}, 'series': {},
+        'booking_option': 'insertScheduleUser', 'user_booked': None,
+    }])
+    client.portal.call(store.set_meta, 'identity', {'studio_name': 'Studio', 'address': 'Test street'})
+    client.app.state.settings.update({'calendar_alarms': [30, 60]})
+    result = client.get('/api/calendar/export?schedule_id=987', headers=headers)
+    assert result.status_code == 200
+    exported = result.json()
+    assert 'BEGIN:VALARM' in exported['ics']
+    assert 'LOCATION:Studio\\, Test street' in exported['ics']
+    # Same renderer/fields as the existing links, including configured alarms.
+    import re
+    clean = lambda text: re.sub(r'DTSTAMP:[^\r\n]+', '', text)
+    assert clean(exported['ics']) == clean(client.get('/api/calendar/event/987.ics').text)
+    google = client.get('/api/calendar/event/987/google', follow_redirects=False)
+    assert exported['google'] == google.headers['location']
+    assert api_key(client) not in result.text

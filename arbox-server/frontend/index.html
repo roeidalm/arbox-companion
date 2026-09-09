@@ -14,8 +14,9 @@
        style attributes, and blocking them breaks the date and quota rows. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Arbox — לוח שיעורים</title>
-<link rel="stylesheet" href="/static/style.css?v=2.58.0">
+<link rel="stylesheet" href="/static/style.css?v=2.62.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
+<link rel="stylesheet" href="/static/membership-ui.css?v=1">
 </head>
 <body>
 <header>
@@ -78,7 +79,7 @@
           <button class="seg-btn" data-mode="month">חודש</button>
         </div>
       </div>
-      <div class="refresh-bar">
+      <details class="schedule-sync"><summary>סנכרון טווח נוסף מול Arbox</summary><div class="refresh-bar">
         <span class="lbl">רענן מול Arbox:</span>
         <button class="rbtn" data-days="0">היום</button>
         <button class="rbtn" data-days="1">מחר</button>
@@ -91,7 +92,8 @@
           <button class="rbtn" id="refRange">רענן טווח</button>
         </span>
       </div>
-      <div class="chips" id="daypartChips"></div>
+      </details>
+      <div class="chips" id="daypartChips" aria-label="שעות היום"></div>
       <div class="chips" id="coachChips"></div>
       <div class="chips" id="categoryChips"></div>
     </div>
@@ -527,27 +529,24 @@
     </div>
 
     <div class="pane" data-pane="studio" hidden>
-      <p class="pane-intro">כל מה ששייך לסטודיו הנבחר: מעבר בין סטודיואים,
-         מנויים, סדר השימוש בהם ומכסת הכניסות.</p>
+      <p class="pane-intro">המנויים וסוגי השיעורים שלהם, במקום אחד. פתחו מנוי כדי לערוך.</p>
+      <div class="card"><h2>המנויים שלי</h2><div id="studioMemberships"></div></div>
       <div class="cards-2 studio-settings-grid">
         <div class="card">
           <h2>הסטודיו הנבחר</h2>
           <div id="profStudio" class="kv"></div>
         </div>
-        <div class="card">
-          <h2>המנויים בסטודיו הזה</h2>
+        <details class="card"><summary>פרטי חיוב ותוקף המנויים</summary>
           <div id="profMembership" class="kv"></div>
-        </div>
-        <div class="card">
-          <h2>סדר שימוש במנויים</h2>
+        </details>
+        <details class="card"><summary>סדר שימוש במנויים</summary>
           <label>מנוי בעדיפות ראשונה
             <select id="preferredMembership"></select>
           </label>
-          <div id="membershipOptions" class="hint"></div>
-        </div>
-        <div class="card">
-          <h2>מכסת כניסות</h2>
-          <div id="profQuotaStatus" class="kv"></div>
+          <div id="membershipOptions" class="hint" hidden></div>
+        </details>
+        <details class="card"><summary>התאמות מכסה חודשית</summary>
+          <div id="profQuotaStatus" hidden></div>
           <label>כניסות בחודש (מהמנוי)
             <input id="monthlyQuota" type="number" min="0" max="99" style="width:4.5em">
           </label>
@@ -556,20 +555,18 @@
           </label>
           <p class="hint">‏0 = חישוב אוטומטי מהמנוי. מכסה חריגה חלה רק על
              החודש הנוכחי; בחודש הבא חוזרים למכסה הרגילה.</p>
-        </div>
-        <div class="card wide">
-          <h2>קטגוריות חסומות בסטודיו הזה</h2>
+        </details>
+        <details class="card wide"><summary>קטגוריות חסומות בסטודיו הזה</summary>
           <div id="blockedList" class="chips"></div>
           <div class="field-row">
             <input id="blockedNew" placeholder="שם קטגוריה מדויק">
             <button id="blockedAdd" type="button">הוסף</button>
           </div>
-          <p class="hint">הרשימה מתמלאת לבד כש-Arbox מסרבת להזמנה בגלל
-             המנוי. היא נשמרת בנפרד לכל סטודיו.</p>
-        </div>
+          <p class="hint">חסימות לפי מנוי אינן חוסמות מנויים אחרים. חסימה ידנית חלה על כל הסטודיו.</p>
+        </details>
       </div>
       <div class="pane-actions">
-        <button class="settingsSave primary">שמור מנויים ומכסה</button>
+        <button class="settingsSave primary">שמור סדר שימוש והתאמות</button>
         <p class="settingsMsg msg"></p>
       </div>
     </div>
@@ -787,6 +784,6 @@
 
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
-<script src="/static/app.js?v=2.61.0"></script>
+<script src="/static/app.js?v=2.62.0"></script>
 </body>
 </html>

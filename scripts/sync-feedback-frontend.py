@@ -8,7 +8,7 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--check', action='store_true')
 args = parser.parse_args()
-for name in ('feedback-form.js', 'feedback.css', 'membership-policy.js'):
+for name in ('feedback-form.js', 'feedback.css', 'membership-policy.js', 'membership-ui.js', 'membership-ui.css', 'filter-picker.js'):
     source = root / 'arbox-server' / 'frontend' / name
     target = root / 'custom_components' / 'arbox' / 'frontend' / name
     if args.check:

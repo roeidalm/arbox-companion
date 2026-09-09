@@ -1,3 +1,4 @@
+import {filterPicker, matchesFilters} from './filter-picker.js?v=1';
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const dateOf = value => new Date(`${value}T12:00:00`);
 const add = (value, days) => {const d=dateOf(value);d.setDate(d.getDate()+days);return iso(d);};
@@ -46,7 +47,7 @@ function list(panel,rows,target){
   }
 }
 export function renderCalendar(panel,{mine=false}={}) {
-  if(!panel.shadowRoot.querySelector('link[data-calendar-style]')){const css=el('link');css.rel='stylesheet';css.href=new URL('./panel-calendar.css?v=3.2.0',import.meta.url).href;css.dataset.calendarStyle='';panel.shadowRoot.append(css);}
+  if(!panel.shadowRoot.querySelector('link[data-calendar-style]')){const css=el('link');css.rel='stylesheet';css.href=new URL('./panel-calendar.css?v=3.3.0',import.meta.url).href;css.dataset.calendarStyle='';panel.shadowRoot.append(css);}
   const view=(mine?panel._mineView:panel._view)||(mine?'all':'day');
   const today=panel.studioNow().slice(0,10),anchor=panel._date||today;
   const setView=v=>{if(mine)panel._mineView=v;else panel._view=v;panel._selectedDay=anchor;panel.load();};
@@ -68,21 +69,34 @@ export function renderCalendar(panel,{mine=false}={}) {
     arrows.append(previous,btn('היום',()=>navigate(today)),next);controls.append(arrows);
     const wrap=el('label',null,'pc-date'),input=el('input');input.type='date';input.value=anchor;input.setAttribute('aria-label','בחירת תאריך');input.dataset.focusKey='calendar-date';input.onchange=()=>{if(input.value)navigate(input.value);};wrap.append(input);controls.append(wrap);
   }
-  root.append(controls);
+  const tools = mine ? el('details',null,'pc-mine-tools') : root;
+  if(mine) {
+    tools.open = !!panel._mineToolsOpen;
+    tools.ontoggle = () => {panel._mineToolsOpen = tools.open;};
+    tools.append(el('summary', `סינון ותצוגת לוח${view !== 'all' ? ' · '+({day:'יום',week:'שבוע',month:'חודש'}[view]) : ''}`));
+    root.append(tools);
+  }
+  tools.append(controls);
   if(view!=='all')root.append(el('h2',view==='month'?dateOf(anchor).toLocaleDateString('he-IL',{month:'long',year:'numeric'}):view==='week'?`${label(range.date_from)} – ${label(range.date_to)}`:label(anchor),'pc-title'));
   const all=panel.rows().slice().sort((a,b)=>`${a.date}${a.start_time||''}`.localeCompare(`${b.date}${b.start_time||''}`));
-  const filters=el('details',null,'pc-filters');filters.open=!!panel._calendarFiltersOpen;
-  filters.ontoggle=()=>{panel._calendarFiltersOpen=filters.open;};
-  const filterCount=Object.values(panel._filters||{}).filter(Boolean).length;
-  filters.append(el('summary',filterCount?`סינון · ${filterCount} פעילים`:'סינון לפי שיעור ומאמן/ת'));
-  const fields=el('div',null,'pc-filter-fields');
-  for(const[key,text]of[['category_name','שיעור'],['coach_name','מאמן/ת']])fields.append(panel.select(text,[['','הכול'],...[...new Set(all.map(s=>s[key]).filter(Boolean))].sort().map(x=>[x,x])],panel._filters?.[key],v=>{panel._filters={...panel._filters,[key]:v};panel.render();}));
-  filters.append(fields);root.append(filters);
-  const rows=all.filter(s=>Object.entries(panel._filters||{}).every(([k,v])=>!v||s[k]===v)).filter(s=>!range.date_from||(s.date>=range.date_from&&s.date<=range.date_to));
+  const filters=el('div',null,'pc-filter-fields');
+  panel._calendarFilterOpen ||= {};
+  for(const [key,text] of [['category_name','סוג שיעור'],['coach_name','מאמן/ת']]) {
+    filters.append(filterPicker({label:text, key, values:[...new Set(all.map(s=>s[key]).filter(Boolean))].sort(), selected:panel._filters?.[key],
+      open:!!panel._calendarFilterOpen[key], toggle:open=>{panel._calendarFilterOpen[key]=open;},
+      change:values=>{panel._filters={...panel._filters,[key]:values};panel.render();}}));
+  }
+  const parts=el('div',null,'pc-dayparts');
+  for(const [value,text] of [['','כל השעות'],['morning','בוקר'],['noon','צהריים'],['afternoon','אחה״צ'],['evening','ערב']]) {
+    const b=btn(text,()=>{panel._filters={...panel._filters,daypart:value};panel.render();});
+    b.setAttribute('aria-pressed',String((panel._filters?.daypart||'')===value));parts.append(b);
+  }
+  tools.append(filters,parts);
+  const rows=all.filter(s=>matchesFilters(s,panel._filters)).filter(s=>!range.date_from||(s.date>=range.date_from&&s.date<=range.date_to));
   const legend=el('div',null,'pc-legend');legend.setAttribute('aria-label','מקרא מצבי האימונים');
-  for(const[key,text,icon]of STATES)legend.append(el('span',`${icon} ${text}`,`pc-state pc-${key}`));root.append(legend);
-  if(mine){const planned=rows.filter(s=>!s.automation_skipped&&(s.watched||s.planning_source==='scheduled'||s.planning_source==='autobook'||s.autobook_match));if(planned.length)root.append(el('p',`${planned.length} אימונים מתוכננים קדימה · תזמונים ואוטומציות מסומנים בלוח`,'pc-planned-note'));}
-  root.append(badges(rows));
+  for(const[key,text,icon]of STATES)legend.append(el('span',`${icon} ${text}`,`pc-state pc-${key}`));tools.append(legend);
+
+  if(!mine) root.append(badges(rows));
   if(view==='month'){
     const selected=panel._selectedDay&&panel._selectedDay>=range.date_from&&panel._selectedDay<=range.date_to?panel._selectedDay:anchor;
     const selectDay=date=>{panel._selectedDay=date;panel.render();};

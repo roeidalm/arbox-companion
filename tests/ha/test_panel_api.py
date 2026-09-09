@@ -55,6 +55,24 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 "action": "skip", "studio_id": 8, "data": data})
         self.server._session.request.assert_not_called()
 
+    async def test_calendar_export_is_a_scoped_read_without_arbitrary_urls(self):
+        self.entry.options[api.VIEW_USERS] = ['user']
+        calls = []
+        async def request(server, method, path, *args, **kwargs):
+            calls.append((method, path, args, kwargs))
+            return {'studio_id': 8} if path == '/panel/context' else {'ics': 'BEGIN:VCALENDAR', 'google': 'https://calendar.google.com/'}
+        msg = {'id': 1, 'entry_id': 'one', 'resource': 'calendar_export', 'params': {'schedule_id': 123}}
+        with patch.object(api, 'request', request):
+            await api.ws_read.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls[-1], ('GET', '/calendar/export', (8,), {'params': {'schedule_id': 123}}))
+            self.assertFalse(self.conn.send_result.call_args.args[1]['can_write'])
+            calls.clear()
+            await api.ws_read.__wrapped__(self.hass, self.conn, {**msg, 'params': {'url': 'https://example.com'}})
+            self.assertEqual(calls, [])
+            self.entry.options = {}
+            await api.ws_read.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls, [])
+
     async def test_membership_editor_requires_action_access_and_uses_fixed_path(self):
         self.entry.options[api.VIEW_USERS] = ['user']
         msg = {'id':1, 'entry_id':'one', 'action':'membership_policy_save', 'studio_id':8,

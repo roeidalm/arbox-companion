@@ -636,7 +636,7 @@ async function boot() {
     return;
   }
   loadFacets(); // fills the chips when it lands; schedule doesn't wait on it
-  loadStudioSwitch();
+  await loadStudioSwitch(); // Establish the studio before starting context-bound reads.
   initScheduleFromURL();   // restore ?mode=&d= before the first render
   showView(viewFromPath(), false);
   window.dispatchEvent(new CustomEvent("arbox:ready", { detail: health }));
@@ -706,11 +706,10 @@ function renderFacetChips() {
     // daypart is filtered here in the browser and never sent to the server,
     // so re-rendering from what we already hold is the whole operation
     state.daypart, (v) => { state.daypart = v; renderFacetChips(); renderSchedule(); });
-  renderChips($("#coachChips"), facets.coaches.map((c) => ({ label: c, value: c })),
-    state.coach, (v) => { state.coach = v; renderFacetChips(); loadSchedule(); });
-  renderChips($("#categoryChips"),
-    facets.categories.map((c) => ({ label: c.name, value: c.name, color: c.color })),
-    state.category, (v) => { state.category = v; renderFacetChips(); loadSchedule(); });
+  renderFacetSelect($('#coachChips'), 'מאמן/ת', facets.coaches, state.coach,
+    v => { state.coach = v; renderSchedule(); });
+  renderFacetSelect($('#categoryChips'), 'סוג שיעור', facets.categories.map(c => c.name), state.category,
+    v => { state.category = v; renderSchedule(); });
 }
 
 function renderChips(el, items, active, onPick) {
@@ -755,6 +754,8 @@ function gotoDay(d) {
 }
 
 function calendarStatus(s) {
+  if (s.user_in_standby != null && s.user_booked == null) return {cls:'standby',title:'בהמתנה',icon:'◷'};
+  if (s.user_booked == null && s.planning && s.planning.state !== 'ready') return {cls:'review',title:'דורש בדיקה',icon:'⚠'};
   if (s.user_booked != null) return {
     icon: "✓", cls: "booked", title: "רשום/ה לשיעור",
   };
@@ -768,7 +769,7 @@ function calendarStatus(s) {
     icon: "🏖️", cls: "vacation",
     title: "לא יוזמן אוטומטית — התאריך נמצא בחופשה",
   };
-  if (s.autobook_match) return {
+  if (s.autobook_match || s.planning_source === "autobook") return {
     icon: "🤖", cls: "autobook",
     title: `מיועד להזמנה אוטומטית${(s.autobook_rule_names || []).length ?
       " · " + s.autobook_rule_names.join(", ") : ""}`,
@@ -898,8 +899,6 @@ async function loadSchedule(refresh = false) {
   const { from, to } = visibleRange(state.calMode, state.weekStart);
   $("#weekLabel").textContent = rangeLabel(state.calMode, state.weekStart);
   const params = new URLSearchParams({ date_from: iso(from), date_to: iso(to) });
-  if (state.coach) params.set("coach", state.coach);
-  if (state.category) params.set("category", state.category);
   if (refresh) params.set("refresh", "1");
   let data;
   try { data = await api("/api/schedule?" + params); }
@@ -935,7 +934,10 @@ function renderSchedule() {
   if (!data) return;
   const { from, to } = visibleRange(state.calMode, state.weekStart);
   const byDate = {};
+  const selected = value => Array.isArray(value) ? value : value ? [value] : [];
   for (const s of data.sessions) {
+    if (selected(state.coach).length && !selected(state.coach).includes(s.coach_name)) continue;
+    if (selected(state.category).length && !selected(state.category).includes(s.category_name)) continue;
     if (state.daypart && !inDaypart(s, state.daypart)) continue;
     (byDate[s.date] ||= []).push(s);
   }
@@ -986,6 +988,8 @@ function renderSession(s) {
   const el = document.createElement("div");
   el.className = "session" + (s.booking_option === "past" ? " past" : "");
   if (s.category_color) el.style.borderInlineStartColor = s.category_color;
+  const personal = calendarStatus(s);
+  if (personal) el.classList.add(`schedule-${personal.cls}`);
 
   const row1 = document.createElement("div");
   row1.className = "row";
@@ -1074,13 +1078,15 @@ function membershipPicker(s, act) {
     ? `לאימון הזה: ${membershipName(chosen)} — לחיצה לשינוי`
     : `ברירת מחדל: ${membershipName(defaultMembershipForSession(s)?.id)} — לחיצה לבחירת מנוי אחר`;
   pick.onclick = async () => {
+    const studio = state.selectedStudioId;
     const before = state.membershipOverrides.get(s.schedule_id);
     if (!await chooseSessionMembership(s)) return;
+    if (studio !== state.selectedStudioId) { toast('הסטודיו השתנה. פתחו את האימון מחדש'); return; }
     const selected = state.membershipOverrides.get(s.schedule_id) || null;
     try {
       if (state.watchlist.has(s.schedule_id) || s.watched) {
         await api(`/api/watchlist/${s.schedule_id}/membership`, {
-          method: "PUT", body: JSON.stringify({ membership_user_id: selected }),
+          method: "PUT", headers: {'X-Arbox-Studio-Id':String(studio)}, body: JSON.stringify({ membership_user_id: selected }),
         });
       }
       toast(selected ? `האימון ישתמש ב-${membershipName(selected)}` :
@@ -1098,7 +1104,7 @@ function membershipPicker(s, act) {
 function statusBadge(s) {
   const b = document.createElement("span");
   b.className = "badge";
-  if (s.planning && s.planning.state !== 'ready' && !s.user_booked && !s.user_in_standby) {
+  if (s.planning && s.planning.state !== 'ready' && s.user_booked == null && s.user_in_standby == null) {
     b.className += ' blocked'; b.textContent = '⚠ דורש בדיקה'; b.title = s.planning.reason; return b;
   }
   if (s.user_booked != null) { b.classList.add("booked"); b.textContent = "רשום ✓"; }
@@ -1306,6 +1312,70 @@ $("#refRange").addEventListener("click", () => {
 
 /* ----------------------------------------------------------------- mine */
 
+const membershipUI = () => import('/static/membership-ui.js?v=1');
+function openStudioMemberships() {
+  state.settingsPane = 'studio'; showView('settings');
+}
+async function renderFacetSelect(host, text, values, selected, change) {
+  const ui = await import('/static/filter-picker.js?v=1');
+  const picker = ui.filterPicker({label:text, values, selected, change});
+  host.replaceChildren(picker);
+}
+
+function mountSessionMembership(host, session, studio) {
+  const label = document.createElement('label'); label.textContent = 'מנוי לאימון הזה';
+  const select = document.createElement('select'); select.append(new Option('בחירה אוטומטית של המערכת', ''));
+  for (const member of eligibleMemberships(session)) select.append(new Option(member.plan, member.id));
+  select.value = state.membershipOverrides.get(session.schedule_id) || '';
+  label.append(select);
+  const save = document.createElement('button'); save.textContent = 'עדכון המנוי לאימון';
+  save.onclick = async () => {
+    if (save.disabled) return;
+    if (studio !== state.selectedStudioId) { toast('הסטודיו השתנה. פתחו את האימון מחדש'); return; }
+    save.disabled = true;
+    try {
+      const selected = select.value ? Number(select.value) : null;
+      if (session.watched || state.watchlist.has(session.schedule_id))
+        await api(`/api/watchlist/${session.schedule_id}/membership`, {method:'PUT', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify({membership_user_id:selected})});
+      if (studio !== state.selectedStudioId) return;
+      if (selected) state.membershipOverrides.set(session.schedule_id, selected); else state.membershipOverrides.delete(session.schedule_id);
+      toast('הבחירה עודכנה לאימון הזה'); await loadMine();
+    } catch(e) { toast(e.message); save.disabled = false; }
+  };
+  host.append(label, save);
+}
+async function renderStudioMemberships(profile) {
+  const studio = state.selectedStudioId, host = $('#studioMemberships');
+  if (host.dataset.studio === String(studio) && host.querySelector('.mu-editor')) return;
+  host.dataset.studio = String(studio);
+  host.textContent = 'טוענים מנויים…';
+  try {
+    const [ui, policies, policyUI] = await Promise.all([membershipUI(), api('/api/membership-policies'), import('/static/membership-policy.js?v=2')]);
+    if (studio !== state.selectedStudioId) return;
+    host.replaceChildren();
+    for (const configured of policies.memberships || []) {
+      const data = profile.quota?.memberships?.find(x => x.id === configured.id);
+      const member = {...configured, ...data};
+      const body = document.createElement('div'); body.append(ui.quotaRow(member));
+      if (data?.period_start) { const period = document.createElement('small'); period.className = 'hint'; period.textContent = `${data.period_start} – ${data.period_end}`; body.append(period); }
+      const editorHost = document.createElement('div');
+      const edit = () => {
+        if (editorHost.childElementCount) return;
+        const editor = policyUI.policyEditor({member: configured, categories: policies.categories,
+          save: async values => {
+            if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את ההגדרה מחדש');
+            await api(`/api/membership-policies/${configured.id}`, {method:'PUT', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify(values)});
+            toast('הגדרת המנוי נשמרה');
+          }, close: () => { editorHost.replaceChildren(); loadProfile(); }});
+        editorHost.append(editor); editor.querySelector('input,button')?.focus();
+      };
+      body.append(policyUI.policySummary(member, state.apiKey ? edit : null), editorHost);
+      host.append(ui.membershipDisclosure(member, body));
+    }
+    if (!host.childElementCount) host.textContent = 'לא נמצאו מנויים בסטודיו הזה';
+  } catch(e) { if (studio === state.selectedStudioId) host.textContent = 'לא ניתן לטעון מנויים: ' + e.message; }
+}
+
 async function loadMine() {
   const studio = state.selectedStudioId;
   let data;
@@ -1321,39 +1391,16 @@ async function loadMine() {
   if (studio !== state.selectedStudioId) return;
   loadMessages(); // non-blocking; fills its own card
 
-  const m = data.membership;
-  $("#membershipCard").innerHTML = "";
-  if (m) {
-    const h = document.createElement("h2");
-    h.textContent = "המנוי שלי";
-    const p = document.createElement("div");
-    p.textContent = `${m.plan || ""} · ${m.price || ""}₪ · ${m.active ? "פעיל" : "לא פעיל"}`;
-    $("#membershipCard").append(h, p);
-    Promise.all([api('/api/quota'), api('/api/membership-policies'), import('/static/membership-policy.js')]).then(([q, policies, ui]) => {
-      if (!q || studio !== state.selectedStudioId) return;
-      const line = document.createElement('p');
-      line.textContent = `${q.used} נוצלו החודש · ${q.reserved} מוזמנים · ${q.planned_total} בתכנון`;
-      if (q.uncovered_plans?.length) line.textContent += ` · ${q.uncovered_plans.length} ללא כיסוי`;
-      if (q.unresolved_plans?.length) line.textContent += ` · ${q.unresolved_plans.length} דורשים השלמה`;
-      if (q.unattributed_sessions?.length) line.textContent += ` · ${q.unattributed_sessions.length} אימונים טרם שויכו למנוי`;
-      $('#membershipCard').append(line);
-      for (const member of policies.memberships) {
-        const data = q.memberships.find(x => x.id === member.id);
-        if (!data) continue;
-        const card = document.createElement('article'); card.style.cssText = 'padding:16px 0;border-top:1px solid var(--border,#ddd)';
-        const heading = document.createElement('h3'); heading.textContent = member.plan;
-        const counts = document.createElement('p'); counts.textContent = `${data.used}/${data.quota ?? '—'} נוצלו · ${data.reserved} מוזמנים · ${data.planned} בתכנון · ${data.available_after_planned ?? '—'} פנויים אחרי התכנון`;
-        const period = document.createElement('small'); period.textContent = `תקופת המכסה: ${data.period_start} – ${data.period_end}`;
-        card.append(heading, counts, period, ui.policySummary({...member, policy: data.policy}, () => ui.policyDialog({member, categories: policies.categories,
-          save: async values => {
-            if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את ההגדרה מחדש');
-            await api(`/api/membership-policies/${member.id}`, {method:'PUT', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify(values)});
-            toast('הגדרת המנוי נשמרה'); await loadMine();
-          }})));
-        $('#membershipCard').append(card);
-      }
-    }).catch(e => toast('לא ניתן לטעון את פירוט המנויים: ' + e.message));
-  }
+  const quotaHost = $("#membershipCard");
+  quotaHost.textContent = 'טוענים מכסות…';
+  const quotaLoad = Promise.all([api('/api/quota'), membershipUI()]);
+  quotaLoad.then(([quota, ui]) => {
+    if (studio !== state.selectedStudioId) return;
+    quotaHost.replaceChildren(ui.quotaSummary(quota, openStudioMemberships));
+  }).catch(e => {
+    if (studio !== state.selectedStudioId) return;
+    quotaHost.textContent = 'לא ניתן לטעון מכסות: ' + e.message;
+  });
 
   const list = $("#mineList");
   list.innerHTML = "";
@@ -1372,7 +1419,9 @@ async function loadMine() {
   }
   for (const s of upcoming) {
     const c = document.createElement("div");
-    c.className = "card mine-item";
+    c.className = 'card mine-item';
+    const personal = calendarStatus(s);
+    if (personal) c.classList.add(`mine-${personal.cls}`);
     const grow = document.createElement("div");
     grow.className = "grow";
     const d = new Date(`${s.date}T00:00`);
@@ -1386,11 +1435,14 @@ async function loadMine() {
     const t2 = document.createElement("div");
     t2.textContent = (s.category_name || "") + (s.coach_name ? " · " + s.coach_name : "");
     grow.append(t1, t2);
-    if (s.planning) {
+    if (s.planning && s.planning.state !== 'ready') {
       const note = document.createElement('p');
       note.textContent = [s.planning.reason, membershipName(s.planning.membership_user_id)].filter(Boolean).join(' · ');
+      note.className = 'planning-warning';
       grow.append(note);
     }
+    const assigned = s.planning?.membership_user_id ?? s.membership_user_id;
+    if (assigned) { const membership = document.createElement('small'); membership.className = 'mine-membership'; membership.textContent = membershipName(assigned); grow.append(membership); }
     if (s.planning?.state === 'uncertain') {
       const studio = state.selectedStudioId;
       for (const [label, confirm_not_booked] of [['בדיקת מצב ההזמנה',false],['בדקתי בארבוקס: האימון לא מוזמן',true]]) {
@@ -1414,8 +1466,24 @@ async function loadMine() {
     const uncertain = s.planning?.state === 'uncertain';
     const act = uncertain ? null : s.planning_source === "autobook" ? occurrenceSkipButton(s) : actionButton(s);
     const pick = uncertain || s.planning_source === "autobook" ? null : membershipPicker(s, act);
-    if (pick) c.appendChild(pick);
-    if (act) c.appendChild(act);
+    if (act) { if (s.user_booked != null) act.textContent = 'ביטול הרשמה'; c.appendChild(act); }
+    if (s.planning?.state !== 'uncertain' && s.user_booked == null && s.user_in_standby == null && (pick || s.planning)) {
+      const check = document.createElement('details'); check.className = 'mine-check';
+      const heading = document.createElement('summary'); heading.textContent = s.planning && s.planning.state !== 'ready' ? 'בדיקה כאן' : 'בחירת מנוי לאימון';
+      check.append(heading);
+      let loaded = false;
+      check.ontoggle = async () => {
+        if (!check.open || loaded) return; loaded = true;
+        try {
+          const [q, ui] = await quotaLoad;
+          if (studio !== state.selectedStudioId || !check.isConnected) return;
+          check.append(ui.quotaSummary(q));
+          if (pick) mountSessionMembership(check, s, studio);
+          else { const text = document.createElement('p'); text.textContent = 'המערכת בוחרת מנוי מתאים לאוטומציה. הגדרות השיעורים והמכסה נמצאות בסטודיו.'; check.append(text); }
+        } catch(e) { loaded = false; toast(e.message); }
+      };
+      c.append(check);
+    }
     list.appendChild(c);
   }
 }
@@ -2909,12 +2977,14 @@ function renderStudioPreferences(data, host) {
 }
 
 async function loadProfile() {
+  const studio = state.selectedStudioId;
   let d;
   try { d = await api("/api/profile"); }
   catch (e) {
     $("#profAccount").textContent = "צריך מפתח API כדי לראות פרטי חשבון";
     return;
   }
+  if (studio !== state.selectedStudioId) return;
   const p = d.profile || {}, m = d.membership || {}, memberships = d.memberships || [],
         a = d.activity || {}, q = d.quota;
   const cur = p.currency || "₪";
@@ -2959,26 +3029,7 @@ async function loadProfile() {
   kvRow(act, "אימונים שהתקיימו", a.attended);
   kvRow(act, "אימונים קרובים", a.upcoming);
   kvRow(act, "ממוצע שבועי", a.weekly_average);
-  const quotaStatus = $("#profQuotaStatus");
-  quotaStatus.innerHTML = "";
-  if (q) {
-    const planned = q.planned_total ?? q.planned ?? 0;
-    kvRow(quotaStatus, "מצב נוכחי",
-          `${q.used} נוצלו החודש` +
-          (q.reserved ? ` · ${q.reserved} שמורות` : "") +
-          (q.planned_scheduled ? ` · ${q.planned_scheduled} מתוזמנות` : "") +
-          (q.planned_autobook ? ` · ${q.planned_autobook} אוטומטיות` : "") +
-          (!q.planned_scheduled && !q.planned_autobook && planned
-            ? ` · ${planned} מתוכננות` : "") +
-          (q.uncovered_plans?.length ? ` · ${q.uncovered_plans.length} תכנונים ללא כיסוי` : '') +
-          (q.unresolved_plans?.length ? ` · ${q.unresolved_plans.length} דורשים השלמה` : ''),
-          q.overcommitted || q.unresolved_plans?.length
-            ? "warn" : "");
-    for (const item of q.memberships || []) {
-      kvRow(quotaStatus, item.plan || 'מנוי',
-        `${item.used}/${item.quota ?? '—'} נוצלו · ${item.reserved} מוזמנים · ${item.planned} בתכנון · ${item.available_after_planned ?? '—'} פנויים אחרי התכנון`);
-    }
-  }
+  renderStudioMemberships(d);
 
 
   const st = $("#profStudio"); st.innerHTML = "";

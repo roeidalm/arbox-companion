@@ -1,3 +1,32 @@
+# Compact membership UI — server 1.52.0 / integration 3.3.0
+
+- 156 server pytest tests pass, including authenticated calendar export matching
+  the existing event, configured alarms and location.
+- 38 Node tests pass: full-width quota allocation, unknown/zero capacity,
+  standby/uncertain commitments, multiple filters, context guards, confirmation
+  gates, feedback and journal behavior. Shared assets pass the bundle drift check.
+- `scripts/check-membership-ui.cjs` runs the actual standalone frontend and HA
+  web component against synthetic data only. It checks 1440, 390 and 320 px,
+  light/dark mode, continuous quota bars, initially collapsed Studio cards,
+  inline editing, draft preservation on polling, a scoped per-workout membership
+  change, all 42 fixture classes, multiple coach selections and day/week/month.
+  All checks passed with no page errors or real Arbox calls. Screenshots are
+  written to ignored `tmp/ui-review/`.
+- Run the browser check from the repository root with `node
+  scripts/check-membership-ui.cjs` and an installed Playwright Chromium. Optional
+  `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` reuse an existing local installation.
+- This round tests the **HA component with a mock WebSocket transport**, not a
+  running HA installation. The new fixed calendar read has an HA unittest ready
+  for the existing workflow. Real-HA acceptance and HACS upgrade remain to be
+  checked after publishing; no installed integration files were replaced.
+
+The implementation only changes presentation and adds a read-only calendar
+export for HA. Eligibility, quota allocation, booking windows and confirmation
+gates remain on the server. No real bookings, cancellations or notifications
+were performed during these checks.
+
+---
+
 # Full panel validation — v1.49.0 / integration 3.0.0
 
 Validated against Home Assistant 2026.8.3 in an isolated local Podman container.

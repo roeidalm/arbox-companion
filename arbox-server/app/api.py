@@ -502,6 +502,22 @@ async def _studio_location(s) -> str:
     return ", ".join(p for p in parts if p)
 
 
+@router.get("/calendar/export")
+async def calendar_export(request: Request, schedule_id: int,
+                          x_api_key: str | None = Header(None)):
+    """HA exports the same event, alarms and location without exposing this server."""
+    require_key(request, x_api_key)
+    s = ctx(request)
+    session = await s.store.get_session(schedule_id)
+    if not session:
+        raise HTTPException(404, f"unknown schedule_id {schedule_id}")
+    location = await _studio_location(s)
+    return {
+        "ics": build_calendar([session], alarms=s.settings.calendar_alarms, location=location),
+        "google": google_calendar_url(session, location=location),
+    }
+
+
 @router.get("/calendar/event/{schedule_id}.ics")
 async def calendar_event(request: Request, schedule_id: int):
     """One class as a downloadable file — the one-tap 'add to my calendar'.

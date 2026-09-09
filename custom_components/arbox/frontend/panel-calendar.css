@@ -6,3 +6,14 @@
 @media(max-width:600px){.pc-month{gap:4px}.pc-cell{min-height:82px;border-radius:9px;padding:3px;cursor:pointer}.pc-cell .pc-event,.pc-cell .pc-more{display:none}.pc-cell .pc-day-number{width:100%;min-height:43px;padding:4px 0;display:flex;align-items:center;justify-content:space-evenly;flex-direction:column;font-size:.95rem}.pc-cell-total{display:block;font-size:.66rem;font-weight:400;line-height:1.4;color:var(--secondary-text-color,#687580)}.pc-cell .pc-counts{justify-content:center;gap:3px;margin:3px 0;pointer-events:none}.pc-cell .pc-state{font-size:0;line-height:0;width:6px;height:6px;padding:0;border:0;border-radius:50%;background:var(--pc-color)}.pc-weekday{padding:5px;font-size:.78rem}.pc-selected-day .session-card{min-width:0}.pc-calendar>.pc-legend{font-size:.7rem}}
 
 .pc-review {border-color:var(--warning-color,#a85c08)!important;background:color-mix(in srgb,var(--warning-color,#dd8800) 12%,var(--card-background-color,#fff));}
+/* Readable day columns rather than seven cramped cards. */
+.pc-week{grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr))}.pc-week .session-card{display:flex;flex-direction:column;align-items:stretch}.pc-week .session-time{display:flex;gap:8px}.pc-week .date-heading{display:none}
+.pc-filter-fields{gap:12px;align-items:start}.pc-dayparts{display:flex;gap:6px;flex-wrap:wrap}.pc-dayparts button{padding:6px 12px;min-height:40px;font-size:.9em}.pc-dayparts button[aria-pressed=true]{border-color:var(--accent);background:var(--soft);color:var(--accent)}
+.pc-week .mine-card{display:flex;flex-direction:row}.pc-week .mine-heading{flex-basis:100%}.pc-filter-fields .filter-picker{min-width:140px}
+.pc-mine-tools{margin:0 0 16px}.pc-mine-tools>summary{cursor:pointer;min-height:44px;padding:8px 0;color:var(--accent)}.pc-mine-tools .pc-controls{margin-top:8px}
+/* Follow the panel theme even when HA's global theme variables are absent. */
+.pc-calendar{--pc-booked:light-dark(#238652,#72c49b);--pc-waiting:light-dark(#936812,#dcba65);--pc-scheduled:light-dark(#356fc2,#88b3ee);--pc-automatic:light-dark(#9257b9,#c79be7);--pc-skipped:light-dark(#66717e,#b2bac5);--pc-vacation:light-dark(#a26418,#e7b173);--pc-review:light-dark(#995a10,#efbe6b)}
+.pc-views,.pc-week-day{background:var(--bg)}.pc-views button[aria-pressed=true],.pc-cell,.pc-date input{background:var(--card);color:var(--ink)}.pc-state,.pc-event[class*=pc-]{background:color-mix(in srgb,var(--pc-color,transparent) 9%,var(--card))}.pc-review{--pc-color:var(--pc-review);color:var(--pc-review)}.pc-event{background:var(--bg)}
+
+.pc-personal.pc-review{background:color-mix(in srgb,var(--pc-review) 10%,var(--card));color:var(--ink)}
+@media(min-width:1100px){.pc-week{grid-template-columns:repeat(3,minmax(0,1fr))}}

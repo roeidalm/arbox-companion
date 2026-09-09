@@ -92,8 +92,8 @@ Standby promotions are detected on every sync and announced.
 
 ### Membership eligibility and safe planning
 
-Open **My → membership details → class types and quota** in the app or the HA
-panel. Each membership shows its own used entries, reservations, waiting lists,
+Open **Settings → Studio** in the app, or **Studio** in the HA panel,
+then expand a membership and select **Class types and quota**. Each membership shows its own used entries, reservations, waiting lists,
 plans and remaining capacity, with the source and validity of its restrictions.
 The monthly overview counts unique workouts; a punch card's allowance covers
 its whole validity period. Unattributed bookings are shown for reconciliation
@@ -136,13 +136,33 @@ booked before resuming. An absence in a sync never triggers an automatic retry.
 External bookings and studio-side changes can still occur between the check and
 the write; Arbox remains the final authority.
 
-Upgrade the server through its tagged workflow image and Compose first, then
-update the integration to **3.2.0** through HACS and restart HA. No dashboard YAML,
+Upgrade the server to **1.52.0 or newer** through its tagged workflow image and Compose first, then
+update the integration to **3.3.0** through HACS and restart HA. No dashboard YAML,
 manual HA file replacement or new browser-to-server access is required. View-only
 HA users cannot edit policy definitions. Older automatically learned global
 category blocks are removed only when their original log evidence identifies
 them; manual blocks and historical decisions remain. Previously failed attempts
 are not silently replayed on upgrade.
+
+The membership summary in **My** stays compact: each membership has its own
+full-width quota track, including free places. Monthly and whole-card periods
+are never combined into one bar. Unknown capacity and planning warnings remain
+explicit; the UI does not calculate eligibility or allow quota bypasses.
+
+Use **Settings → Studio** on the server, or **Studio** in the HA panel header,
+to expand a membership and edit its allowed classes and quota in place. Source
+and verification details are folded separately. In **My**, registrations,
+waiting lists, scheduled registrations and automatic occurrences stay visible.
+**Check here** opens planning details beside the affected workout; changing a
+scheduled workout's membership affects only that workout. An existing booking
+cannot be charged to another membership through this selector.
+
+The schedule still includes every class in the selected day/week/month. Coach
+and category filters support multiple selections; clearing them restores the
+full list. On HA, **My → Filter and calendar view** exposes optional date/filter
+controls without hiding the workout list. Calendar export also travels through
+HA, retaining the server's configured alarms and location; browsers never need
+to connect directly to Arbox. Policy editing remains restricted to action users.
 
 Five minutes before a booked class the server asks whether you arrived. The
 answer remains live until midnight; no answer defaults to attended and is

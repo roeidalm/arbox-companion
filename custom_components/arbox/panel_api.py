@@ -22,6 +22,7 @@ READS = {
     "journal": ("/journal", set()), "rules": ("/rules", set()),
     "vacations": ("/vacations", set()), "watchlist": ("/watchlist", set()),
     "membership_policies": ("/membership-policies", set()),
+    "calendar_export": ("/calendar/export", {"schedule_id"}),
 }
 # Method, path, path identifier, permitted JSON fields. Identifiers must be integers.
 ACTIONS = {

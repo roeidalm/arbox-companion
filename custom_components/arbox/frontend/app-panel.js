@@ -1,7 +1,9 @@
 import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.1.0";
-import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.2.0';
+import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.3.0';
 import {renderJournal, journalSignature} from './panel-journal.js?v=3.1.0';
-import {policySummary, policyDialog} from './membership-policy.js';
+import {policySummary, policyEditor} from './membership-policy.js?v=2';
+import {quotaSummary, quotaRow, membershipDisclosure} from './membership-ui.js?v=1';
+import {calendarLinks} from './session-calendar.js?v=1';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
@@ -69,8 +71,8 @@ const hasFeedback = (row) =>
 export function sessionStatus(s) {
   if (s.status)
     return [STATUS[s.status] || s.status, hasFeedback(s) ? "reviewed" : ""];
-  if (s.user_booked) return ["✓ מוזמן", "booked"];
-  if (s.user_in_standby) return ["בהמתנה", "waiting"];
+  if (s.user_booked != null) return ["✓ מוזמן", "booked"];
+  if (s.user_in_standby != null) return ["בהמתנה", "waiting"];
   if (s.planning && s.planning.state !== 'ready') return ["⚠ דורש בדיקה", "warning"];
   if (s.watched) return ["⏳ מתוזמן", "planned"];
   if (s.automation_skipped) return ["⏭ דולג הפעם", "skipped"];
@@ -168,7 +170,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.1.2", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.3.0", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -211,7 +213,7 @@ export class ArboxAppPanel extends HTMLElement {
         this._sync.disabled = !this.canWrite();
       }
     });
-    header.append(this._sync);
+    header.append(button("סטודיו", () => this.navigate("studio")), this._sync);
     this._meta = node("p", null, "sync-meta");
     this._error = node("div", null, "error");
     this._error.setAttribute("role", "alert");
@@ -237,7 +239,9 @@ export class ArboxAppPanel extends HTMLElement {
       this._content,
       this._nav,
     );
-    this.shadowRoot.replaceChildren(css, this._shell);
+    const membershipCSS = node('link'); membershipCSS.rel = 'stylesheet';
+    membershipCSS.href = new URL('./membership-ui.css?v=1', import.meta.url).href;
+    this.shadowRoot.replaceChildren(css, membershipCSS, this._shell);
   }
   navigate(tab) {
     window.history.replaceState(null, "", `#${tab}`);
@@ -246,7 +250,7 @@ export class ArboxAppPanel extends HTMLElement {
   navigateFromURL() {
     const parts = window.location.hash.slice(1).split("/");
     const previousTab = this._tab;
-    this._tab = TABS.some((t) => t[0] === parts[0]) ? parts[0] : "overview";
+    this._tab = parts[0] === "studio" || TABS.some((t) => t[0] === parts[0]) ? parts[0] : "overview";
     if (previousTab !== this._tab) this._resetScroll = true;
     this._focusId = Number(parts[1]) || null;
     this._nav
@@ -322,9 +326,10 @@ export class ArboxAppPanel extends HTMLElement {
     const generation = ++this._generation;
     const tab = this._tab;
     const resources = {
-      overview: ["summary", "me", "journal", "membership_policies"],
-      schedule: ["summary", "schedule", "facets"],
-      mine: ["summary", "me", "membership_policies"],
+      overview: ["summary", "me", "journal", "membership_policies", "watchlist"],
+      schedule: ["summary", "schedule", "facets", "watchlist"],
+      mine: ["summary", "me", "membership_policies", "watchlist"],
+      studio: ["summary", "membership_policies"],
       journal: ["summary", "history", "journal"],
       automations: ["summary", "rules", "vacations", "facets"],
     }[tab];
@@ -411,6 +416,11 @@ export class ArboxAppPanel extends HTMLElement {
     ]
       .filter(Boolean)
       .join(" · ");
+    if (this._inlineEditor?.isConnected) {
+      const draft = this._inlineContext;
+      if (draft?.entry === this._entry.entry_id && draft?.studio === this.context().studio_id && draft?.tab === this._tab && this.canWrite()) return;
+      this._inlineEditor.remove(); this._inlineEditor = null;
+    }
     const signature = JSON.stringify({
       entry: this._entry.entry_id,
       tab: this._tab,
@@ -446,6 +456,7 @@ export class ArboxAppPanel extends HTMLElement {
       mine: "האימונים שלי",
       journal: "יומן האימונים",
       automations: "התכנון שלי",
+      studio: "המנויים בסטודיו",
     }[this._tab];
     this._content.replaceChildren(
       node("p", fmtDate(this._date), "eyebrow"),
@@ -489,6 +500,7 @@ export class ArboxAppPanel extends HTMLElement {
     parent.append(list);
   }
   card(s) {
+    if (this._tab === "mine") return this.mineCard(s);
     const card = button("", () => this.openSession(s), "session-card");
     card.dataset.focusKey = `session-${s.schedule_id}`;
     const time = node("div", null, "session-time");
@@ -505,6 +517,10 @@ export class ArboxAppPanel extends HTMLElement {
     if (this._tab !== "journal" && cls) card.classList.add(`state-${cls}`);
     if (this._tab !== "journal" && ["planned", "automatic"].includes(cls) && s.registration_note)
       info.append(node("small", s.registration_note, "planning-note"));
+    if (this._tab === 'schedule') {
+      info.append(node('small', `${s.registered ?? '—'}/${s.max_users ?? '—'} רשומים${s.free > 0 ? ` · ${s.free} פנויים` : ''}`, 'session-capacity'));
+      if (s.planning && s.planning.state !== 'ready') info.append(node('small', s.planning.reason, 'warning'));
+    }
     if (this._tab === "journal")
       info.append(
         node("small", hasFeedback(s) ? "משוב נשמר" : "ללא משוב", "muted"),
@@ -574,71 +590,81 @@ export class ArboxAppPanel extends HTMLElement {
     }
     return card;
   }
-  quota() {
-    const q = this._data.summary?.quota;
-    const wrap = node("section", null, "quota-card quota-compact");
-    const heading = node("div", null, "section-heading");
-    heading.append(node("h2", "המנויים והמכסה שלי"));
-    if (q) heading.append(node("strong", `${q.used ?? 0} אימונים החודש`, "quota-number"));
-    wrap.append(heading);
-    const metrics = (values, personal = false) => {
-      const labels = personal
-        ? [["used", "נוצלו", "used"], ["reserved", "מוזמנים", "reserved"], ["planned", "בתכנון", "scheduled"], ["available_after_planned", "פנויים אחרי התכנון", "available"]]
-        : [["used", "נוצלו", "used"], ["reserved", "מוזמנים", "reserved"], ["planned_scheduled", "מתוזמנים", "scheduled"], ["planned_autobook", "אוטומטיים", "automatic"], ["available_after_planned", "פנויים אחרי התכנון", "available"]];
-      const row = node("div", null, "quota-legend");
-      for (const [key, label, kind] of labels) {
-        const cell = node("span", null, `quota-key ${kind}`);
-        cell.append(node("b", String(values[key] ?? 0)), document.createTextNode(` ${label}`));
-        row.append(cell);
+  mineCard(s) {
+    const card = node('article', null, 'session-card mine-card');
+    const [status, kind] = sessionStatus(s);
+    if (kind) card.classList.add(`state-${kind}`);
+    const info = button('', () => this.openSession(s), 'mine-heading');
+    info.dataset.focusKey = `session-${s.schedule_id}`;
+    const time = node('b', `${s.start_time?.slice(0,5) || ''}–${s.end_time?.slice(0,5) || ''}`, 'mine-time'); time.dir = 'ltr';
+    info.append(time, node('strong', s.category_name), node('span', s.coach_name, 'muted'));
+    card.append(info, node('span', status, `badge ${kind}`));
+    const planning = s.planning || this._data.summary?.quota?.plan_states?.[String(s.schedule_id)];
+    const mid = planning?.membership_user_id ?? s.membership_user_id;
+    const member = this._data.summary?.memberships?.find(m => m.id === mid);
+    if (member) card.append(node('small', member.plan, 'mine-member muted'));
+    if (planning && planning.state !== 'ready') card.append(node('p', planning.reason, 'mine-reason warning'));
+    const actions = node('div', null, 'mine-actions');
+    const entry = this._entry.entry_id, studio = this.context().studio_id;
+    if (!s.automation_skipped) actions.append(calendarLinks(s, async () => {
+      if (entry !== this._entry.entry_id || studio !== this.context().studio_id) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');
+      const result = await this.read('calendar_export', {schedule_id:s.schedule_id});
+      if (entry !== this._entry.entry_id || studio !== this.context().studio_id || result.context?.studio_id !== studio) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');
+      return result.data;
+    }, text => this.toast(text)));
+    const context = {...this.context()};
+    const inlineHost = node('div', null, 'mine-inline-host');
+    const inspect = () => this.openSession(s, inlineHost);
+    if (this.canWrite()) {
+      if (s.user_booked != null || s.user_in_standby != null) actions.append(button(s.user_booked != null ? 'ביטול הרשמה' : 'יציאה מההמתנה', inspect, 'danger'));
+      else if (planning?.state === 'uncertain') actions.append(button('בדיקת מצב ההזמנה', inspect));
+      else {
+        if (s.watched) actions.append(this.actionButton('ביטול תזמון', 'unwatch', {schedule_id:s.schedule_id}, context));
+        else if (s.automation_skipped) actions.append(this.actionButton('החזרת המועד', 'restore', {schedule_id:s.schedule_id}, context));
+        else if (s.planning_source === 'autobook' || s.autobook_match) actions.append(this.actionButton('דילוג על המועד', 'skip', {schedule_id:s.schedule_id}, context));
+        actions.append(button(planning && planning.state !== 'ready' ? 'בדיקה כאן' : 'בחירת מנוי לאימון', inspect));
       }
-      return row;
-    };
-    if (q) {
-      const bar = node("div", null, "quota-bar");
-      bar.setAttribute("aria-hidden", "true");
-      const values = [["used", q.used], ["reserved", q.reserved], ["scheduled", q.planned_scheduled], ["automatic", q.planned_autobook], ["available", Math.max(0, q.available_after_planned ?? 0)]];
-      for (const [kind, count] of values) if (Number(count) > 0) {
-        const part = node("span", null, kind); part.style.flexGrow = String(count); bar.append(part);
-      }
-      wrap.append(bar, metrics(q));
-      if (q.overcommitted) wrap.append(node("p", "יש תכנונים ללא מכסה במנוי המתאים", "warning"));
-      if (q.unresolved_plans?.length) wrap.append(node("p", `${q.unresolved_plans.length} תכנונים דורשים השלמה — ההרשמה שלהם מושהית`, "warning"));
-      if (q.unattributed_sessions?.length) wrap.append(node("p", `${q.unattributed_sessions.length} אימונים טרם שויכו למנוי. נדרש סנכרון ובירור`, "warning"));
-    } else wrap.append(node("p", "לא קיימת מכסה מחושבת למנוי הזה."));
-    const members = this._data.summary?.memberships || [];
-    const details = node("details", null, "membership-details");
-    details.open = this._membershipsOpen ?? true;
-    details.ontoggle = () => { this._membershipsOpen = details.open; };
-    details.append(node("summary", `פירוט ${members.length} מנויים`));
-    for (const m of members) {
-      const data = q?.memberships?.find(x => (x.membership_user_id ?? x.id) === m.id);
-      const card = node("article", null, "membership-card");
-      const title = node("div", null, "section-heading");
-      title.append(node("strong", m.plan || "מנוי פעיל"));
-      if (data) title.append(node("b", `${data.used ?? 0} / ${data.quota ?? "—"}`, "membership-count"));
-      card.append(title);
-      card.append(node("small", [m.active === false ? "לא פעיל" : "פעיל", m.recurring ? "מנוי מתחדש" : "כרטיסייה", m.end ? `בתוקף עד ${fmtDate(m.end)}` : ""].filter(Boolean).join(" · "), "muted"));
-      if (data) {
-        card.append(metrics(data, true));
-        card.append(node("small", `תקופת המכסה: ${data.period_start} – ${data.period_end}`, "muted"));
-        const configured = this._data.membership_policies?.memberships?.find(x => x.id === m.id) || data;
-        card.append(policySummary({...configured, policy: {...configured.policy, ...(data.policy?.state !== "ready" ? {state: data.policy.state, reason: data.policy.reason} : {})}}, this.canWrite() ? () => this.editMembershipPolicy(configured) : null));
-      }
-      else card.append(node("p", "לא קיימת מכסה מחושבת למנוי הזה.", "muted"));
-      details.append(card);
     }
-    if (members.length) wrap.append(details);
+    card.append(actions, inlineHost); return card;
+  }
+  quota() {
+    const wrap = node('section', null, 'quota-card quota-compact');
+    wrap.append(quotaSummary(this._data.summary?.quota, () => this.navigate('studio')));
     return wrap;
   }
-  editMembershipPolicy(member) {
-    const context = {...this.context()};
-    const entry = this._entry.entry_id;
-    policyDialog({host: this.shadowRoot, member,
-      categories: this._data.membership_policies?.categories || [],
-      save: async data => {
-        if (entry !== this._entry.entry_id) throw new Error("חיבור Arbox השתנה. פתחו את ההגדרה מחדש");
-        return this.act('membership_policy_save', {...data, membership_id: member.id}, context, {close: false});
-      }});
+  keepInline(editor) {
+    this._inlineEditor = editor;
+    this._inlineContext = {entry: this._entry.entry_id, studio: this.context().studio_id, tab: this._tab};
+  }
+  closeInline() {
+    this._inlineEditor?.remove(); this._inlineEditor = null;
+    this._renderSignature = null;
+  }
+  render_studio() {
+    this._content.append(node('p', 'פתחו מנוי כדי לראות ולערוך את סוגי השיעורים והמכסה שלו.', 'muted'));
+    for (const configured of this._data.membership_policies?.memberships || []) {
+      const data = this._data.summary?.quota?.memberships?.find(m => m.id === configured.id);
+      const member = {...configured, ...data};
+      const body = node('div'); body.append(quotaRow(member));
+      if (data?.period_start) body.append(node('small', `${data.period_start} – ${data.period_end}`, 'muted'));
+      const editorHost = node('div');
+      const edit = () => {
+        if (editorHost.childElementCount) return;
+        const context = {...this.context()}, entry = this._entry.entry_id;
+        const editor = policyEditor({member: configured, categories: this._data.membership_policies?.categories || [],
+          save: async data => {
+            if (entry !== this._entry.entry_id) throw new Error('חיבור Arbox השתנה. פתחו את ההגדרה מחדש');
+            return this.act('membership_policy_save', {...data, membership_id: member.id}, context, {close: false});
+          }, close: () => { this.closeInline(); this.render(); }});
+        editorHost.append(editor); this.keepInline(editor);
+        editor.querySelector('input,button')?.focus();
+      };
+      body.append(policySummary(member, this.canWrite() ? edit : null), editorHost);
+      this._studioOpen ||= {};
+      this._content.append(membershipDisclosure(member, body, {
+        open: !!this._studioOpen[member.id], onToggle: value => {this._studioOpen[member.id] = value;},
+      }));
+    }
   }
   render_overview() {
     const next = this._data.summary?.next_class;
@@ -895,7 +921,7 @@ export class ArboxAppPanel extends HTMLElement {
       }
       if (response.ok === false)
         throw new Error(response.error || "הפעולה לא הושלמה.");
-      if (close) this._dialog?.close();
+      if (close) { this._dialog?.close(); this.closeInline(); }
       this.toast(response.quota_note || "השינוי נשמר");
       await this._loading;
       await this.load();
@@ -977,9 +1003,18 @@ export class ArboxAppPanel extends HTMLElement {
       reason_text: other.value.trim() || null,
     });
   }
-  openSession(s) {
-    const body = this.dialog(s.category_name || "פרטי האימון"),
+  openSession(s, inlineHost = null) {
+    if (inlineHost) {
+      if (inlineHost.childElementCount) return;
+      this.closeInline();
+    }
+    const body = inlineHost ? node('section', null, 'mine-inline') : this.dialog(s.category_name || "פרטי האימון"),
       context = { ...this.context() };
+    if (inlineHost) {
+      body.append(button('סגירה', () => {this.closeInline(); this.render();}));
+      inlineHost.append(body); this.keepInline(body);
+      body.append(quotaSummary(this._data.summary?.quota));
+    }
     body.append(
       node(
         "p",
@@ -1110,24 +1145,27 @@ export class ArboxAppPanel extends HTMLElement {
         (!m.start || m.start <= s.date) &&
         (!m.end || m.end >= s.date),
     );
-    if (members.length) {
+    if (members.length && s.user_booked == null && s.user_in_standby == null && (s.watched || !(s.planning_source === 'autobook' || s.autobook_match))) {
       const wrap = node("label", "באיזה מנוי להשתמש?", "field");
       membership = node("select");
       membership.append(new Option("בחירה אוטומטית של המערכת", ""));
       for (const m of members)
         membership.append(new Option(m.plan || String(m.id), String(m.id)));
+      const watched = this._data.watchlist?.watchlist?.find(w => w.schedule_id === s.schedule_id && !w.result);
+      membership.value = watched?.membership_user_id == null ? '' : String(watched.membership_user_id);
       wrap.append(membership);
       body.append(wrap);
+      if (s.watched) body.append(this.actionButton('עדכון המנוי לאימון', 'watch_membership', () => ({schedule_id:s.schedule_id, membership_user_id: membership.value ? Number(membership.value) : null}), context));
     }
     const payload = () => ({
       schedule_id: s.schedule_id,
       membership_user_id: membership?.value ? Number(membership.value) : null,
     });
-    if (s.user_booked || s.user_in_standby) {
+    if (s.user_booked != null || s.user_in_standby != null) {
       const getReason = this.reasons(body);
       body.append(
         button(
-          s.user_booked ? "ביטול הרשמה" : "יציאה מההמתנה",
+          s.user_booked != null ? "ביטול הרשמה" : "יציאה מההמתנה",
           () =>
             this.confirm("לבטל את ההשתתפות באימון הזה?", () =>
               this.act(

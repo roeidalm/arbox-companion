@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import aiosqlite
+from .planning_intent import snapshot, change
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,6 +195,16 @@ CREATE TABLE IF NOT EXISTS watchlist (
     membership_user_id INTEGER,              -- per-class override; NULL = default
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     result        TEXT                       -- NULL = still waiting
+);
+
+CREATE TABLE IF NOT EXISTS planning_intents (
+    schedule_id INTEGER NOT NULL,
+    box_id INTEGER NOT NULL,
+    snapshot TEXT NOT NULL,
+    source TEXT NOT NULL,
+    rule_signature TEXT,
+    changed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (schedule_id, box_id)
 );
 
 CREATE TABLE IF NOT EXISTS vacations (
@@ -487,6 +498,13 @@ class Store:
             await self._db.execute(
                 "UPDATE training_events SET box_id=? WHERE box_id IS NULL",
                 (self.active_box_id,))
+        # Upgrade baseline: old pins only retained an id. Preserve the last
+        # cached details before the first post-upgrade sync can replace them.
+        cur = await self._db.execute(
+            "SELECT s.* FROM watchlist w JOIN sessions s ON s.schedule_id=w.schedule_id "
+            "WHERE w.result IS NULL")
+        for row in await cur.fetchall():
+            await self.remember_intent(dict(row), 'scheduled')
         await self._db.commit()
 
     async def close(self) -> None:
@@ -499,6 +517,50 @@ class Store:
         return self._db
 
     # ------------------------------------------------------------- sessions
+
+    async def remember_intent(self, session: dict, source: str,
+                              rule_signature: str | None = None) -> dict:
+        sid, box = session['schedule_id'], session.get('box_id') or self.active_box_id or 0
+        current = await self.get_intent(sid, box)
+        if current and not (source == current['source'] == 'autobook' and
+                            current.get('rule_signature') != rule_signature):
+            return current
+        await self.db.execute(
+            "INSERT INTO planning_intents VALUES (?,?,?,?,?,0) "
+            "ON CONFLICT(schedule_id,box_id) DO UPDATE SET snapshot=excluded.snapshot, "
+            "source=excluded.source,rule_signature=excluded.rule_signature,changed=0",
+            (sid, box, json.dumps(snapshot(session)), source, rule_signature))
+        await self.db.commit()
+        return await self.get_intent(sid, box)
+
+    async def get_intent(self, sid: int, box: int | None = None) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM planning_intents WHERE schedule_id=? AND box_id=?",
+            (sid, box if box is not None else self.active_box_id or 0))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def list_auto_intents(self) -> list[dict]:
+        cur = await self.db.execute(
+            "SELECT * FROM planning_intents WHERE box_id=? AND source='autobook'",
+            (self.active_box_id or 0,))
+        return [dict(row) for row in await cur.fetchall()]
+
+    async def intent_change(self, session: dict) -> dict | None:
+        record = await self.get_intent(session['schedule_id'])
+        result = change(record, session)
+        if result and not record['changed']:
+            await self.db.execute(
+                "UPDATE planning_intents SET changed=1 WHERE schedule_id=? AND box_id=?",
+                (session['schedule_id'], self.active_box_id or 0))
+            await self.db.commit()
+        return result
+
+    async def accept_intent(self, session: dict) -> None:
+        await self.db.execute(
+            "UPDATE planning_intents SET snapshot=?,changed=0 WHERE schedule_id=? AND box_id=?",
+            (json.dumps(snapshot(session)), session['schedule_id'], self.active_box_id or 0))
+        await self.db.commit()
 
     async def upsert_sessions(
         self, sessions: list[dict], extra_advance_hours: int = 0,
@@ -525,6 +587,13 @@ class Store:
             f"updated_at=datetime('now')",
             rows,
         )
+        await self.db.commit()
+        for row in rows:
+            if row.get('box_id') == self.active_box_id:
+                await self.db.execute(
+                    'UPDATE planning_intents SET changed=1 WHERE schedule_id=? AND box_id=? AND changed=2',
+                    (row['schedule_id'], self.active_box_id or 0))
+                await self.intent_change(row)
         await self.db.commit()
 
     async def prune_sessions(
@@ -584,6 +653,18 @@ class Store:
         (e.g. a holiday wiped the day) — everything local in it is stale.
         NOT IN (NULL) would match no rows, so that case gets its own query.
         """
+        # A disappeared planned class is a held intent, not an instruction to
+        # forget it. Keep its last details so My and the daily review explain it.
+        cur = await self.db.execute(
+            'SELECT s.schedule_id FROM sessions s JOIN planning_intents p '
+            'ON p.schedule_id=s.schedule_id AND p.box_id=COALESCE(s.box_id,0) '
+            'WHERE s.date>=? AND s.date<=? AND (? IS NULL OR s.box_id=?)',
+            (start, end, self.active_box_id, self.active_box_id))
+        protected = {r[0] for r in await cur.fetchall()} - set(keep_ids)
+        for sid in protected:
+            await self.db.execute('UPDATE planning_intents SET changed=2 WHERE schedule_id=? AND box_id=?',
+                                  (sid, self.active_box_id or 0))
+        keep_ids = [*keep_ids, *protected]
         if keep_ids:
             marks = ",".join("?" for _ in keep_ids)
             cur = await self.db.execute(
@@ -1508,6 +1589,15 @@ class Store:
     async def watch(self, schedule_id: int, allow_standby: bool = True,
                     ignore_vacation: bool = False,
                     membership_user_id: int | None = None) -> None:
+        session = await self.get_session(schedule_id)
+        if session:
+            await self.remember_intent(session, 'scheduled')
+            # Choosing a membership or pinning an automatic occurrence does
+            # not acknowledge a change to the workout itself.
+            await self.db.execute(
+                "UPDATE planning_intents SET source='scheduled',rule_signature=NULL "
+                "WHERE schedule_id=? AND box_id=?",
+                (schedule_id, self.active_box_id or 0))
         await self.db.execute(
             "INSERT INTO watchlist (schedule_id, allow_standby, ignore_vacation, "
             "membership_user_id) VALUES (?, ?, ?, ?) "
@@ -1522,6 +1612,9 @@ class Store:
 
     async def unwatch(self, schedule_id: int) -> None:
         await self.db.execute("DELETE FROM watchlist WHERE schedule_id=?", (schedule_id,))
+        await self.db.execute(
+            "DELETE FROM planning_intents WHERE schedule_id=? AND box_id=? AND source='scheduled'",
+            (schedule_id, self.active_box_id or 0))
         await self.db.commit()
 
     async def set_watch_membership(

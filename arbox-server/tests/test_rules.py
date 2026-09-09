@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
@@ -490,6 +491,18 @@ class DigestStore:
         self.blocked = blocked or set()
         self.prompts = []
         self.plans = plans or []
+        self.active_box_id = 73
+        self.meta = {}
+        self.intents = {}
+
+    async def get_meta(self, key, default=None): return self.meta.get(key, default)
+    async def set_meta(self, key, value): self.meta[key] = value
+    async def list_auto_intents(self): return []
+    async def get_intent(self, sid): return self.intents.get(sid)
+    async def remember_intent(self, session, source, signature=None):
+        self.intents[session['schedule_id']] = {'source':source, 'rule_signature':signature, 'snapshot':json.dumps(session)}
+    async def intent_change(self, session): return None
+    async def my_sessions(self, **kwargs): return await self.get_sessions(mine=True)
 
     async def get_sessions(self, date_from=None, date_to=None, mine=False, **kwargs):
         rows = [
@@ -548,6 +561,10 @@ class DigestSyncer:
 
     async def sync_range(self, date_from, date_to):
         self.calls.append((date_from, date_to))
+
+    async def refresh_selected(self, sessions):
+        self.calls.append({s['schedule_id'] for s in sessions})
+        return {s['schedule_id'] for s in sessions}
 
 
 def digest_session(schedule_id, day, start, category, coach="Dana", **patch):
@@ -638,9 +655,7 @@ async def test_nightly_message_combines_tomorrow_and_future_sections(monkeypatch
 
     await engine.nightly_digest()
 
-    assert syncer.calls == [
-        ("2026-09-02", "2026-09-02"),
-    ]
+    assert syncer.calls == [{1, 2, 3}]
     assert len(notifier.sent) == 1
     text, buttons, kind, _ = notifier.sent[0]
     assert kind == "digest"
@@ -668,7 +683,7 @@ async def test_vacation_hides_future_section_but_not_tomorrow_reminder(monkeypat
 
     await engine.nightly_digest()
 
-    assert syncer.calls == [("2026-09-02", "2026-09-02")]
+    assert syncer.calls == [{1}]
     assert len(notifier.sent) == 1
     text, buttons, kind, _ = notifier.sent[0]
     assert text == "📌 מחר\n• 20:00 · Evening class · Dana"

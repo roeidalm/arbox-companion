@@ -424,6 +424,33 @@ class Syncer:
             end = (date.today() + timedelta(days=NEAR_TERM_DAYS)).isoformat()
             await self._pull_range(start, end)
 
+    async def refresh_selected(self, sessions: list[dict]) -> set[int]:
+        """One read for personal commitments, without running probes/notices.
+
+        Arbox exposes a date-range read, not a per-id read. Only selected ids
+        are written/reviewed; unrelated classes in the response are ignored.
+        Missing entries are retained locally and block booking until reviewed.
+        """
+        if not sessions:
+            return set()
+        async with self._lock:
+            await self.ensure_identity()
+            selected = {s['schedule_id'] for s in sessions}
+            days = [s['date'] for s in sessions]
+            raw = await self.client.schedule_between(self.box_id, self.location_id, min(days), max(days))
+            raw = [s for s in raw if s['id'] in selected]
+            memberships = await self.store.get_meta('memberships') or []
+            bonus = max((int(m.get('extra_advance_hours') or 0) for m in memberships), default=0)
+            await self.store.upsert_sessions(raw, extra_advance_hours=bonus, box_id=self.box_id)
+            found = {s['id'] for s in raw}
+            for sid in selected - found:
+                await self.store.db.execute(
+                    'UPDATE planning_intents SET changed=2 WHERE schedule_id=? AND box_id=?',
+                    (sid, self.box_id))
+            await self.store.db.commit()
+            await self.store.set_meta('quota_cache', None)
+            return found
+
     async def mid_range_sync(self) -> None:
         """Every 2h: the whole window, so a booking or cancellation made in
         the Arbox app to a class further out than the near-term span shows

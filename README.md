@@ -163,6 +163,23 @@ top across searches; **Everything** clears that group only. My filters use the
 workouts already in My; the compact coach/class counts also act as filters.
 The counts sit beside quotas on desktop and collapse to one row on phones.
 
+From server **1.53.1** and integration **3.4.1**, saved plans retain the original
+workout details. Changes to class type, coach, date or time pause the plan until
+you approve the updated workout or cancel that occurrence in My, Telegram or HA.
+Availability changes do not pause it, and changing membership does not approve
+a different workout. Existing bookings are never automatically cancelled.
+
+Once per day, **at the configured nightly digest time**, Arbox refreshes the
+workouts currently in My (bookings, waitlists, pins and automatic occurrences)
+before composing the same daily message. Changes appear together in that digest,
+not as extra notifications after every sync. Background calendar syncing keeps
+its existing cadence. A read immediately before a booking/probe quietly blocks
+an outdated or unavailable workout. This reuses the existing login token.
+Arbox's read API returns date ranges; only the selected personal workout ids are
+updated and reviewed by this targeted check. Old pins are initialized from the
+last cached details on upgrade; details overwritten before upgrading cannot be
+reconstructed. No new notification automation is required for this patch.
+
 The membership summary in **My** stays compact: each membership has its own
 full-width quota track, including free places. Monthly and whole-card periods
 are never combined into one bar. Unknown capacity and planning warnings remain

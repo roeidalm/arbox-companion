@@ -3,6 +3,21 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.53.1
+
+- Keep original workout details for planned occurrences. Pause on changes to
+  class type, coach or time, including automatic occurrences that stop matching
+  their rule. Require fresh, scoped confirmation before resuming; quota still applies.
+- Review only My workouts once daily immediately before the nightly digest.
+  Include changes in that message, with Telegram/HA confirmation or cancellation,
+  and prevent duplicate daily sends across restarts. Background syncs remain quiet
+  about changed workout details; a fresh check guards every booking/probe.
+- Keep one HA daily notification even with many actions; full class actions remain
+  in Telegram and the panel. Reject stale notification buttons after a replacement.
+- Keep disappeared planned workouts visible for review. Preserve unknown booking
+  outcomes and existing registrations. Initialize old pins from cached details.
+- Add in-place confirmation to My and HA panel 3.4.1; install through HACS normally.
+
 ## 1.53.0
 
 - Share colored, searchable multi-select filters across the calendar, My,

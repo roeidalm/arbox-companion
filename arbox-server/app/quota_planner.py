@@ -10,6 +10,7 @@ REASONS = {
     "no_capacity": "המכסה של המנוי המתאים מלאה — ההרשמה מושהית",
     "unattributed": "יש אימונים שטרם שויכו למנוי — נדרש סנכרון ובירור",
     "uncertain": "תוצאת ההזמנה לא ידועה — ממתינים לבירור, ללא ניסיון נוסף",
+    "session_changed": "פרטי האימון השתנו — ההרשמה מושהית עד לאישור מחדש",
 }
 
 
@@ -100,6 +101,9 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
         return mid
 
     for sid, plan in unique.items():
+        if plan.get('intent_change') and str(sid) not in uncertain:
+            states[str(sid)] = {**plan['intent_change'], 'membership_user_id':plan.get('membership_user_id')}
+            continue
         possible = [m for m in members if valid(m, plan["date"])]
         explicit = plan.get("membership_user_id")
         if explicit is not None:
@@ -148,7 +152,7 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
                         "available_after_planned": max(0, available - counts["planned"]) if available is not None else None})
     displayed = [p for p in unique.values() if p["date"][:7] == month]
     unresolved = [p["schedule_id"] for p in displayed if states[str(p["schedule_id"])]["state"] in
-                  ("needs_review", "unattributed", "uncertain")]
+                  ("needs_review", "unattributed", "uncertain", "session_changed")]
     uncovered = [p["schedule_id"] for p in displayed if states[str(p["schedule_id"])]["state"] in
                  ("no_capacity", "no_membership")]
     actual = [r for r in commitments if r["date"][:7] == month]

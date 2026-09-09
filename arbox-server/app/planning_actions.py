@@ -11,8 +11,10 @@ import secrets
 import time
 
 from .membership_policy import eligible, fingerprint
+from .arbox_client import ArboxError
 from .notification_reply import NotificationReply
 from .store import NO_SCHEDULE
+from .planning_intent import snapshot, token as intent_token
 
 
 def digest(value):
@@ -20,8 +22,7 @@ def digest(value):
 
 
 def session_identity(session):
-    return {k: session.get(k) for k in
-            ('schedule_id', 'category_id', 'category_name', 'coach_name', 'date', 'start_time')}
+    return snapshot(session)
 
 
 class PlanningActions:
@@ -41,7 +42,7 @@ class PlanningActions:
         from .rules import fmt_when
         return f"{fmt_when(session)}\n{session.get('category_name') or 'שיעור'} · {session.get('coach_name') or ''}".strip(' ·')
 
-    async def notice_buttons(self, problems):
+    async def notice_buttons(self, problems, *, force_list=False):
         tag = 'arbox-plan-' + secrets.token_urlsafe(12)
         context = {'studio': self.e.store.active_box_id,
                    'account': self.e.membership_policy.key(0),
@@ -53,11 +54,15 @@ class PlanningActions:
                           'identity': session_identity(session),
                           'selected': plan.get('membership_user_id'),
                           'group': secrets.token_urlsafe(12)})
-        if len(items) == 1:
+        if len(items) == 1 and not force_list:
             return await self.actions(items[0])
         return [[await self.button('בחירת אימון לתיקון', 'list', context, items=items, page=0)]]
 
     async def actions(self, context):
+        session = await self.e.store.get_session(context['schedule_id'])
+        if session and await self.e.store.intent_change(session):
+            return [[await self.button('אישור האימון המעודכן', 'keep_change', context),
+                     await self.button('ביטול התכנון הזה', 'drop_change', context)]]
         return [[await self.button('התעלם מסוג השיעור', 'ignore', context),
                  await self.button('בחירת מנוי', 'members', context, page=0)]]
 
@@ -99,12 +104,32 @@ class PlanningActions:
             if plan.get('membership_user_id') != c.get('selected'):
                 return self.reply(c, 'בחירת המנוי כבר השתנתה. פתחו את התכנון המעודכן.')
             op = c['operation']
+            if op in ('keep_change', 'drop_change'):
+                if not await self.e.store.intent_change(session):
+                    return self.reply(c, 'השינוי כבר טופל. לא בוצע שינוי נוסף.')
+                if op == 'keep_change':
+                    try:
+                        result = await self.e.confirm_plan_change(session['schedule_id'], intent_token(session))
+                    except ArboxError as err:
+                        return self.reply(c, str(err))
+                    message = '✓ האימון המעודכן אושר.\n' + result.get('reason', 'התכנון נשמר')
+                else:
+                    if plan.get('planning_source') == 'autobook':
+                        await self.e.store.set_automation_skip(session['schedule_id'], True)
+                    else:
+                        await self.e.store.unwatch(session['schedule_id'])
+                    message = '✓ התכנון הזה בוטל.'
+                await self.e.store.take_prompt(cid)
+                await self.e.store.answer_batch(c.get('group'))
+                return self.reply(c, message)
             if op in ('open', 'ignore', 'members'):
                 # Opening the correction flow is an answer too: stop the
                 # notifier from escalating the original notice to another channel.
                 await self.e.store.take_prompt(cid)
             if op == 'open':
-                return self.reply(c, self.label(session) + '\n\nאיך לטפל באימון?', await self.actions(c))
+                change = await self.e.store.intent_change(session)
+                detail = change['reason'] + '\nהתכנון מושהה · נדרש אישור' if change else 'איך לטפל באימון?'
+                return self.reply(c, self.label(session) + '\n\n' + detail, await self.actions(c))
             if op == 'ignore':
                 return self.reply(c, f"להפסיק לתכנן {session['category_name']} בסטודיו הזה?\n\nהרשמות קיימות לא יבוטלו.",
                     [[await self.button('כן, התעלם מהסוג הזה', 'ignore_confirm', c),

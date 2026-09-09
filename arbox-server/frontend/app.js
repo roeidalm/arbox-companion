@@ -1344,6 +1344,22 @@ function mountSessionMembership(host, session, studio) {
   };
   host.append(label, save);
 }
+
+function confirmChangedWorkout(s) {
+  const studio = state.selectedStudioId;
+  const b = document.createElement('button'); b.className = 'act future';
+  b.textContent = 'אישור האימון המעודכן';
+  b.onclick = async () => {
+    if (b.disabled || !await confirmSchedule(`${s.planning.reason}\n\nלהשאיר את התכנון לאימון המעודכן?`)) return;
+    b.disabled = true;
+    try {
+      const result = await api(`/api/planning/${s.schedule_id}/confirm-change`, {method:'POST',
+        headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify({expected_token:s.planning.token})});
+      toast(result.planning?.reason || 'התכנון עודכן'); await loadMine(); await loadSchedule();
+    } catch(e) { toast(e.message); b.disabled = false; }
+  };
+  return b;
+}
 async function renderStudioMemberships(profile) {
   const studio = state.selectedStudioId, host = $('#studioMemberships');
   if (host.dataset.studio === String(studio) && host.querySelector('.mu-editor')) return;
@@ -1454,9 +1470,13 @@ async function renderMineData(data, studio, quotaLoad) {
     grow.append(t1, t2);
     if (s.planning && s.planning.state !== 'ready') {
       const note = document.createElement('p');
-      note.textContent = [s.planning.reason, membershipName(s.planning.membership_user_id)].filter(Boolean).join(' · ');
+      note.textContent = [s.planning.reason, s.planning.state === 'session_changed' ? '' : membershipName(s.planning.membership_user_id)].filter(Boolean).join(' · ');
       note.className = 'planning-warning';
       grow.append(note);
+      if (s.planning.state === 'session_changed') {
+        const paused = document.createElement('small'); paused.textContent = 'התכנון מושהה · נדרש אישור מחדש';
+        grow.append(paused, confirmChangedWorkout(s));
+      }
     }
     const assigned = s.planning?.membership_user_id ?? s.membership_user_id;
     if (assigned) { const membership = document.createElement('small'); membership.className = 'mine-membership'; membership.textContent = membershipName(assigned); grow.append(membership); }
@@ -1484,7 +1504,7 @@ async function renderMineData(data, studio, quotaLoad) {
     const act = uncertain ? null : s.planning_source === "autobook" ? occurrenceSkipButton(s) : actionButton(s);
     const pick = uncertain || s.planning_source === "autobook" ? null : membershipPicker(s, act);
     if (act) { if (s.user_booked != null) act.textContent = 'ביטול הרשמה'; c.appendChild(act); }
-    if (s.planning?.state !== 'uncertain' && s.user_booked == null && s.user_in_standby == null && (pick || s.planning)) {
+    if (!['uncertain','session_changed'].includes(s.planning?.state) && s.user_booked == null && s.user_in_standby == null && (pick || s.planning)) {
       const check = document.createElement('details'); check.className = 'mine-check';
       const heading = document.createElement('summary'); heading.textContent = s.planning && s.planning.state !== 'ready' ? 'בדיקה כאן' : 'בחירת מנוי לאימון';
       check.append(heading);

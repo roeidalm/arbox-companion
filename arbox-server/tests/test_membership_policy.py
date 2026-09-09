@@ -69,6 +69,7 @@ async def engine(tmp_path, monkeypatch):
         book=AsyncMock(return_value=raw(user_booked=88)), join_standby=AsyncMock(),
         membership_details=AsyncMock(side_effect=ArboxError('not available',status=500)), membership_schedules=AsyncMock(return_value={'past':[], 'future':[], 'lateCancellation':[]}))
     syncer = SimpleNamespace(ensure_identity=AsyncMock(), refresh_membership=AsyncMock(),
+                             refresh_selected=AsyncMock(side_effect=lambda rows:{s['schedule_id'] for s in rows}),
                              box_id=73, location_id=42, membership_user_id=10)
     e = RulesEngine(store, client, syncer, notifier)
     for m in members:

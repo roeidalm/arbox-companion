@@ -1155,6 +1155,13 @@ export class ArboxAppPanel extends HTMLElement {
     if (planning) {
       const label = this._data.summary?.memberships?.find(m => m.id === planning.membership_user_id)?.plan;
       body.append(node("p", [planning.reason, label].filter(Boolean).join(" · "), planning.state === "ready" ? "muted" : "warning"));
+      if (planning.state === 'session_changed') {
+        body.append(node('p', 'התכנון מושהה · נדרש אישור מחדש', 'warning'),
+          button('אישור האימון המעודכן', () => this.confirm(`${planning.reason}\n\nלהשאיר את התכנון לאימון המעודכן?`,
+            () => this.act('planning_confirm_change', {schedule_id:s.schedule_id, expected_token:planning.token}, context))),
+          this.actionButton('ביטול התכנון הזה', s.planning_source === 'autobook' && !s.watched ? 'skip' : 'unwatch', {schedule_id:s.schedule_id}, context));
+        return;
+      }
       if (planning.state === 'uncertain') {
         body.append(button('בדיקת מצב ההזמנה', () => this.act('planning_reconcile', {schedule_id:s.schedule_id}, context)),
           button('בדקתי בארבוקס: האימון לא מוזמן', () => this.confirm('לחדש את התכנון? יש לאשר רק אחרי שבדקתם בארבוקס שאין הרשמה או המתנה לאימון.',

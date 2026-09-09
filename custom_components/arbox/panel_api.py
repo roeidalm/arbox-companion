@@ -26,6 +26,7 @@ READS = {
 }
 # Method, path, path identifier, permitted JSON fields. Identifiers must be integers.
 ACTIONS = {
+    "planning_confirm_change": ("POST", "/planning/{id}/confirm-change", "schedule_id", {"expected_token"}),
     "planning_reconcile": ("POST", "/planning/{id}/reconcile", "schedule_id", {"confirm_not_booked"}),
     "membership_policy_save": ("PUT", "/membership-policies/{id}", "membership_id", {"category_ids", "limits", "fingerprint"}),
     "book": ("POST", "/book", None, {"schedule_id", "membership_user_id"}),

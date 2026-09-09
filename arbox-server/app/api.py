@@ -1163,6 +1163,21 @@ class WatchMembershipBody(BaseModel):
     membership_user_id: int | None = None
 
 
+class ConfirmPlanChangeBody(BaseModel):
+    expected_token: str
+
+
+@router.post('/planning/{schedule_id}/confirm-change')
+async def confirm_plan_change(request: Request, schedule_id: int, body: ConfirmPlanChangeBody,
+                              x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    try:
+        planning = await ctx(request).rules_engine.confirm_plan_change(schedule_id, body.expected_token)
+    except ArboxError as err:
+        raise HTTPException(409, str(err)) from err
+    return {'ok': True, 'planning': planning}
+
+
 @router.get("/watchlist")
 async def get_watchlist(request: Request):
     s = ctx(request)

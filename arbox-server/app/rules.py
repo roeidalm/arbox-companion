@@ -29,6 +29,7 @@ from .sync import FULL_WINDOW_DAYS, Syncer
 from .membership_policy import MembershipPolicy, eligible
 from .quota_planner import plan_quota, REASONS
 from .planning_actions import PlanningActions
+from .planning_intent import snapshot as intent_snapshot, token as intent_token, description as intent_description
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -417,6 +418,7 @@ class RulesEngine:
         plans: list[dict] = []
         seen: set[int] = set()
         stored = await self.store.planned_sessions(start, end)
+        pinned_ids = {p['schedule_id'] for p in stored}
         for raw in [*(extra_plans or []), *stored]:
             plan = dict(raw)
             sid = int(plan["schedule_id"])
@@ -466,12 +468,90 @@ class RulesEngine:
                 })
                 seen.add(sid)
 
+        # A renamed/replaced automatic occurrence must remain visible for
+        # review even if its new details no longer match the original rule.
+        for record in await self.store.list_auto_intents():
+            sid = record['schedule_id']
+            if sid in seen or sid in skipped:
+                continue
+            original = json.loads(record['snapshot'])
+            signature = self._intent_rule_signature(rules, original)
+            if not signature or signature != record['rule_signature']:
+                continue  # rule removed/edited: the user changed their intent
+            session = await self.store.get_session(sid)
+            if (not session or not start <= session['date'] <= end
+                    or session.get('user_booked') is not None or session.get('user_in_standby') is not None
+                    or self._blocked(session) or await self.store.autobook_attempted(sid)
+                    or await self.store.vacation_blocks(session['date'], 'autobook')):
+                continue
+            if await self.store.intent_change(session):
+                plans.append({**session, 'planning_source':'autobook', 'membership_user_id':None})
+                seen.add(sid)
+
+        for plan in plans:
+            session = await self.store.get_session(plan['schedule_id']) or plan
+            signature = self._intent_rule_signature(rules, session) if plan['planning_source'] == 'autobook' else None
+            existing = await self.store.get_intent(plan['schedule_id'])
+            if plan['planning_source'] == 'scheduled' and plan['schedule_id'] not in pinned_ids and not existing:
+                # Quota previews / manual booking requests are not saved plans.
+                plan['intent_change'] = None
+                continue
+            if (existing and existing['source'] == 'autobook' and
+                    self._intent_rule_signature(rules, json.loads(existing['snapshot'])) == existing['rule_signature']):
+                signature = existing['rule_signature']
+            # Preserve the original rule for an occurrence that stopped matching.
+            if signature or not existing:
+                await self.store.remember_intent(session, plan['planning_source'], signature)
+            plan['intent_change'] = await self.store.intent_change(session)
+
         plans.sort(key=lambda p: (
             p.get("registration_opens") or
             f"{p.get('date', '9999-12-31')}T{p.get('start_time') or '23:59'}",
             p.get("created_at") or "", int(p.get("schedule_id") or 0),
         ))
         return plans
+
+    @staticmethod
+    def _intent_rule_signature(rules, session):
+        matched = [{k:r.get(k) for k in ('id','coaches','categories','weekdays','time_from','time_to')}
+                   for r in rules if rule_matches(r, session)]
+        return json.dumps(sorted(matched, key=lambda r:r['id']), sort_keys=True) if matched else None
+
+    async def confirm_plan_change(self, sid: int, expected: str) -> dict:
+        async with self._tick_lock:
+            plans = await self._planned_sessions(date.today().isoformat(), '9999-12-31')
+            if sid not in {p['schedule_id'] for p in plans}:
+                raise PlanningBlocked('התכנון כבר אינו פעיל')
+            session = await self.store.get_session(sid)
+            found = await self.syncer.refresh_selected([session])
+            current = await self.store.get_session(sid)
+            if sid not in found or intent_token(current) != expected:
+                raise PlanningBlocked('פרטי האימון השתנו שוב או שאינו מופיע בלוח. רעננו ובדקו מחדש')
+            await self.store.accept_intent(current)
+            # Reconfirming a changed automatic occurrence creates explicit
+            # intent for this occurrence, without broadening its recurring rule.
+            record = await self.store.get_intent(sid)
+            if record['source'] == 'autobook':
+                await self.store.watch(sid)
+            status = await self.quota_status(target_date=current['date']) or {}
+            await self.schedule_openings()
+            await self.store.log_event('info','planning','השינוי באימון אושר',
+                                       fmt_class(current),sid)
+            return status.get('plan_states', {}).get(str(sid), {})
+
+    async def _guard_booking_identity(self, session):
+        """Read immediately before a write; failures never permit stale booking."""
+        sid = session['schedule_id']
+        try:
+            found = await self.syncer.refresh_selected([session])
+        except ArboxError as err:
+            raise PlanningBlocked('לא ניתן לאמת את פרטי האימון כרגע — ההרשמה מושהית') from err
+        current = await self.store.get_session(sid)
+        if sid not in found or not current:
+            raise PlanningBlocked('האימון אינו מופיע בלוח המעודכן — ההרשמה מושהית')
+        if intent_snapshot(current) != intent_snapshot(session) or await self.store.intent_change(current):
+            raise PlanningBlocked('פרטי האימון השתנו — נדרש אישור מחדש ב׳שלי׳')
+        return current
 
     async def uncertain_sessions(self) -> list[dict]:
         """Interrupted writes remain visible, including unpinned manual actions.
@@ -484,7 +564,7 @@ class RulesEngine:
         for sid, operation in pending.items():
             session = await self.store.get_session(int(sid)) or operation.get('session')
             if session and session.get('user_booked') is None and session.get('user_in_standby') is None:
-                rows.append({**session, 'membership_user_id': operation['membership_user_id'],
+                rows.append({**{k:v for k,v in session.items() if k != 'raw_json'}, 'membership_user_id': operation['membership_user_id'],
                              'planning_source': 'uncertain'})
         return rows
 
@@ -605,6 +685,8 @@ class RulesEngine:
         for plan in plans:
             if recent >= 2:
                 break
+            if plan.get('intent_change'):
+                continue
             # Pin rows deliberately carry only cached presentation fields;
             # resolve the full session before evaluating the safety boundary.
             session = await self.store.get_session(plan["schedule_id"]) or {}
@@ -650,6 +732,10 @@ class RulesEngine:
                 projected = plan_quota(details, commitments, projected_plans, session["date"][:7])
                 if projected["plan_allocations"].get(str(session["schedule_id"])) != member["id"]:
                     continue
+                try:
+                    session = await self._guard_booking_identity(session)
+                except ArboxError:
+                    continue
                 probes[probe_id] = {"at": time.time(), "schedule_id": session["schedule_id"]}
                 await self.store.set_meta(history_key, probes)
                 recent += 1
@@ -693,7 +779,9 @@ class RulesEngine:
             for plan in (p for p in plans if p["date"][:7] == month):
                 sid = str(plan["schedule_id"])
                 state = (status.get("plan_states") or {}).get(sid, {})
-                if state.get("state") not in (None, "ready"):
+                # Changed workout details belong to the single nightly digest,
+                # never a push for each sync, tick, or restart.
+                if state.get("state") not in (None, "ready", "session_changed"):
                     current[sid] = state.get("state")
                     held.setdefault(sid, plan['date'])
                     if previous.get(sid) != current[sid]:
@@ -731,7 +819,7 @@ class RulesEngine:
         await self.syncer.refresh_membership()
         await self.refresh_planning_evidence(force_history=True)
         sid = session["schedule_id"]
-        fresh = await self.store.get_session(sid)
+        fresh = await self._guard_booking_identity(session)
         if not fresh:
             raise PlanningBlocked('האימון אינו נמצא בסטודיו הפעיל. רעננו את התצוגה')
         if fresh.get("user_booked") is not None or fresh.get("user_in_standby") is not None:
@@ -905,6 +993,64 @@ class RulesEngine:
     # -------------------------------------------------------------- digest
 
     async def nightly_digest(self) -> None:
+        async with self._tick_lock:
+            key = self.membership_policy.key(0) + ':daily_digest_attempt'
+            today = date.today().isoformat()
+            if await self.store.get_meta(key) == today:
+                return
+            # Persist before IO: duplicate jobs, reconnects and restarts must
+            # not resend the daily message when delivery outcome is uncertain.
+            await self.store.set_meta(key, today)
+            await self._nightly_digest()
+
+    async def _daily_personal_review(self):
+        today = date.today().isoformat()
+        plans = await self._planned_sessions(today, '9999-12-31')
+        mine = await self.store.my_sessions(include_watched=True, date_from=today)
+        selected = {s['schedule_id']:s for s in [*mine, *plans]}
+        key = self.membership_policy.key(0) + ':daily_mine_snapshot'
+        previous = await self.store.get_meta(key) or {str(sid):intent_snapshot(s) for sid,s in selected.items()}
+        try:
+            found = await self.syncer.refresh_selected(list(selected.values()))
+        except ArboxError as err:
+            _LOGGER.warning('Daily personal review unavailable: %s', err)
+            return ['לא ניתן היה לבדוק עדכונים בארבוקס; מוצגים הנתונים האחרונים.'], []
+        lines, problems, current = [], [], {}
+        promoted = False
+        plans = await self._planned_sessions(today, '9999-12-31')
+        for plan in plans:
+            if plan.get('intent_change'):
+                state = plan['intent_change']
+                lines += ['', fmt_class(plan), state['reason'], 'התכנון מושהה · נדרש אישור']
+                problems.append((plan, state, {}))
+        for sid, old in selected.items():
+            session = await self.store.get_session(sid) or old
+            current[str(sid)] = intent_snapshot(session)
+            if old.get('user_booked') is None and old.get('user_in_standby') is None:
+                continue
+            before = previous.get(str(sid), intent_snapshot(old))
+            if sid not in found:
+                lines += ['', fmt_class(old), 'ההרשמה לא נמצאה בלוח המעודכן — כדאי לבדוק מול הסטודיו']
+            else:
+                if before != intent_snapshot(session):
+                    lines += ['', fmt_class(session), intent_description(before, session), 'לא ביצענו ביטול הרשמה']
+                if session.get('user_booked') is None and session.get('user_in_standby') is None:
+                    lines += ['', fmt_class(session), 'ההרשמה או ההמתנה כבר אינן מופיעות בארבוקס — כדאי לבדוק מול הסטודיו']
+                elif old.get('user_in_standby') is not None and session.get('user_booked') is not None:
+                    promoted = True
+                    lines += ['', fmt_class(session), '🎉 עלית מרשימת ההמתנה — ההרשמה מאושרת']
+        if promoted:
+            # This read consumed the standby transition before the usual sync
+            # callback. Include it here and refresh capacity without a second push.
+            try:
+                await self.syncer.refresh_membership()
+            except ArboxError:
+                lines += ['', 'לא ניתן היה לעדכן את יתרת המנוי; ננסה שוב בסנכרון הבא.']
+        await self.store.set_meta(key, current)
+        await self.store.set_meta(self.membership_policy.key(0) + ':daily_mine_checked_at', datetime.now().isoformat())
+        return (['🔄 שינויים באימונים שלך'] + lines if lines else []), problems
+
+    async def _nightly_digest(self) -> None:
         """One evening message with independent tomorrow and booking sections.
 
         The first section is a reminder about commitments on the next day and
@@ -916,15 +1062,8 @@ class RulesEngine:
         next_day = (today + timedelta(days=1)).isoformat()
         horizon = (today + timedelta(days=FULL_WINDOW_DAYS)).isoformat()
 
-        # Existing commitments remain visible even when there are no notify
-        # rules or future registration candidates are blocked by a vacation.
-        try:
-            # The 15–30 day tail was refreshed once at 19:30 and the first
-            # 14 days are refreshed throughout the day. Only tomorrow needs
-            # one last point refresh for attendance and standby changes.
-            await self.syncer.sync_range(next_day, next_day)
-        except ArboxError as err:
-            _LOGGER.warning("Tomorrow reminder pre-sync failed, using cached: %s", err)
+        # One targeted review, in this same daily run, before composing text.
+        changes, changed_plans = await self._daily_personal_review()
         tomorrow_sessions = await self.store.get_sessions(
             date_from=next_day, date_to=next_day, mine=True)
         booked_next_day = [
@@ -936,7 +1075,7 @@ class RulesEngine:
             and s.get("user_in_standby") is not None
         ]
 
-        sections: list[list[str]] = []
+        sections: list[list[str]] = [changes] if changes else []
         if booked_next_day:
             sections.append(
                 ["📌 מחר"]
@@ -982,6 +1121,9 @@ class RulesEngine:
                 if await self.store.vacation_blocks(s["date"], "autobook")
             }
             planned = await self._planned_sessions(today.isoformat(), horizon)
+            paused_ids = {p['schedule_id'] for p in planned if p.get('intent_change')}
+            candidates = [s for s in candidates if s['schedule_id'] not in paused_ids]
+            planned = [p for p in planned if not p.get('intent_change')]
             planned_ids = {p["schedule_id"] for p in planned}
             covered = [
                 s for s in candidates
@@ -1067,6 +1209,24 @@ class RulesEngine:
             _LOGGER.info("Nightly message: nothing relevant")
             return
 
+        if changed_plans:
+            # One entry point keeps the daily message readable on both
+            # transports; the existing selector handles several workouts.
+            change_buttons = await self.planning_actions.notice_buttons(changed_plans, force_list=True)
+            change_buttons[0][0]['text'] = 'בדיקת השינויים באימונים'
+            buttons = [*(buttons or []), *change_buttons]
+            cids += [b['data'].split(':', 1)[1] for row in change_buttons for b in row]
+
+        if sum(not b.get('tg_only') for row in buttons or [] for b in row) > 3:
+            # HA supports three actions. Keep one daily notification: full
+            # per-class actions remain in Telegram and the authenticated panel.
+            telegram = [[{**b, 'tg_only': True} for b in row if not b.get('ha_only')]
+                        for row in buttons]
+            ha = [[{'text': 'ללוח האימונים', 'uri': '/arbox#calendar', 'ha_only': True}]]
+            if changed_plans:
+                ha += [[{**b, 'ha_only': True} for b in row] for row in change_buttons]
+            buttons = [*[row for row in telegram if row], *ha]
+
         delivered = await self.notifier.send(
             "\n\n".join("\n".join(section) for section in sections),
             buttons, kind="digest",
@@ -1104,7 +1264,8 @@ class RulesEngine:
             else:
                 action = "standby"
             await self.store.add_prompt(
-                cid, s["schedule_id"], action, dry_run=dry_run, batch_id=batch
+                cid, s["schedule_id"], action, dry_run=dry_run, batch_id=batch,
+                payload=json.dumps({'identity':intent_snapshot(s)})
             )
             icon = {"book": "📖", "standby": "⏳", "watch": "🎯"}[action]
             label = f"{icon} {s['start_time']}"
@@ -1372,6 +1533,15 @@ class RulesEngine:
 
         try:
             await self.syncer.ensure_identity()
+            if action in ("watch", "book", "standby"):
+                try:
+                    expected = json.loads(prompt.get("payload") or "{}").get("identity")
+                except (TypeError, ValueError):
+                    expected = None
+                if not session or expected != intent_snapshot(session):
+                    return "פרטי האימון בהודעה כבר אינם עדכניים. פתחו את הלוח ובחרו מחדש — לא בוצעה הרשמה או תזמון"
+                if action == "watch":
+                    session = await self._guard_booking_identity(session)
             if action == "book":
                 updated, membership_id = await self.perform_membership_action(
                     session, "book")
@@ -1949,6 +2119,8 @@ class RulesEngine:
             s = await self.store.get_session(w["schedule_id"])
             if not s:
                 continue
+            if await self.store.intent_change(s):
+                continue
             if s.get("user_booked") is not None or s.get("user_in_standby") is not None:
                 await self.store.mark_watch(w["schedule_id"], "already booked")
                 continue
@@ -2169,6 +2341,7 @@ class RulesEngine:
                  if r["enabled"] and r["mode"] == "autobook"]
         if not rules:
             return
+        await self._planned_sessions(date.today().isoformat(), '9999-12-31')
         now = datetime.now()
         skipped = await self.store.automation_skip_ids()
         sessions = await self.store.get_sessions(date_from=date.today().isoformat())

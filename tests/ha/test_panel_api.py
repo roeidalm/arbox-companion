@@ -55,6 +55,19 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 "action": "skip", "studio_id": 8, "data": data})
         self.server._session.request.assert_not_called()
 
+    async def test_changed_workout_confirmation_is_action_only_and_scoped(self):
+        self.entry.options[api.VIEW_USERS] = ['user']
+        msg = {'id':1, 'entry_id':'one', 'action':'planning_confirm_change', 'studio_id':8,
+               'data':{'schedule_id':123, 'expected_token':'details-reviewed'}}
+        await api.ws_action.__wrapped__(self.hass, self.conn, msg)
+        self.server._session.request.assert_not_called()
+        self.entry.options[api.ACTION_USERS] = ['user']
+        await api.ws_action.__wrapped__(self.hass, self.conn, msg)
+        args,kw = self.server._session.request.call_args
+        self.assertEqual(args, ('POST','http://internal-arbox:8000/api/planning/123/confirm-change'))
+        self.assertEqual(kw['json'], {'expected_token':'details-reviewed'})
+        self.assertEqual(kw['headers']['X-Arbox-Studio-Id'], '8')
+
     async def test_calendar_export_is_a_scoped_read_without_arbitrary_urls(self):
         self.entry.options[api.VIEW_USERS] = ['user']
         calls = []

@@ -709,6 +709,7 @@ blockquote {
 .session-card.mine-card{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;text-align:start;cursor:default}
 .mine-heading{display:flex;flex:1 1 65%;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:0;border:0;text-align:start;min-width:0;background:none}
 .mine-heading strong{font-size:1em}.mine-heading .muted{flex-basis:100%;font-size:.9em}.mine-time{font-variant-numeric:tabular-nums}
+.mine-heading .previous-name{font-size:.8em;color:var(--muted);}
 .mine-member,.mine-reason,.mine-actions,.mine-inline-host{flex-basis:100%;min-width:0}.mine-reason{margin:2px 0;font-size:.9em}
 .mine-actions,.session-calendar-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mine-actions button,.mine-actions a{padding:7px 12px;font-size:.9em;min-height:44px}
 .session-calendar-links a{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:12px;color:var(--accent);text-decoration:none}

@@ -618,10 +618,11 @@ export class ArboxAppPanel extends HTMLElement {
     const info = button('', () => this.openSession(s), 'mine-heading');
     info.dataset.focusKey = `session-${s.schedule_id}`;
     const time = node('b', `${s.start_time?.slice(0,5) || ''}–${s.end_time?.slice(0,5) || ''}`, 'mine-time'); time.dir = 'ltr';
-    info.append(time, node('strong', s.category_name), node('span', s.coach_name, 'muted'));
+    info.append(time, node('strong', s.category_name));
     if (s.planning_change?.before) info.append(node('small',
       s.planning_change.before.category_name !== s.category_name
-        ? `קודם: ${s.planning_change.before.category_name}` : 'פרטי האימון עודכנו', 'muted'));
+        ? `קודם: ${s.planning_change.before.category_name}` : 'עודכן', 'previous-name'));
+    info.append(node('span', s.coach_name, 'muted'));
     card.append(info, node('span', status, `badge ${kind}`));
     const planning = s.planning || this._data.summary?.quota?.plan_states?.[String(s.schedule_id)];
     const mid = planning?.membership_user_id ?? s.membership_user_id;
@@ -786,12 +787,17 @@ export class ArboxAppPanel extends HTMLElement {
           item.open = this._mineHistoryExpanded.has(row.schedule_id);
           item.ontoggle = () => { if (item.isConnected) item.open
             ? this._mineHistoryExpanded.add(row.schedule_id) : this._mineHistoryExpanded.delete(row.schedule_id); };
-          title.append(node('strong', `${fmtDate(row.date)} · ${row.start_time || ''} · ${row.category_name || 'אימון'} · ${row.coach_name || ''}`),
-            node('span', ` · ${labels[row.status] || row.status || ''}`, 'muted'));
+          const compact = {planning_changed:'השיעור השתנה', planning_change_accepted:'השינוי אושר',
+            planning_change_cancelled:'בוטל בעקבות שינוי'};
+          const day = row.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('he-IL',{day:'numeric',month:'numeric'}) : '';
+          title.append(node('strong', `${day} · ${(row.start_time || '').slice(0,5)} · ${row.category_name || 'אימון'} · ${row.coach_name || ''}`),
+            node('span', ` · ${compact[row.status] || labels[row.status] || row.status || ''}`, 'muted'));
           item.append(title);
           const change = (data.changes || []).find(c => c.schedule_id === row.schedule_id);
-          if (change) item.append(node('p', change.reason_text, 'muted'));
-          for (const event of (data.events || []).filter(e => e.schedule_id === row.schedule_id)) {
+          const events = (data.events || []).filter(e => e.schedule_id === row.schedule_id);
+          if (change && !events.some(e => e.change)) item.append(node('p', change.reason_text, 'muted'));
+          if (change && !compact[row.status]) title.append(node('small', ' · עודכן', 'muted'));
+          for (const event of events) {
             item.append(node('p', `${event.occurred_at} · ${labels[event.event_type] || event.event_type}`
               + (event.reason_text ? ` · ${event.reason_text}` : ''), 'muted'));
           }

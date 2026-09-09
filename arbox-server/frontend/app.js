@@ -1837,16 +1837,12 @@ function renderHistory() {
     what.className = "hist-what";
     what.textContent = [x.category_name, x.coach_name].filter(Boolean).join(" · ");
     const change = (historyData?.changes || []).find(e => e.schedule_id === x.schedule_id);
-    if (change) {
-      const reason = document.createElement('small'); reason.className = 'hint';
-      reason.style.display = 'block'; reason.textContent = change.reason_text;
-      what.append(reason);
-    }
 
     const tag = document.createElement("button");
     tag.type = "button";
     tag.className = "hist-tag";
-    tag.textContent = OUTCOMES[x.outcome].label;
+    tag.textContent = OUTCOMES[x.outcome].label
+      + (change && !x.outcome.startsWith('planning_') ? ' · עודכן' : '');
     tag.setAttribute("aria-expanded", "false");
 
     const detail = document.createElement("div");

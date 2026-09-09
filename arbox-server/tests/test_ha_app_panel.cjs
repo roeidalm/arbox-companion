@@ -260,6 +260,6 @@ test('My history is read lazily and keeps cancelled and accepted changes visible
   panel._content = make('main');
   panel.renderMineHistory();
   const visible = content(panel._content);
-  for (const text of ['Modern dance','Noa','HS','Original class','השינוי אושר','התכנון בוטל בעקבות השינוי'])
+  for (const text of ['Modern dance','Noa','HS','Original class','השינוי אושר','בוטל בעקבות שינוי'])
     assert.ok(visible.includes(text), text);
 });

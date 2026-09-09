@@ -1,7 +1,7 @@
 {
   "domain": "arbox",
   "name": "Arbox",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "documentation": "https://github.com/roeidalm/arbox-companion",
   "issue_tracker": "https://github.com/roeidalm/arbox-companion/issues",
   "requirements": [],

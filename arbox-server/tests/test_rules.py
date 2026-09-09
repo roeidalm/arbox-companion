@@ -284,6 +284,7 @@ async def test_plans_claim_capacity_in_opening_order_and_reconcile_once(
         settings = SimpleNamespace(
             preferred_membership_id=20,
             quota_for_month=lambda _month: 0,
+            is_blocked=lambda _category: False,
         )
         notifier = SimpleNamespace(
             settings=settings, on_callback=None, on_message=None,
@@ -507,6 +508,8 @@ class DigestStore:
         return rows
 
     async def automation_skip_ids(self): return set()
+    async def get_session(self, schedule_id):
+        return next((s for s in await self.get_sessions() if s['schedule_id'] == schedule_id), None)
     async def planned_sessions(self, start, end):
         return [p for p in self.plans if start <= p['date'] <= end]
     async def autobook_attempted(self, sid): return False

@@ -1,3 +1,4 @@
+import {filterPicker, selectedValues} from './filter-picker.js?v=2';
 // Rich journal views share the server's saved data; these aggregates describe
 // the current filter only and never infer booking, attendance or quota rules.
 const node = (tag, text, cls) => {
@@ -68,8 +69,8 @@ export function filterJournalRows(rows, filters, today) {
     if (cutoff && (row.date || "") < cutoff) return false;
     if (f.date_from && (row.date || "") < f.date_from) return false;
     if (f.date_to && (row.date || "") > f.date_to) return false;
-    if (f.category && row.category_name !== f.category) return false;
-    if (f.coach && row.coach_name !== f.coach) return false;
+    if (selectedValues(f.category).length && !selectedValues(f.category).includes(row.category_name)) return false;
+    if (selectedValues(f.coach).length && !selectedValues(f.coach).includes(row.coach_name)) return false;
     if (f.attendance && row.status !== f.attendance) return false;
     if (f.exercise && !(row.exercises || []).some((e) => e.name === f.exercise))
       return false;
@@ -193,7 +194,7 @@ export function journalSignature(panel) {
 }
 function activeCount(filters) {
   return Object.entries(filters).filter(
-    ([key, value]) => value && !(key === "period" && value === "all"),
+    ([key, value]) => (Array.isArray(value) ? value.length : value) && !(key === "period" && value === "all"),
   ).length;
 }
 function select(label, options, value, onchange) {
@@ -279,7 +280,14 @@ function filterControls(panel, rows) {
           "תרגיל",
           rows.flatMap((r) => (r.exercises || []).map((e) => e.name)),
         ],
-      ])
+      ]) {
+        if (key !== 'exercise') {
+          s.pickers ||= {};
+          const pickerState = s.pickers[key] ||= {};
+          grid.append(filterPicker({label, key:`journal-${key}`, values:[...new Set(values.filter(Boolean))], selected:f[key],
+            ...pickerState, toggle:open=>{pickerState.open=open;}, onSearch:search=>{pickerState.search=search;}, change:v=>update(key,v)}));
+          continue;
+        }
         grid.append(
           select(
             label,
@@ -291,6 +299,7 @@ function filterControls(panel, rows) {
             (v) => update(key, v),
           ),
         );
+      }
       const feedback = [
         ["", "הכול"],
         ["documented", "עם משוב"],

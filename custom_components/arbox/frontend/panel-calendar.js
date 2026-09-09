@@ -1,4 +1,4 @@
-import {filterPicker, matchesFilters} from './filter-picker.js?v=1';
+import {filterPicker, matchesFilters} from './filter-picker.js?v=2';
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const dateOf = value => new Date(`${value}T12:00:00`);
 const add = (value, days) => {const d=dateOf(value);d.setDate(d.getDate()+days);return iso(d);};
@@ -47,7 +47,7 @@ function list(panel,rows,target){
   }
 }
 export function renderCalendar(panel,{mine=false}={}) {
-  if(!panel.shadowRoot.querySelector('link[data-calendar-style]')){const css=el('link');css.rel='stylesheet';css.href=new URL('./panel-calendar.css?v=3.3.0',import.meta.url).href;css.dataset.calendarStyle='';panel.shadowRoot.append(css);}
+  if(!panel.shadowRoot.querySelector('link[data-calendar-style]')){const css=el('link');css.rel='stylesheet';css.href=new URL('./panel-calendar.css?v=3.4.0',import.meta.url).href;css.dataset.calendarStyle='';panel.shadowRoot.append(css);}
   const view=(mine?panel._mineView:panel._view)||(mine?'all':'day');
   const today=panel.studioNow().slice(0,10),anchor=panel._date||today;
   const setView=v=>{if(mine)panel._mineView=v;else panel._view=v;panel._selectedDay=anchor;panel.load();};
@@ -81,9 +81,11 @@ export function renderCalendar(panel,{mine=false}={}) {
   const all=panel.rows().slice().sort((a,b)=>`${a.date}${a.start_time||''}`.localeCompare(`${b.date}${b.start_time||''}`));
   const filters=el('div',null,'pc-filter-fields');
   panel._calendarFilterOpen ||= {};
+  panel._calendarFilterSearch ||= {};
   for(const [key,text] of [['category_name','סוג שיעור'],['coach_name','מאמן/ת']]) {
-    filters.append(filterPicker({label:text, key, values:[...new Set(all.map(s=>s[key]).filter(Boolean))].sort(), selected:panel._filters?.[key],
+    filters.append(filterPicker({label:text, key, values:[...new Map(all.filter(s=>s[key]).map(s=>[s[key],{name:s[key],color:key==='category_name'?s.color:null}])).values()], selected:panel._filters?.[key],
       open:!!panel._calendarFilterOpen[key], toggle:open=>{panel._calendarFilterOpen[key]=open;},
+      search:panel._calendarFilterSearch[key]||'',onSearch:search=>{panel._calendarFilterSearch[key]=search;},
       change:values=>{panel._filters={...panel._filters,[key]:values};panel.render();}}));
   }
   const parts=el('div',null,'pc-dayparts');

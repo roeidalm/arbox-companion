@@ -1592,6 +1592,10 @@ async def ha_callback(request: Request, x_api_key: str | None = Header(None)):
     result = await s.rules_engine.handle_callback(
         action, reply_text=str(body.get("reply_text") or "") or None,
         source_channel="ha")
+    from .notification_reply import NotificationReply
+    if isinstance(result, NotificationReply):
+        await s.notifier._send_ha(result.text, result.buttons, force=True, tag=result.tag)
+        return {'ok': True, 'result': result.text}
     # the HA companion has no popup channel like Telegram's — send the
     # outcome back as a notification so the press gets visible feedback
     # the outcome text goes back as its own notification (the companion app

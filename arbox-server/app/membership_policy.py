@@ -107,11 +107,13 @@ class MembershipPolicy:
             limits.append({"count": max(0, int(finite)), "period": "card"})
         quota_known = bool(limits and not saved.get("unsupported") and
                            (current or finite is not None))
+        confirmed = list(saved.get('confirmed_category_ids') or []) if current and not saved.get('contradiction') else []
         return {
             **saved, "fingerprint": fingerprint(member), "category_ids": sorted(set(ids)),
             "categories_known": category_known, "quota_known": quota_known,
             "limits": limits, "unmatched": unmatched,
-            "state": "ready" if category_known and quota_known else "needs_review",
+            "confirmed_category_ids": confirmed,
+            "state": "ready" if (category_known or confirmed) and quota_known else "needs_review",
             "reason": ("פרטי המנוי השתנו — נדרש אימות מחדש" if saved and not current else
                        "מידע הזכאות התיישן — נדרש רענון או אישור ידני" if stale else
                        "השרת דחה את ההגדרה — נדרש לבדוק את ההתאמה" if saved.get("contradiction") else
@@ -183,6 +185,22 @@ class MembershipPolicy:
         await self.store.set_meta("quota_cache", None)
         return True
 
+    async def confirm_category(self, member: dict, category_id: int, expected_fingerprint: str):
+        if expected_fingerprint != fingerprint(member):
+            raise ValueError('פרטי המנוי השתנו')
+        policy = await self.get(member)
+        if (not policy.get('quota_known') or policy.get('contradiction')
+                or category_id in policy.get('denied_category_ids', [])
+                or category_id not in {c['id'] for c in await self.catalog()}):
+            raise ValueError('לא ניתן לאשר את ההתאמה הזו')
+        saved = await self.store.get_meta(self.key(member['id'])) or {}
+        if saved.get('fingerprint') != expected_fingerprint:
+            saved = {'fingerprint': expected_fingerprint}
+        saved['confirmed_category_ids'] = sorted(set(policy.get('confirmed_category_ids', [])) | {category_id})
+        saved['category_confirmed_at'] = time.time()
+        await self.store.set_meta(self.key(member['id']), saved)
+        await self.store.set_meta('quota_cache', None)
+
     async def save_manual(self, member: dict, category_ids: list[int], limits: list[dict],
                           expected_fingerprint: str) -> dict:
         if expected_fingerprint != fingerprint(member):
@@ -211,5 +229,6 @@ class MembershipPolicy:
 def eligible(member: dict, session: dict) -> bool:
     policy = member.get("policy") or {}
     return bool(policy.get("state") == "ready"
-                and session.get("category_id") in policy.get("category_ids", [])
+                and session.get('category_id') in (policy.get('category_ids', [])
+                    if policy.get('categories_known', True) else policy.get('confirmed_category_ids', []))
                 and session.get("category_id") not in policy.get("denied_category_ids", []))

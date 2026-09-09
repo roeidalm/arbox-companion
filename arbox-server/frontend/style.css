@@ -787,14 +787,14 @@ legend input { width: auto; }
 .mine-item.mine-standby,.session.schedule-standby{border-inline-start:4px solid #dab75c!important}
 .schedule-sync>summary,.studio-settings-grid details>summary{padding:8px 0;cursor:pointer;font-weight:600;min-height:44px}
 .schedule-sync{margin:10px 0;color:var(--muted)}.schedule-sync .refresh-bar{padding:8px 0}
-#coachChips,#categoryChips{display:inline-block;width:min(100%,290px);vertical-align:top;margin-inline-end:12px}
+#coachChips,#categoryChips{display:flex;min-width:0;margin:0}
 #coachChips label,#categoryChips label{margin:4px 0 8px}#coachChips select,#categoryChips select{min-height:44px}
 .studio-settings-grid .kv-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(0,2fr);align-items:start}
 .studio-settings-grid .kv-k{min-width:0;overflow-wrap:anywhere}.studio-settings-grid details.card{align-self:start}
 #studioMemberships:empty{display:none}.mu-editor input[type=checkbox]{width:20px}
 :root[data-theme=dark] .mu-manage,:root[data-theme=dark] .mine-check>summary{color:#8db0ff}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .mu-manage,:root:not([data-theme=light]) .mine-check>summary{color:#8db0ff}}
-@media(max-width:520px){#membershipCard{padding:4px 14px}.mine-item{gap:10px}.mine-item .grow{flex-basis:100%}.mine-item button,.mine-item a{min-height:44px}#coachChips,#categoryChips{width:calc(50% - 8px);margin-inline-end:4px}.mine-item .calendar-links{display:flex;flex-wrap:wrap}.studio-settings-grid .kv-row{grid-template-columns:minmax(90px,1fr) minmax(0,2fr)}}
+@media(max-width:520px){#membershipCard{padding:4px 14px}.mine-item{gap:10px}.mine-item .grow{flex-basis:100%}.mine-item button,.mine-item a{min-height:44px}#coachChips,#categoryChips{width:100%;margin:0}.mine-item .calendar-links{display:flex;flex-wrap:wrap}.studio-settings-grid .kv-row{grid-template-columns:minmax(90px,1fr) minmax(0,2fr)}}
 @media(max-width:360px){header nav{width:100%;gap:2px;justify-content:space-between}header nav .tab{padding:8px 7px;font-size:.86em}}
 .mine-item.mine-autobook,.session.schedule-autobook{border-inline-start:4px solid #ae82d5!important}
 

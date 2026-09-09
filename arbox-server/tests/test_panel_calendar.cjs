@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 let source=fs.readFileSync(path.resolve(__dirname,'../../custom_components/arbox/frontend/panel-calendar.js'),'utf8');
 const picker=fs.readFileSync(path.resolve(__dirname,'../frontend/filter-picker.js'),'utf8');
-source=source.replace('./filter-picker.js?v=1','data:text/javascript;base64,'+Buffer.from(picker).toString('base64'));
+source=source.replace(/\.\/filter-picker\.js\?v=[\d.]+/,'data:text/javascript;base64,'+Buffer.from(picker).toString('base64'));
 const modulePromise=import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 test('calendar ranges use Sunday weeks and exact leap-year month bounds',async()=>{
  const {calendarRange}=await modulePromise;

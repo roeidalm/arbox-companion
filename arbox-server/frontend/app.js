@@ -569,8 +569,7 @@ $$("[data-journal-mode]").forEach((b) => b.addEventListener("click", () => {
 $("#journalSearch").addEventListener("input", (event) => {
   state.journalFilters.search = event.target.value; renderJournal();
 });
-for (const [selector, key] of [["#journalPeriod", "period"], ["#journalCategory", "category"],
-                               ["#journalCoach", "coach"], ["#journalExercise", "exercise"],
+for (const [selector, key] of [["#journalPeriod", "period"], ["#journalExercise", "exercise"],
                                ["#journalFeedbackFilter", "feedback"]]) {
   $(selector).addEventListener("change", (event) => {
     state.journalFilters[key] = event.target.value; renderJournal();
@@ -708,7 +707,7 @@ function renderFacetChips() {
     state.daypart, (v) => { state.daypart = v; renderFacetChips(); renderSchedule(); });
   renderFacetSelect($('#coachChips'), 'מאמן/ת', facets.coaches, state.coach,
     v => { state.coach = v; renderSchedule(); });
-  renderFacetSelect($('#categoryChips'), 'סוג שיעור', facets.categories.map(c => c.name), state.category,
+  renderFacetSelect($('#categoryChips'), 'סוג שיעור', facets.categories, state.category,
     v => { state.category = v; renderSchedule(); });
 }
 
@@ -1317,8 +1316,9 @@ function openStudioMemberships() {
   state.settingsPane = 'studio'; showView('settings');
 }
 async function renderFacetSelect(host, text, values, selected, change) {
-  const ui = await import('/static/filter-picker.js?v=1');
-  const picker = ui.filterPicker({label:text, values, selected, change});
+  const ui = await import('/static/filter-picker.js?v=2');
+  const previous=host.querySelector('details');
+  const picker = ui.filterPicker({label:text, values, selected, change, open:!!previous?.open, search:previous?.querySelector('input[type=search]')?.value || ''});
   host.replaceChildren(picker);
 }
 
@@ -1350,7 +1350,7 @@ async function renderStudioMemberships(profile) {
   host.dataset.studio = String(studio);
   host.textContent = 'טוענים מנויים…';
   try {
-    const [ui, policies, policyUI] = await Promise.all([membershipUI(), api('/api/membership-policies'), import('/static/membership-policy.js?v=2')]);
+    const [ui, policies, policyUI] = await Promise.all([membershipUI(), api('/api/membership-policies'), import('/static/membership-policy.js?v=3')]);
     if (studio !== state.selectedStudioId) return;
     host.replaceChildren();
     for (const configured of policies.memberships || []) {
@@ -1391,14 +1391,22 @@ async function loadMine() {
   if (studio !== state.selectedStudioId) return;
   loadMessages(); // non-blocking; fills its own card
 
+  if(state.mineFilterStudio!==studio){state.mineFilters={};state.mineFilterStudio=studio;state.mineSummaryOpen=false;}
+  renderMineData(data,studio,Promise.all([api('/api/quota'), membershipUI(), import('/static/filter-picker.js?v=2')]));
+}
+
+async function renderMineData(data, studio, quotaLoad) {
+  const generation = state.mineRenderGeneration = (state.mineRenderGeneration || 0) + 1;
+  const current = () => studio === state.selectedStudioId && generation === state.mineRenderGeneration;
   const quotaHost = $("#membershipCard");
   quotaHost.textContent = 'טוענים מכסות…';
-  const quotaLoad = Promise.all([api('/api/quota'), membershipUI()]);
-  quotaLoad.then(([quota, ui]) => {
-    if (studio !== state.selectedStudioId) return;
-    quotaHost.replaceChildren(ui.quotaSummary(quota, openStudioMemberships));
+  quotaLoad.then(([quota, ui, filters]) => {
+    if (!current()) return;
+    const combined=document.createElement('div');combined.className='my-overview';
+    combined.append(ui.quotaSummary(quota, openStudioMemberships),filters.workoutSummary(allUpcoming,{filters:state.mineFilters,open:state.mineSummaryOpen,toggle:value=>{state.mineSummaryOpen=value;},change:patch=>{state.mineFilters={...state.mineFilters,...patch};renderMineData(data,studio,quotaLoad);}}));
+    quotaHost.replaceChildren(combined);
   }).catch(e => {
-    if (studio !== state.selectedStudioId) return;
+    if (!current()) return;
     quotaHost.textContent = 'לא ניתן לטעון מכסות: ' + e.message;
   });
 
@@ -1408,12 +1416,21 @@ async function loadMine() {
   // studio's wall clock, and parsing them as device-local dates put every
   // class hours out for anyone reading this from another timezone
   const nowStamp = studioNowStamp();
-  const upcoming = data.sessions.filter((s) =>
+  const allUpcoming = data.sessions.filter((s) =>
     s.planning?.state === 'uncertain' || `${s.date} ${(s.end_time || s.start_time || "").slice(0, 5)}` > nowStamp);
+  const filters = await import('/static/filter-picker.js?v=2');
+  if(!current())return;
+  const fields=$('#mineFilters');
+  const old=Object.fromEntries([...fields.querySelectorAll('details')].map(p=>[p.dataset.key,{open:p.open,search:p.querySelector('input[type=search]')?.value||''}]));
+  fields.replaceChildren();
+  for(const[key,label]of [['category_name','שיעורים'],['coach_name','מאמנים']]){
+    const picker=filters.filterPicker({label,key,values:[...new Set(allUpcoming.map(r=>r[key]).filter(Boolean))],selected:state.mineFilters?.[key],...old[key],change:values=>{state.mineFilters={...state.mineFilters,[key]:values};renderMineData(data,studio,quotaLoad);}});picker.dataset.key=key;fields.append(picker);
+  }
+  const upcoming=allUpcoming.filter(row=>filters.matchesFilters(row,state.mineFilters));
   if (!upcoming.length) {
     const c = document.createElement("div");
     c.className = "card";
-    c.textContent = "אין שיעורים קרובים — לא רשומ/ה, לא בהמתנה ולא מתוזמן";
+    c.textContent = allUpcoming.length ? 'אין אימונים שמתאימים לסינון' : "אין שיעורים קרובים — לא רשומ/ה, לא בהמתנה ולא מתוזמן";
     list.appendChild(c);
     return;
   }
@@ -1945,8 +1962,13 @@ function populateJournalFilters() {
     });
     select.value = chosen;
   };
-  fill("#journalCategory", entries.map((x) => x.category_name), state.journalFilters.category);
-  fill("#journalCoach", entries.map((x) => x.coach_name), state.journalFilters.coach);
+  for (const [key, field, selector, label] of [
+    ['category', 'category_name', '#journalCategory', 'שיעורים'],
+    ['coach', 'coach_name', '#journalCoach', 'מאמנים'],
+  ]) {
+    renderFacetSelect($(selector), label, entries.filter(r => r[field]).map(r => ({name:r[field],color:key==='category'?r.color:null})),
+      state.journalFilters[key], values => {state.journalFilters[key]=values; renderJournal();});
+  }
   fill("#journalExercise", entries.flatMap((x) => (x.exercises || []).map((item) => item.name)),
     state.journalFilters.exercise);
 }
@@ -1959,8 +1981,10 @@ function filteredJournalEntries(data) {
   const needle = f.search.trim().toLocaleLowerCase("he");
   return (data.entries || []).filter((entry) => {
     if (cutoff && entry.date < cutoff) return false;
-    if (f.category && entry.category_name !== f.category) return false;
-    if (f.coach && entry.coach_name !== f.coach) return false;
+    for (const [key, field] of [['category','category_name'],['coach','coach_name']]) {
+      const values = Array.isArray(f[key]) ? f[key] : f[key] ? [f[key]] : [];
+      if (values.length && !values.includes(entry[field])) return false;
+    }
     if (f.exercise && !(entry.exercises || []).some((item) => item.name === f.exercise)) return false;
     if (f.feedback === "documented" && !journalHasContent(entry)) return false;
     if (f.feedback === "not_applicable" && entry.coach_feedback !== "not_applicable" &&
@@ -2123,7 +2147,7 @@ function renderJournal() {
   const host = $("#journalContent");
   host.innerHTML = "";
   const activeFilters = Object.entries(state.journalFilters).filter(([key, value]) =>
-    value && !(key === "period" && value === "all")).length;
+    (Array.isArray(value) ? value.length : value) && !(key === "period" && value === "all")).length;
   const filterSummary = $(".journal-filters summary");
   filterSummary.textContent = activeFilters ? `🔎 סינון · ${activeFilters}` : "🔎 סינון";
   filterSummary.classList.toggle("on", activeFilters > 0);
@@ -2619,12 +2643,8 @@ function renderMultiChips(el, items, sel, onChange) {
 }
 
 function renderRuleChips() {
-  renderMultiChips($("#ruleCoaches"),
-    state.facets.coaches.map((c) => ({ label: c, value: c })), ruleSel.coaches,
-    refreshSuggestedName);
-  renderMultiChips($("#ruleCategories"),
-    state.facets.categories.map((c) => ({ label: c.name, value: c.name })), ruleSel.categories,
-    refreshSuggestedName);
+  for(const[key,label,values]of [['coaches','מאמנים',state.facets.coaches],['categories','שיעורים',state.facets.categories]])
+    renderFacetSelect($(key==='coaches'?'#ruleCoaches':'#ruleCategories'),label,values,[...ruleSel[key]],chosen=>{ruleSel[key].clear();chosen.forEach(v=>ruleSel[key].add(v));refreshSuggestedName();});
   renderMultiChips($("#ruleWeekdays"),
     RULE_DAYS.map((d) => ({ label: d.name, value: d.py })), ruleSel.weekdays,
     refreshSuggestedName);

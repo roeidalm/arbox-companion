@@ -9,6 +9,7 @@ export function policySummary(member, openEditor) {
   const source = el('details'); source.append(el('summary', 'מקור ופרטי אימות'));
   source.append(el('small', `מקור: ${sources[p.source] || 'טרם התקבל מידע מאומת'}`));
   if (p.verified_at) source.append(el('small', `נבדק: ${new Date(p.verified_at * 1000).toLocaleString('he-IL')}`));
+  if (p.confirmed_category_ids?.length && !p.categories_known) source.append(el('small', `אישור שלכם מההתראה: ${p.confirmed_category_ids.length} סוגי שיעור. שאר הסוגים עדיין דורשים אימות.`));
   if (p.state !== 'ready') {
     const warning = el('strong', p.reason || 'דורש השלמה — ההרשמה האוטומטית מושהית');
     warning.setAttribute('role', 'status'); wrap.append(warning);
@@ -41,7 +42,7 @@ export function policyEditor({member, categories, save, close}) {
   for (const c of categories) {
     const label = el('label'); label.style.cssText = 'display:flex;gap:10px;align-items:center;min-height:44px';
     const input = el('input'); input.type = 'checkbox'; input.value = c.id;
-    input.checked = (policy.category_ids || []).includes(c.id); boxes.push(input);
+    input.checked = (policy.categories_known !== false ? policy.category_ids || [] : policy.confirmed_category_ids || []).includes(c.id); boxes.push(input);
     label.append(input, el('span', c.name)); choices.append(label);
   }
   form.append(fieldset);

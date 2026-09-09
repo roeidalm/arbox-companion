@@ -1,9 +1,10 @@
 import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.1.0";
-import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.3.0';
-import {renderJournal, journalSignature} from './panel-journal.js?v=3.1.0';
-import {policySummary, policyEditor} from './membership-policy.js?v=2';
+import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.4.0';
+import {renderJournal, journalSignature} from './panel-journal.js?v=3.4.0';
+import {policySummary, policyEditor} from './membership-policy.js?v=3';
 import {quotaSummary, quotaRow, membershipDisclosure} from './membership-ui.js?v=1';
 import {calendarLinks} from './session-calendar.js?v=1';
+import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
@@ -99,6 +100,9 @@ export class ArboxAppPanel extends HTMLElement {
     this._date = iso(new Date());
     this._view = "day";
     this._filters = {};
+      this._filtersByTab = {};
+      this._calendarFilterSearch = {};
+      this._calendarFilterOpen = {};
     this._generation = 0;
     this._onLocation = () => this.navigateFromURL();
     this._visibility = () => {
@@ -170,7 +174,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.3.0", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.4.0", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -199,6 +203,9 @@ export class ArboxAppPanel extends HTMLElement {
       this._currentContext = null;
       this._journalState = null;
       this._filters = {};
+      this._filtersByTab = {};
+      this._calendarFilterSearch = {};
+      this._calendarFilterOpen = {};
       this._generation++;
       this.load();
     };
@@ -240,7 +247,7 @@ export class ArboxAppPanel extends HTMLElement {
       this._nav,
     );
     const membershipCSS = node('link'); membershipCSS.rel = 'stylesheet';
-    membershipCSS.href = new URL('./membership-ui.css?v=1', import.meta.url).href;
+    membershipCSS.href = new URL('./membership-ui.css?v=2', import.meta.url).href;
     this.shadowRoot.replaceChildren(css, membershipCSS, this._shell);
   }
   navigate(tab) {
@@ -251,6 +258,13 @@ export class ArboxAppPanel extends HTMLElement {
     const parts = window.location.hash.slice(1).split("/");
     const previousTab = this._tab;
     this._tab = parts[0] === "studio" || TABS.some((t) => t[0] === parts[0]) ? parts[0] : "overview";
+    if (previousTab !== this._tab) {
+      this._filtersByTab ||= {};
+      this._filtersByTab[previousTab] = this._filters;
+      this._filters = this._filtersByTab[this._tab] || {};
+      this._calendarFilterSearch = {};
+      this._calendarFilterOpen = {};
+    }
     if (previousTab !== this._tab) this._resetScroll = true;
     this._focusId = Number(parts[1]) || null;
     this._nav
@@ -359,6 +373,9 @@ export class ArboxAppPanel extends HTMLElement {
         this._contexts = {};
         this._journalState = null;
         this._filters = {};
+      this._filtersByTab = {};
+      this._calendarFilterSearch = {};
+      this._calendarFilterOpen = {};
       }
       this._currentContext = nextContext;
       for (const [resource, result] of results) {
@@ -385,6 +402,9 @@ export class ArboxAppPanel extends HTMLElement {
           this._currentContext = null;
       this._journalState = null;
       this._filters = {};
+      this._filtersByTab = {};
+      this._calendarFilterSearch = {};
+      this._calendarFilterOpen = {};
           this._entry.can_write = false;
           this._dialog?.close();
           this._content.replaceChildren();
@@ -726,7 +746,11 @@ export class ArboxAppPanel extends HTMLElement {
   }
   render_schedule() { renderCalendar(this); }
   render_mine() {
-    this._content.append(this.quota());
+    const quota=this.quota(),combined=node('div',null,'my-overview');
+    const range=calendarRange(this._date||this.studioNow().slice(0,10),this._mineView||'all');
+    const rows=this.rows().filter(r=>!range.date_from||r.date>=range.date_from&&r.date<=range.date_to);
+    combined.append(...quota.childNodes,workoutSummary(rows,{filters:this._filters,open:!!this._mineSummaryOpen,toggle:open=>{this._mineSummaryOpen=open;},change:patch=>{this._filters={...this._filters,...patch};this.render();}}));quota.append(combined);
+    this._content.append(quota);
     renderCalendar(this, {mine: true});
   }
   render_journal() { renderJournal(this); }
@@ -1319,7 +1343,7 @@ export class ArboxAppPanel extends HTMLElement {
       new Option("הרשמה אוטומטית", "autobook"),
       new Option("התראה בלבד", "notify"),
     );
-    mode.value = rule.mode || "autobook";
+    mode.value = rule.mode || "notify";
     const ml = node("label", "מה יקרה כשמתפנה מקום?", "field");
     ml.append(mode);
     form.append(ml);
@@ -1338,17 +1362,8 @@ export class ArboxAppPanel extends HTMLElement {
           ...(rule[key] || []),
         ]),
       ].filter(Boolean);
-      selected[key] = [];
-      for (const value of available) {
-        const l = node("label", null, "check"),
-          cb = node("input");
-        cb.type = "checkbox";
-        cb.value = value;
-        cb.checked = (rule[key] || []).includes(value);
-        selected[key].push(cb);
-        l.append(cb, document.createTextNode(value));
-        field.append(l);
-      }
+      selected[key] = available.map(value=>({value,checked:(rule[key]||[]).includes(value)}));
+      field.append(filterPicker({label,key,values:this._data.facets?.[key]||available,selected:rule[key]||[],change:values=>{selected[key]=values.map(value=>({value,checked:true}));}}));
       if (!available.length) {
         const input = this.input(field, "שמות מופרדים בפסיק", key);
         selected[key] = input;

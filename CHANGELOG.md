@@ -3,6 +3,31 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.53.0
+
+- Share colored, searchable multi-select filters across the calendar, My,
+  journal and automation editor in the app and HA panel 3.4.0. Selected items
+  stay first across searches; Everything clears the current filter group.
+- Show compact workout/coach counts beside membership quotas on desktop,
+  with an expandable summary row on phones. My workouts remain visible.
+- Resolve planning notices directly in Telegram and HA: confirm ignoring a
+  class type in the active studio, or choose a membership for one occurrence.
+  Preserve booked workouts and recurring rules; recheck eligibility, quota,
+  membership revision and studio before accepting each confirmation.
+- Partial user confirmation allows only the selected class type when studio
+  eligibility is unknown. Explicit studio restrictions and quota limits still
+  take precedence. Do not probe a class type already confirmed by the user.
+- Edit the source Telegram message and replace the HA notification by tag.
+  Update the HA webhook relay/template as described in dashboard/README.md;
+  existing callback forwarding remains compatible. Existing notices retain
+  their old buttons; new actions appear on newly issued notices.
+
+## 1.52.1
+
+- Keep My workouts and actions visible; move membership editing to Studio.
+  Include the free remainder in every quota track, and retain day/week/month
+  calendar views with multi-select coach and class filters.
+
 ## 1.51.1
 
 - Make planning notices easier to read: separate workout details, show the

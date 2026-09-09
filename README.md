@@ -136,13 +136,32 @@ booked before resuming. An absence in a sync never triggers an automatic retry.
 External bookings and studio-side changes can still occur between the check and
 the write; Arbox remains the final authority.
 
-Upgrade the server to **1.52.1 or newer** through its tagged workflow image and Compose first, then
-update the integration to **3.3.0** through HACS and restart HA. No dashboard YAML,
+Upgrade the server to **1.53.0 or newer** through its tagged workflow image and Compose first, then
+update the integration to **3.4.0** through HACS and restart HA. No dashboard YAML,
 manual HA file replacement or new browser-to-server access is required. View-only
 HA users cannot edit policy definitions. Older automatically learned global
 category blocks are removed only when their original log evidence identifies
 them; manual blocks and historical decisions remain. Previously failed attempts
 are not silently replayed on upgrade.
+
+Planning notifications now offer **Ignore this class type** (with confirmation)
+and **Choose membership**, in both Telegram and HA. The membership choice applies
+to this occurrence; quota and eligibility are checked again on confirmation.
+When class eligibility is unknown but capacity is verified, you can explicitly
+confirm this class type based on information from your studio. This does not
+authorize other unknown classes or override studio restrictions.
+Ignoring a class type stops its future planning in the current studio and frees
+planned capacity, while keeping actual registrations. Undo it in Studio settings.
+Telegram edits the original message. For HA notification replacement, update the
+webhook relay as described in [the notification setup](dashboard/README.md).
+The existing callback relay is still required; HACS does not replace automations
+you previously installed yourself. New buttons apply to new notices.
+
+Coach and class filters have color cues, search and cumulative multi-selection
+in the calendar, My, journal and automation editor. Selected items remain at the
+top across searches; **Everything** clears that group only. My filters use the
+workouts already in My; the compact coach/class counts also act as filters.
+The counts sit beside quotas on desktop and collapse to one row on phones.
 
 The membership summary in **My** stays compact: each membership has its own
 full-width quota track, including free places. Monthly and whole-card periods

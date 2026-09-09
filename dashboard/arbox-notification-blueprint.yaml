@@ -31,7 +31,9 @@ action:
     data:
       title: "{{ trigger.json.title | default('Arbox') }}"
       message: "{{ trigger.json.message }}"
-      data:
-        actions: "{{ trigger.json.actions | default([]) }}"
+      data: >-
+        {% set payload = dict(actions=trigger.json.actions | default([])) %}
+        {{ dict(payload, tag=trigger.json.tag, alert_once=trigger.json.alert_once | default(false))
+           if trigger.json.tag is defined else payload }}
 mode: queued
 max: 10

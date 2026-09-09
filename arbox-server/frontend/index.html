@@ -14,9 +14,9 @@
        style attributes, and blocking them breaks the date and quota rows. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Arbox — לוח שיעורים</title>
-<link rel="stylesheet" href="/static/style.css?v=2.62.0">
+<link rel="stylesheet" href="/static/style.css?v=2.63.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
-<link rel="stylesheet" href="/static/membership-ui.css?v=1">
+<link rel="stylesheet" href="/static/membership-ui.css?v=2">
 </head>
 <body>
 <header>
@@ -94,8 +94,10 @@
       </div>
       </details>
       <div class="chips" id="daypartChips" aria-label="שעות היום"></div>
-      <div class="chips" id="coachChips"></div>
-      <div class="chips" id="categoryChips"></div>
+      <div class="mine-filter-fields">
+        <div class="chips" id="categoryChips"></div>
+        <div class="chips" id="coachChips"></div>
+      </div>
     </div>
     <details class="legend">
       <summary>מקרא — מה כל כפתור עושה</summary>
@@ -121,6 +123,7 @@
   <!-- mine -->
   <section id="view-mine" class="view" hidden>
     <div class="card" id="membershipCard"></div>
+    <div id="mineFilters" class="mine-filter-fields"></div>
     <div id="mineList"></div>
     <div class="card" id="messagesCard" hidden>
       <h2>📣 הודעות מהסטודיו</h2>
@@ -270,8 +273,8 @@
             <option value="365">שנה</option>
           </select>
         </label>
-        <label>סוג שיעור <select id="journalCategory"><option value="">הכול</option></select></label>
-        <label>מורה <select id="journalCoach"><option value="">הכול</option></select></label>
+        <div id="journalCategory"></div>
+        <div id="journalCoach"></div>
         <label>תרגיל <select id="journalExercise"><option value="">הכול</option></select></label>
         <label>משוב
           <select id="journalFeedbackFilter">
@@ -784,6 +787,6 @@
 
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
-<script src="/static/app.js?v=2.62.0"></script>
+<script src="/static/app.js?v=2.63.0"></script>
 </body>
 </html>

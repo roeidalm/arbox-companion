@@ -21,6 +21,23 @@ def api_key(client):
         return json.load(settings_file)["api_key"]
 
 
+def test_ha_planning_callback_is_authenticated_and_only_replies_to_ha(client):
+    from app.notification_reply import NotificationReply
+    state = client.app.state
+    reply = NotificationReply('נשמר', [], 'plan-scope')
+    state.rules_engine.handle_callback = AsyncMock(return_value=reply)
+    state.notifier._send_ha = AsyncMock()
+    state.notifier._send_telegram = AsyncMock()
+    body = {'action':'ARBOX_plan:opaque'}
+    assert client.post('/api/ha/callback', json=body).status_code == 401
+    state.rules_engine.handle_callback.assert_not_awaited()
+    response = client.post('/api/ha/callback', json=body, headers={'X-Api-Key':api_key(client)})
+    assert response.status_code == 200
+    state.rules_engine.handle_callback.assert_awaited_once_with('plan:opaque', reply_text=None, source_channel='ha')
+    state.notifier._send_ha.assert_awaited_once_with('נשמר', [], force=True, tag='plan-scope')
+    state.notifier._send_telegram.assert_not_awaited()
+
+
 def test_health_and_spa_routes_work_before_setup(client):
     health = client.get("/api/health")
     assert health.status_code == 200

@@ -3,7 +3,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const context = { URL };
+const context = { URL, selectedValues:value=>Array.isArray(value)?value:value?[value]:[] };
 vm.runInNewContext(
   fs
     .readFileSync(
@@ -14,6 +14,7 @@ vm.runInNewContext(
       "utf8",
     )
     .replaceAll("export ", "")
+    .replace(/^import .*filter-picker.*;$/m, '')
     .replaceAll(
       "import.meta.url",
       JSON.stringify("https://ha.example/arbox_frontend/panel-journal.js"),

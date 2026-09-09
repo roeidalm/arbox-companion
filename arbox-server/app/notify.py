@@ -29,13 +29,14 @@ from typing import Awaitable, Callable
 import aiohttp
 
 from .settings import Settings
+from .notification_reply import NotificationReply
 
 _LOGGER = logging.getLogger(__name__)
 
 TG_API = "https://api.telegram.org"
 
 # handler(callback_id) -> answer text to show the user
-CallbackHandler = Callable[..., Awaitable[str]]
+CallbackHandler = Callable[..., Awaitable[str | NotificationReply]]
 MessageHandler = Callable[..., Awaitable[str | None]]
 EventLogger = Callable[..., Awaitable[None]]
 
@@ -49,6 +50,8 @@ def _ha_action(b: dict) -> dict:
     if b.get("uri"):
         return {"action": "URI", "title": b["text"], "uri": b["uri"]}
     out = {"action": f"ARBOX_{b['data']}", "title": b["text"]}
+    if b.get('authentication_required'):
+        out['authenticationRequired'] = True
     if b.get("text_input"):
         out.update({"behavior": "textInput",
                     "textInputPlaceholder": b.get("placeholder") or "כתבו כאן…"})
@@ -346,7 +349,7 @@ class Notifier:
 
     async def _send_telegram(
         self, text: str, buttons: list[list[dict]] | None, force: bool = False,
-        *, bold_lines: list[str] | None = None,
+        *, bold_lines: list[str] | None = None, message_id: int | None = None,
     ) -> None:
         tg = self.settings.telegram
         if not (tg.get("bot_token") and tg.get("chat_id")):
@@ -356,6 +359,8 @@ class Notifier:
         if not tg.get("enabled") and not force:
             return
         payload: dict = {"chat_id": tg["chat_id"], "text": text}
+        if message_id is not None:
+            payload['message_id'] = message_id
         if bold_lines:
             # Telegram offsets count UTF-16 units, including emoji surrogates.
             # Entities keep upstream class names as plain text, not markup.
@@ -371,18 +376,21 @@ class Notifier:
         rows = [[_telegram_button(b) for b in row if not b.get("ha_only")]
                 for row in (buttons or [])]
         rows = [r for r in rows if r]
-        if rows:
+        if rows or message_id is not None:
             payload["reply_markup"] = {"inline_keyboard": rows}
         session = await self._http()
         async with session.post(
-            f"{TG_API}/bot{tg['bot_token']}/sendMessage", json=payload
+            f"{TG_API}/bot{tg['bot_token']}/{'editMessageText' if message_id is not None else 'sendMessage'}", json=payload
         ) as resp:
             body = await resp.json(content_type=None)
             if not body.get("ok"):
+                if message_id is not None and 'message is not modified' in body.get('description', ''):
+                    return
                 raise RuntimeError(f"Telegram sendMessage: {body}")
 
     async def _send_ha(
-        self, text: str, buttons: list[list[dict]] | None, force: bool = False
+        self, text: str, buttons: list[list[dict]] | None, force: bool = False,
+        *, tag: str | None = None,
     ) -> None:
         """POST to an HA webhook. The webhook id is the only secret needed —
         no long-lived token, no API access; it can only fire the automation
@@ -406,12 +414,15 @@ class Notifier:
         chunks = [flat[i:i + per] + extras for i in range(0, len(flat), per)] \
             or ([extras] if extras else [None])
         session = await self._http()
+        tag = tag or next((b.get('notification_tag') for row in buttons or [] for b in row if b.get('notification_tag')), None)
         for i, chunk in enumerate(chunks):
             payload: dict = {
                 "message": text if i == 0 else f"(המשך {i + 1}/{len(chunks)})",
                 "title": "Arbox",
                 "actions": [_ha_action(b) for b in (chunk or [])],
             }
+            if tag:
+                payload.update(tag=tag if i == 0 else f'{tag}-{i}', alert_once=True)
             async with session.post(url, json=payload) as resp:
                 if resp.status not in (200, 201):
                     raise RuntimeError(
@@ -472,7 +483,7 @@ class Notifier:
         tg = self.settings.telegram
         want = str(tg.get("chat_id") or "")
         got = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
-        if want and got and got != want:
+        if not want or not got or got != want:
             # a press from a chat this bot was not configured for: the prompt
             # id is the only thing take_prompt checks, so without this anyone
             # who can see a forwarded button could book or cancel classes
@@ -500,11 +511,11 @@ class Notifier:
         ):
             pass
         # and off the poll loop, so a slow booking cannot stall getUpdates
-        task = asyncio.create_task(self._run_callback(cq.get("data", "")))
+        task = asyncio.create_task(self._run_callback(cq.get("data", ""), (cq.get('message') or {}).get('message_id')))
         self._cb_tasks.add(task)
         task.add_done_callback(self._cb_tasks.discard)
 
-    async def _run_callback(self, data: str) -> None:
+    async def _run_callback(self, data: str, message_id: int | None = None) -> None:
         answer = "🤷"
         if self.on_callback:
             try:
@@ -515,7 +526,10 @@ class Notifier:
         # the outcome goes to the chat, where it persists — the popup is gone
         # by the time a booking finishes anyway
         try:
-            await self._send_telegram(answer, None, force=True)
+            if isinstance(answer, NotificationReply):
+                await self._send_telegram(answer.text, answer.buttons, force=True, message_id=message_id)
+            else:
+                await self._send_telegram(answer, None, force=True)
         except RuntimeError:
             pass
 

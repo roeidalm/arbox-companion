@@ -3,6 +3,59 @@ import pytest
 from app.notify import _telegram_button
 
 
+async def test_planning_reply_edits_source_telegram_message_and_clears_buttons(tmp_path):
+    from unittest.mock import AsyncMock
+    from app.notify import Notifier
+    from app.notification_reply import NotificationReply
+    from app.settings import Settings
+    settings = Settings(str(tmp_path))
+    settings.update({'telegram': {'enabled': True, 'bot_token': 'test', 'chat_id': '123'}})
+    sent = []
+    class Response:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def json(self, **kwargs): return {'ok': True}
+    class Transport:
+        def post(self, url, json):
+            sent.append((url, json))
+            return Response()
+    notifier = Notifier(settings)
+    notifier._http = AsyncMock(return_value=Transport())
+    notifier.on_callback = AsyncMock(return_value=NotificationReply('נשמר', [], 'scoped-tag'))
+    notifier._send_ha = AsyncMock()
+    await notifier._run_callback('plan:opaque', message_id=77)
+    assert len(sent) == 1 and sent[0][0].endswith('/editMessageText')
+    assert sent[0][1]['message_id'] == 77
+    assert sent[0][1]['reply_markup']['inline_keyboard'] == []
+    notifier._send_ha.assert_not_awaited()
+
+
+async def test_ha_planning_steps_replace_same_tag_and_preserve_legacy_notices(tmp_path):
+    from unittest.mock import AsyncMock
+    from app.notify import Notifier
+    from app.settings import Settings
+    settings = Settings(str(tmp_path))
+    settings.update({'ha': {'enabled': True, 'webhook_url': 'http://ha.test/webhook'}})
+    sent = []
+    class Response:
+        status = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+    class Transport:
+        def post(self, url, json):
+            sent.append(json)
+            return Response()
+    notifier = Notifier(settings)
+    notifier._http = AsyncMock(return_value=Transport())
+    await notifier._send_ha('בדיקה', [[{'text':'מנוי', 'data':'plan:opaque',
+        'notification_tag':'scope', 'authentication_required':True}]])
+    await notifier._send_ha('נשמר', [], tag='scope')
+    await notifier._send_ha('הודעה רגילה', None)
+    assert [s.get('tag') for s in sent] == ['scope', 'scope', None]
+    assert sent[0]['actions'][0]['authenticationRequired'] is True
+    assert sent[1]['actions'] == [] and sent[1]['alert_once'] is True
+
+
 def test_telegram_button_supports_navigation_links_and_callbacks():
     assert _telegram_button({
         "text": "View details",

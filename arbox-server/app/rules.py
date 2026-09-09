@@ -28,6 +28,7 @@ from .studio_context import ReentrantAsyncLock
 from .sync import FULL_WINDOW_DAYS, Syncer
 from .membership_policy import MembershipPolicy, eligible
 from .quota_planner import plan_quota, REASONS
+from .planning_actions import PlanningActions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -369,6 +370,7 @@ class RulesEngine:
         exclusive = getattr(syncer, "exclusive", None)
         self._tick_lock = exclusive() if exclusive else ReentrantAsyncLock()
         self._membership_lock = self._tick_lock
+        self.planning_actions = PlanningActions(self)
         notifier.on_callback = self.handle_callback
         notifier.on_message = self.handle_message
 
@@ -419,6 +421,9 @@ class RulesEngine:
             plan = dict(raw)
             sid = int(plan["schedule_id"])
             if sid in seen or not start <= plan.get("date", "") <= end:
+                continue
+            current_session = await self.store.get_session(sid) or plan
+            if self._blocked(current_session):
                 continue
             if not plan.get("ignore_vacation") and await self.store.vacation_blocks(
                     plan["date"], "autobook"):
@@ -504,6 +509,7 @@ class RulesEngine:
     async def quota_status(
         self, force: bool = False, target_date: str | date | None = None,
         extra_plans: list[dict] | None = None,
+        policy_overrides: dict | None = None,
     ) -> dict | None:
         """Compute from one evidence-backed ledger. Rendering never calls Arbox."""
         anchor = target_date.isoformat() if isinstance(target_date, date) else target_date or date.today().isoformat()
@@ -512,7 +518,7 @@ class RulesEngine:
         pending_rows = await self.uncertain_sessions()
         if not members and not plans and not pending_rows:
             return None
-        details = [{**m, "policy": await self.membership_policy.get(m)} for m in members]
+        details = [{**m, "policy": (policy_overrides or {}).get(m['id']) or await self.membership_policy.get(m)} for m in members]
         import time
         for detail in details:
             history = await self.store.get_meta(self.membership_policy.key(detail["id"]) + ":history") or {}
@@ -619,6 +625,7 @@ class RulesEngine:
                 policy = await self.membership_policy.get(member)
                 # Explicit evidence/manual decisions are never probed again.
                 if (policy.get("categories_known") or not policy.get("quota_known")
+                        or session['category_id'] in policy.get('confirmed_category_ids', [])
                         or policy.get("contradiction") or policy.get("source") == "manual"):
                     continue
                 probe_id = f"{member['id']}:{fingerprint(member)}:{session['category_id']}"
@@ -632,7 +639,7 @@ class RulesEngine:
                 details = [{**m, "policy": await self.membership_policy.get(m)} for m in members]
                 for d in details:
                     if d["id"] == member["id"]:
-                        d["policy"] = {**policy, "state": "ready", "category_ids": [session["category_id"]]}
+                        d["policy"] = {**policy, "state": "ready", "categories_known": True, "category_ids": [session["category_id"]]}
                 commitments = await self._quota_commitments(members)
                 pending_key = self.membership_policy.key(0) + ":uncertain"
                 pending = await self.store.get_meta(pending_key) or {}
@@ -697,10 +704,7 @@ class RulesEngine:
         if problems:
             await self.store.log_event("warn", "quota", "תכנונים דורשים בדיקה",
                                        "\n".join(f"{fmt_class(p)} · {state.get('reason')}" for p, state, _ in problems), notified=True)
-            buttons = [[{"text": "מעבר לבדיקה ותיקון", "uri": "/arbox#mine", "ha_only": True}]]
-            base = getattr(self.settings, "base_url", "")
-            if base.startswith(("https://", "http://")):
-                buttons[0].append({"text": "מעבר לבדיקה ותיקון", "uri": base.rstrip("/") + "/mine", "tg_only": True})
+            buttons = await self.planning_actions.notice_buttons(problems)
             text, bold = planning_notice(problems)
             await self.notifier.send(text, buttons, kind="membership", telegram_bold=bold)
 
@@ -1169,6 +1173,8 @@ class RulesEngine:
 
         if action.startswith("preview_"):
             return await self.journal_preview.callback(action, cid, source_channel, reply_text)
+        if action == 'plan':
+            return await self.planning_actions.callback(cid)
 
         if action == "info":
             # never consumes the prompt — the booking button must stay live
@@ -1969,7 +1975,7 @@ class RulesEngine:
                 await self.store.mark_watch(w["schedule_id"], "blocked category")
                 await self.store.log_event(
                     "warn", "watchlist", f"לא ניתן לתפוס · {fmt_class(s)}",
-                    "הקטגוריה חסומה למנוי שלך", w["schedule_id"])
+                    "סוג השיעור הוגדר להתעלמות על ידך", w["schedule_id"])
                 continue
             membership_override, membership_ready = \
                 await self._validate_watch_membership(w, s)

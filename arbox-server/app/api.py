@@ -373,8 +373,14 @@ async def me(request: Request, x_api_key: str | None = Header(None)):
     if has_key(request, x_api_key):
         quota = await s.rules_engine.quota_status() or {}
         states = quota.get("plan_states", {})
+        changes = {e['schedule_id']:e for e in await s.store.planning_history()}
+        sessions = [row for row in sessions if not (row.get('automation_skipped') and
+                    changes.get(row['schedule_id'], {}).get('status') == 'planning_change_cancelled')]
         for row in sessions:
             row["planning"] = states.get(str(row["schedule_id"]))
+            event = changes.get(row['schedule_id'])
+            if event and event['status'] == 'planning_change_accepted':
+                row['planning_change'] = {**event['planning_change'], 'accepted_at': event['occurred_at']}
     return {
         "membership": (await s.store.get_meta("membership")
                        if has_key(request, x_api_key) else None),
@@ -843,6 +849,7 @@ async def history(request: Request, x_api_key: str | None = Header(None)):
         "stats": await s.store.attendance_stats(),
         "decisions": await s.store.automation_decisions(),
         "events": await s.store.training_events(),
+        "changes": await s.store.planning_history(),
     }
 
 
@@ -1247,8 +1254,9 @@ async def remove_watch(request: Request, schedule_id: int,
                        x_api_key: str | None = Header(None)):
     require_key(request, x_api_key)
     s = ctx(request)
-    await s.store.unwatch(schedule_id)
-    await s.rules_engine.reconcile_planned_quota()
+    async with s.rules_engine._tick_lock:
+        await s.store.unwatch(schedule_id)
+        await s.rules_engine.reconcile_planned_quota()
     return {"ok": True}
 
 

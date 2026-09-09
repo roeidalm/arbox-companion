@@ -168,6 +168,13 @@ workout details. Changes to class type, coach, date or time pause the plan until
 you approve the updated workout or cancel that occurrence in My, Telegram or HA.
 Availability changes do not pause it, and changing membership does not approve
 a different workout. Existing bookings are never automatically cancelled.
+Detected changes and each acceptance/cancellation remain in **Workout history**
+at the bottom of My, on the server and in HA. Expand a row for the original and
+updated details, reason and timestamps. A cancelled plan disappears from active
+workouts; an accepted plan keeps the current name with its former name alongside.
+History survives removal of the plan and follows the existing history retention
+setting. Detection time records when we observed a change, not when the studio
+made it. These planning events do not count as attendance or membership usage.
 
 Once per day, **at the configured nightly digest time**, Arbox refreshes the
 workouts currently in My (bookings, waitlists, pins and automatic occurrences)

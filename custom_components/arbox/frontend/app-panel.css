@@ -485,6 +485,10 @@ legend {
 details {
   margin: 22px 0;
 }
+.mine-history {border-top: 1px solid var(--line); margin-top: 24px;}
+.mine-history .history-entry {margin: 0; padding: 10px 0; border-top: 1px solid var(--line);}
+.mine-history .history-entry p {margin: 6px 12px; font-size: 14px; overflow-wrap: anywhere;}
+.mine-history .history-entry summary {padding: 6px 12px;}
 summary {
   cursor: pointer;
   padding: 12px;

@@ -235,7 +235,7 @@ async def test_daily_changes_and_many_offers_still_send_one_ha_notification(engi
     await notifier._send_ha(text, buttons)
     assert len(sent) == 1
     assert len(sent[0]['actions']) == 2
-    assert sent[0]['actions'][0]['uri'] == '/arbox#calendar'
+    assert sent[0]['actions'][0]['uri'] == '/arbox#schedule'
     assert sent[0]['actions'][1]['title'] == 'בדיקת השינויים באימונים'
 
 

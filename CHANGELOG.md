@@ -17,6 +17,10 @@ lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-compa
 - Keep disappeared planned workouts visible for review. Preserve unknown booking
   outcomes and existing registrations. Initialize old pins from cached details.
 - Add in-place confirmation to My and HA panel 3.4.1; install through HACS normally.
+- Preserve detected changes, acceptance and cancellation in the existing workout
+  history, including before/after details, reason and detection/decision time.
+  Accepted plans show the new class name with the former name beside it in My.
+  Cancellation removes the active plan without deleting history or consuming quota.
 
 ## 1.53.0
 

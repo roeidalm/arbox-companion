@@ -1033,6 +1033,9 @@ class RulesEngine:
                 lines += ['', fmt_class(old), 'ההרשמה לא נמצאה בלוח המעודכן — כדאי לבדוק מול הסטודיו']
             else:
                 if before != intent_snapshot(session):
+                    await self.store._record_planning_event(session,
+                        {'snapshot': json.dumps(before), 'box_id': session.get('box_id') or self.store.active_box_id,
+                         'changed': 1}, 'planning_changed')
                     lines += ['', fmt_class(session), intent_description(before, session), 'לא ביצענו ביטול הרשמה']
                 if session.get('user_booked') is None and session.get('user_in_standby') is None:
                     lines += ['', fmt_class(session), 'ההרשמה או ההמתנה כבר אינן מופיעות בארבוקס — כדאי לבדוק מול הסטודיו']
@@ -1222,7 +1225,7 @@ class RulesEngine:
             # per-class actions remain in Telegram and the authenticated panel.
             telegram = [[{**b, 'tg_only': True} for b in row if not b.get('ha_only')]
                         for row in buttons]
-            ha = [[{'text': 'ללוח האימונים', 'uri': '/arbox#calendar', 'ha_only': True}]]
+            ha = [[{'text': 'ללוח האימונים', 'uri': '/arbox#schedule', 'ha_only': True}]]
             if changed_plans:
                 ha += [[{**b, 'ha_only': True} for b in row] for row in change_buttons]
             buttons = [*[row for row in telegram if row], *ha]

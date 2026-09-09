@@ -174,7 +174,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.4.0", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.4.1", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -342,7 +342,7 @@ export class ArboxAppPanel extends HTMLElement {
     const resources = {
       overview: ["summary", "me", "journal", "membership_policies", "watchlist"],
       schedule: ["summary", "schedule", "facets", "watchlist"],
-      mine: ["summary", "me", "membership_policies", "watchlist"],
+      mine: ["summary", "me", "membership_policies", "watchlist", ...(this._mineHistoryOpen ? ['history'] : [])],
       studio: ["summary", "membership_policies"],
       journal: ["summary", "history", "journal"],
       automations: ["summary", "rules", "vacations", "facets"],
@@ -453,6 +453,7 @@ export class ArboxAppPanel extends HTMLElement {
       selectedDay: this._selectedDay,
       period: this._period,
       feedbackFilter: this._feedbackFilter,
+      mineHistoryOpen: this._mineHistoryOpen,
       calendar: calendarSignature(this),
       journal: journalSignature(this),
     });
@@ -618,6 +619,9 @@ export class ArboxAppPanel extends HTMLElement {
     info.dataset.focusKey = `session-${s.schedule_id}`;
     const time = node('b', `${s.start_time?.slice(0,5) || ''}–${s.end_time?.slice(0,5) || ''}`, 'mine-time'); time.dir = 'ltr';
     info.append(time, node('strong', s.category_name), node('span', s.coach_name, 'muted'));
+    if (s.planning_change?.before) info.append(node('small',
+      s.planning_change.before.category_name !== s.category_name
+        ? `קודם: ${s.planning_change.before.category_name}` : 'פרטי האימון עודכנו', 'muted'));
     card.append(info, node('span', status, `badge ${kind}`));
     const planning = s.planning || this._data.summary?.quota?.plan_states?.[String(s.schedule_id)];
     const mid = planning?.membership_user_id ?? s.membership_user_id;
@@ -752,6 +756,51 @@ export class ArboxAppPanel extends HTMLElement {
     combined.append(...quota.childNodes,workoutSummary(rows,{filters:this._filters,open:!!this._mineSummaryOpen,toggle:open=>{this._mineSummaryOpen=open;},change:patch=>{this._filters={...this._filters,...patch};this.render();}}));quota.append(combined);
     this._content.append(quota);
     renderCalendar(this, {mine: true});
+    this.renderMineHistory();
+  }
+  renderMineHistory() {
+    const wrap = node('details', null, 'mine-history'), heading = node('summary', 'היסטוריית אימונים');
+    wrap.open = !!this._mineHistoryOpen;
+    wrap.append(heading);
+    wrap.ontoggle = () => {
+      if (!wrap.isConnected || this._tab !== 'mine' || wrap.open === !!this._mineHistoryOpen) return;
+      this._mineHistoryOpen = wrap.open;
+      if (wrap.open) this.load();
+    };
+    if (wrap.open) {
+      const data = this._data.history;
+      if (!data) wrap.append(node('p', 'טוענים היסטוריה…', 'muted'));
+      else {
+        const labels = {planning_changed:'זוהה שינוי באימון', planning_change_accepted:'השינוי אושר',
+          planning_change_cancelled:'התכנון בוטל בעקבות השינוי', booked:'הוזמן', rebooked:'הוזמן מחדש',
+          standby_joined:'נכנס להמתנה', standby_rejoined:'נכנס שוב להמתנה', reason_updated:'הסיבה עודכנה', ...STATUS};
+        const rows = [...(data.sessions || [])];
+        for (const decision of data.decisions || []) if (!rows.some(r => r.schedule_id === decision.schedule_id))
+          rows.push({...decision, status: decision.result?.startsWith('skipped — vacation') ? 'חופשה — לא הוזמן' :
+            decision.result?.startsWith('failed') ? 'התכנון נכשל' : 'התכנון לא בוצע'});
+        for (const change of data.changes || []) if (!rows.some(r => r.schedule_id === change.schedule_id)) rows.push(change);
+        rows.sort((a,b) => `${b.date} ${b.start_time}`.localeCompare(`${a.date} ${a.start_time}`));
+        for (const row of rows) {
+          const item = node('details', null, 'history-entry'), title = node('summary');
+          this._mineHistoryExpanded ||= new Set();
+          item.open = this._mineHistoryExpanded.has(row.schedule_id);
+          item.ontoggle = () => { if (item.isConnected) item.open
+            ? this._mineHistoryExpanded.add(row.schedule_id) : this._mineHistoryExpanded.delete(row.schedule_id); };
+          title.append(node('strong', `${fmtDate(row.date)} · ${row.start_time || ''} · ${row.category_name || 'אימון'} · ${row.coach_name || ''}`),
+            node('span', ` · ${labels[row.status] || row.status || ''}`, 'muted'));
+          item.append(title);
+          const change = (data.changes || []).find(c => c.schedule_id === row.schedule_id);
+          if (change) item.append(node('p', change.reason_text, 'muted'));
+          for (const event of (data.events || []).filter(e => e.schedule_id === row.schedule_id)) {
+            item.append(node('p', `${event.occurred_at} · ${labels[event.event_type] || event.event_type}`
+              + (event.reason_text ? ` · ${event.reason_text}` : ''), 'muted'));
+          }
+          wrap.append(item);
+        }
+        if (!rows.length) wrap.append(node('p', 'עדיין אין היסטוריה', 'muted'));
+      }
+    }
+    this._content.append(wrap);
   }
   render_journal() { renderJournal(this); }
   render_automations() {

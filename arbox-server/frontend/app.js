@@ -1409,6 +1409,12 @@ async function loadMine() {
 
   if(state.mineFilterStudio!==studio){state.mineFilters={};state.mineFilterStudio=studio;state.mineSummaryOpen=false;}
   renderMineData(data,studio,Promise.all([api('/api/quota'), membershipUI(), import('/static/filter-picker.js?v=2')]));
+  if ($('#historyDetails').open) {
+    try {
+      const updated = await api('/api/history');
+      if (studio === state.selectedStudioId) { historyData = updated; renderHistory(); }
+    } catch (e) { toast('לא ניתן לעדכן היסטוריה: ' + e.message); }
+  }
 }
 
 async function renderMineData(data, studio, quotaLoad) {
@@ -1467,6 +1473,14 @@ async function renderMineData(data, studio, quotaLoad) {
     t1.append(`${WEEKDAYS_HE[d.getDay()]} ${fmtDate(d)} · `, span);
     const t2 = document.createElement("div");
     t2.textContent = (s.category_name || "") + (s.coach_name ? " · " + s.coach_name : "");
+    const previous = s.planning_change?.before;
+    if (previous) {
+      const label = document.createElement('small'); label.className = 'hint';
+      label.textContent = previous.category_name !== s.category_name
+        ? ` · קודם: ${previous.category_name}` : ' · פרטי האימון עודכנו';
+      label.title = 'השינוי אושר · הפירוט נשמר בהיסטוריית האימונים למטה';
+      t2.append(label);
+    }
     grow.append(t1, t2);
     if (s.planning && s.planning.state !== 'ready') {
       const note = document.createElement('p');
@@ -1573,6 +1587,9 @@ const OUTCOMES = {
   full:      { label: "🚪 התמלא — בלי המתנה", cls: "o-skipped" },
   failed:    { label: "❌ נכשל", cls: "o-failed" },
   other:     { label: "❔ אחר", cls: "o-skipped" },
+  planning_changed: {label: '🔄 פרטי האימון השתנו', cls: 'o-pending'},
+  planning_change_accepted: {label: '✓ השינוי אושר', cls: 'o-attended'},
+  planning_change_cancelled: {label: 'בוטל בעקבות שינוי', cls: 'o-cancelled'},
 };
 
 const RESULT_TO_OUTCOME = [
@@ -1615,6 +1632,8 @@ function mergedHistory() {
     ...(d.decisions || []).map((x) => ({
       ...x, outcome: outcomeOf(x.result),
     })),
+    ...(d.changes || []).filter(x => ![...(d.sessions || []), ...(d.decisions || [])]
+      .some(s => s.schedule_id === x.schedule_id)).map(x => ({...x, outcome:x.status})),
   ];
   return rows.sort((a, b) => {
     const da = `${histDate(a) || ""} ${a.start_time || ""}`;
@@ -1634,6 +1653,9 @@ const EVENT_LABELS = {
   attended: "סומן שהגעת",
   missed: "סומן שלא הגעת",
   reason_updated: "סיבת אי-הגעה עודכנה",
+  planning_changed: 'זוהה שינוי באימון',
+  planning_change_accepted: 'השינוי אושר',
+  planning_change_cancelled: 'התכנון בוטל בעקבות השינוי',
 };
 
 function eventClock(value) {
@@ -1647,6 +1669,7 @@ function eventStamp(value) {
 
 function eventReason(e) {
   if (!e.reason_code || e.reason_code === "none") return "";
+  if (e.reason_code === 'workout_changed') return ` · ${e.reason_text || 'פרטי האימון השתנו'}`;
   const value = e.reason_code === "other"
     ? (e.reason_text || "אחר") : (REASON_LABELS[e.reason_code] || e.reason_code);
   return ` · סיבה: ${value}`;
@@ -1813,6 +1836,12 @@ function renderHistory() {
     const what = document.createElement("span");
     what.className = "hist-what";
     what.textContent = [x.category_name, x.coach_name].filter(Boolean).join(" · ");
+    const change = (historyData?.changes || []).find(e => e.schedule_id === x.schedule_id);
+    if (change) {
+      const reason = document.createElement('small'); reason.className = 'hint';
+      reason.style.display = 'block'; reason.textContent = change.reason_text;
+      what.append(reason);
+    }
 
     const tag = document.createElement("button");
     tag.type = "button";

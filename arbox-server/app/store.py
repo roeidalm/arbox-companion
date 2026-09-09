@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import aiosqlite
-from .planning_intent import snapshot, change
+from .planning_intent import snapshot, change, description
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -441,6 +441,8 @@ class Store:
              "ALTER TABLE training_events ADD COLUMN box_id INTEGER"),
             ("training_events", "membership_user_id",
              "ALTER TABLE training_events ADD COLUMN membership_user_id INTEGER"),
+            ("training_events", "change_json",
+             "ALTER TABLE training_events ADD COLUMN change_json TEXT"),
             # when this class first entered the DB, as opposed to updated_at,
             # which every sync rewrites. The autobook catch-up cap needs to
             # tell "we have known about this for days and did nothing" from
@@ -549,6 +551,8 @@ class Store:
     async def intent_change(self, session: dict) -> dict | None:
         record = await self.get_intent(session['schedule_id'])
         result = change(record, session)
+        if result:
+            await self._record_planning_event(session, record, 'planning_changed')
         if result and not record['changed']:
             await self.db.execute(
                 "UPDATE planning_intents SET changed=1 WHERE schedule_id=? AND box_id=?",
@@ -557,10 +561,57 @@ class Store:
         return result
 
     async def accept_intent(self, session: dict) -> None:
+        record = await self.get_intent(session['schedule_id'])
+        if change(record, session):
+            await self._record_planning_event(session, record, 'planning_change_accepted')
         await self.db.execute(
             "UPDATE planning_intents SET snapshot=?,changed=0 WHERE schedule_id=? AND box_id=?",
             (json.dumps(snapshot(session)), session['schedule_id'], self.active_box_id or 0))
         await self.db.commit()
+
+    async def _record_planning_event(self, session, record, event_type):
+        """Append snapshots independently of the deletable/current intent."""
+        if not record:
+            return
+        sid, box = session['schedule_id'], record['box_id']
+        cur = await self.db.execute(
+            "SELECT * FROM training_events WHERE schedule_id=? AND box_id=? "
+            "AND change_json IS NOT NULL ORDER BY id DESC LIMIT 1", (sid, box))
+        last = await cur.fetchone()
+        prior = json.loads(last['change_json']) if last else None
+        current, available = snapshot(session), record['changed'] != 2
+        if event_type == 'planning_changed':
+            if prior and prior['after'] == current and prior['available'] == available:
+                return
+            before = prior['after'] if prior else json.loads(record['snapshot'])
+        else:
+            before = json.loads(record['snapshot'])
+        detail = description(before, current) if available else 'האימון אינו מופיע בלוח המעודכן'
+        if event_type == 'planning_change_cancelled':
+            detail = 'בוטל בעקבות שינוי באימון · ' + detail
+        elif event_type == 'planning_change_accepted':
+            detail = 'האימון המעודכן אושר · ' + detail
+        payload = json.dumps({'before': before, 'after': current, 'available': available}, sort_keys=True)
+        # One SQLite statement deduplicates concurrent reads of the same change.
+        await self.db.execute(
+            "INSERT INTO training_events (schedule_id,box_id,event_type,source,date,start_time,end_time,"
+            "category_name,coach_name,reason_code,reason_text,counts_entry,change_json) "
+            "SELECT ?,?,?,?,?,?,?,?,?,?,?,0,? WHERE NOT EXISTS (SELECT 1 FROM training_events "
+            "WHERE id=(SELECT MAX(id) FROM training_events WHERE schedule_id=? AND box_id=? "
+            "AND change_json IS NOT NULL) AND event_type=? AND change_json=?)",
+            (sid, box, event_type, 'planning', session.get('date'), session.get('start_time'),
+             session.get('end_time'), session.get('category_name'), session.get('coach_name'),
+             'workout_changed', detail, payload, sid, box, event_type, payload))
+        await self.db.commit()
+
+    async def planning_history(self) -> list[dict]:
+        cur = await self.db.execute(
+            "SELECT * FROM training_events WHERE id IN (SELECT MAX(id) FROM training_events "
+            "WHERE change_json IS NOT NULL AND (? IS NULL OR box_id=?) GROUP BY schedule_id,box_id)",
+            (self.active_box_id, self.active_box_id))
+        rows = [dict(r) for r in await cur.fetchall()]
+        return [{**{k:v for k,v in e.items() if k != 'change_json'}, 'status': e['event_type'],
+                 'planning_change': json.loads(e['change_json'])} for e in rows]
 
     async def upsert_sessions(
         self, sessions: list[dict], extra_advance_hours: int = 0,
@@ -901,6 +952,10 @@ class Store:
             raise ValueError("unknown session")
         args = (schedule_id, session.get("box_id") or 0)
         if skipped:
+            record = await self.get_intent(schedule_id)
+            if change(record, session):
+                await self.intent_change(session)
+                await self._record_planning_event(session, record, 'planning_change_cancelled')
             await self.db.execute(
                 "INSERT OR IGNORE INTO automation_skips(schedule_id,box_id) VALUES (?,?)", args)
         else:
@@ -1322,7 +1377,12 @@ class Store:
             "SELECT * FROM training_events WHERE (? IS NULL OR box_id=?) "
             "ORDER BY occurred_at, id",
             (self.active_box_id, self.active_box_id))
-        return [dict(r) for r in await cur.fetchall()]
+        rows = [dict(r) for r in await cur.fetchall()]
+        for row in rows:
+            raw = row.pop('change_json', None)
+            if raw:
+                row['change'] = json.loads(raw)
+        return rows
 
     async def get_training_outcome(self, schedule_id: int) -> dict | None:
         cur = await self.db.execute(
@@ -1611,6 +1671,16 @@ class Store:
         await self.db.commit()
 
     async def unwatch(self, schedule_id: int) -> None:
+        session = await self.get_session(schedule_id)
+        record = await self.get_intent(schedule_id)
+        if session and change(record, session):
+            await self.intent_change(session)
+            await self._record_planning_event(session, record, 'planning_change_cancelled')
+            # Rejecting this replacement also prevents a broad recurring rule
+            # from silently recreating the pin as an automatic occurrence.
+            await self.db.execute(
+                'INSERT OR IGNORE INTO automation_skips(schedule_id,box_id) VALUES (?,?)',
+                (schedule_id, record['box_id']))
         await self.db.execute("DELETE FROM watchlist WHERE schedule_id=?", (schedule_id,))
         await self.db.execute(
             "DELETE FROM planning_intents WHERE schedule_id=? AND box_id=? AND source='scheduled'",

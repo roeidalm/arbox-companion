@@ -236,3 +236,30 @@ test("unchanged polling data does not detach focused DOM controls", () => {
   panel.render();
   assert.equal(replacements, 2);
 });
+
+test('My history is read lazily and keeps cancelled and accepted changes visible', async () => {
+  const { panel, context } = harness();
+  const make = tag => ({tag, childNodes:[], append(...children){this.childNodes.push(...children);}});
+  context.document.createElement = make;
+  const content = n => typeof n === 'string' ? n : [n.textContent || '', ...n.childNodes.map(content)].join(' ');
+  panel._content = make('main');
+  panel._tab = 'mine';
+  panel._data.history = {sessions:[], changes:[{
+    schedule_id:1, date:'2026-09-22', start_time:'20:15', category_name:'Modern dance', coach_name:'Noa',
+    status:'planning_change_cancelled', reason_text:'Cancelled after HS changed to Modern dance',
+  }, {
+    schedule_id:2, date:'2026-09-24', start_time:'10:00', category_name:'Updated class',
+    status:'planning_change_accepted', reason_text:'Accepted change from Original class',
+  }], events:[]};
+  panel.renderMineHistory();
+  assert.ok(!content(panel._content).includes('Modern dance'));
+  const section = panel._content.childNodes[0];
+  let loads = 0; panel.load = async () => loads++;
+  section.isConnected = true; section.open = true; section.ontoggle();
+  assert.equal(loads, 1);
+  panel._content = make('main');
+  panel.renderMineHistory();
+  const visible = content(panel._content);
+  for (const text of ['Modern dance','Noa','HS','Original class','השינוי אושר','התכנון בוטל בעקבות השינוי'])
+    assert.ok(visible.includes(text), text);
+});

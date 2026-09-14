@@ -20,8 +20,9 @@ async def test_cached_timing_response_is_reused_even_when_daily_budget_is_full(e
     await engine.store.watch(77,membership_user_id=20)
     key=engine.membership_policy.key(0)+':probes'
     await engine.store.set_meta(key, {
-        f"20:{fingerprint(m)}:1":{'at':time.time(),'schedule_id':77,'status':425,'messages':[TIME]},
+        f"20:{fingerprint(m)}:1":{'at':time.time()-90*86400,'schedule_id':77,'status':425,'messages':[TIME]},
         'other':{'at':time.time()},
+        'another':{'at':time.time()},
     })
     await engine.preflight_plans(); await engine.preflight_plans()
     engine.client.book.assert_not_awaited()
@@ -32,12 +33,13 @@ async def test_cached_timing_response_is_reused_even_when_daily_budget_is_full(e
     assert not (await engine.membership_policy.get({**m,'end':'2027-01-01'}))['preflight_category_ids']
 
 @pytest.mark.asyncio
-async def test_expiry_and_explicit_denial_override_early_check(engine):
+async def test_old_evidence_survives_but_explicit_denial_overrides_early_check(engine):
     m=(await engine.store.get_meta('memberships'))[1]
     await engine.store.set_meta(engine.membership_policy.key(20), {'fingerprint':fingerprint(m)})
     s=await engine.store.get_session(77)
     err=ArboxError('early',status=425,body={'error':{'messageToUser':[TIME]}})
-    assert not await engine.membership_policy.learn_preflight(m,s,err,checked_at=time.time()-8*86400)
+    assert await engine.membership_policy.learn_preflight(m,s,err,checked_at=time.time()-90*86400)
+    assert eligible({**m,"policy":await engine.membership_policy.get(m)},s)
     assert await engine.membership_policy.learn_preflight(m,s,err)
     await engine.membership_policy.learn_rejection(m,s,ArboxError('denied',status=425,body={'error':{'messageToUser':[
         {'name':'classTypeRestricts','value':{'allowedText':'Class 2'}}]}}))
@@ -69,3 +71,30 @@ async def test_probe_projection_keeps_other_confirmed_classes_in_capacity(engine
     await engine.store.watch(77,membership_user_id=20)
     await engine.preflight_plans()
     engine.client.book.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["shop", "rejection"])
+async def test_old_explicit_categories_survive_failed_or_missing_metadata(engine, source):
+    m=(await engine.store.get_meta("memberships"))[1]
+    key=engine.membership_policy.key(m["id"])
+    await engine.store.set_meta(key, {
+        "fingerprint":fingerprint(m), "source":source, "categories_known":True,
+        "category_names":["Class 1"], "verified_at":time.time()-90*86400,
+    })
+    s=await engine.store.get_session(77)
+    await engine.membership_policy.refresh([m])  # failed read
+    assert eligible({**m,"policy":await engine.membership_policy.get(m)},s)
+    state=await engine.store.get_meta(key)
+    state["checked_at"]=0
+    await engine.store.set_meta(key,state)
+    engine.client.membership_details.side_effect=None
+    engine.client.membership_details.return_value={"limitations":[]}
+    await engine.membership_policy.refresh([m])
+    assert eligible({**m,"policy":await engine.membership_policy.get(m)},s)
+    state=await engine.store.get_meta(key)
+    state["checked_at"]=0
+    await engine.store.set_meta(key,state)
+    engine.client.membership_details.return_value={"limitations":[
+        {"header":"Available Classes","values":["Class 2"]}]}
+    await engine.membership_policy.refresh([m])
+    assert not eligible({**m,"policy":await engine.membership_policy.get(m)},s)

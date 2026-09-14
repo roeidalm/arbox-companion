@@ -125,11 +125,14 @@ window still more than 24 hours away, including advance-registration bonuses.
 This is **not a dry-run API**: an unexpected success is saved as a real booking
 of that desired class and announced. A complete 425 response containing only the recognized early-registration
 restriction passes the preliminary eligibility check for that membership revision
-and category for seven days. Cached responses are reused, including after restart.
+and category while the membership revision remains unchanged. Cached responses
+are reused across weeks and restarts; age alone never triggers another attempt.
+Changed membership details or an explicit upstream denial invalidate the relevant
+evidence. The daily workout review and final identity check still detect changed classes.
 Other or additional errors keep the plan paused; final registration still checks
 dates, capacity and the current upstream response. Failed shop
-reads are cached for a day; automatic eligibility older than seven days requires
-review. Existing authentication tokens are reused.
+reads are cached for a day; missing class metadata does not erase previously
+established eligibility. Existing authentication tokens are reused.
 
 Before booking, the server serializes the operation, refreshes membership history
 and checks the same ledger used by the UI. An interrupted write stays paused

@@ -713,10 +713,9 @@ class RulesEngine:
                         body={'error': {'messageToUser': previous.get('messages')}})
                     if await self.membership_policy.learn_preflight(member, session, error, checked_at=previous.get('at', 0)):
                         continue
-                    # Only successful timing evidence expires and can be checked
-                    # again. Unknown outcomes and refusals are never auto-retried.
-                    if not error.timing_only() or time.time() - previous.get('at', 0) < 7 * 86400:
-                        continue
+                    # One attempt per membership revision/category, regardless
+                    # of age. Unknown outcomes and refusals are not retried either.
+                    continue
                 if recent >= 2 or opening_moment(start, advance + bonus) < datetime.now() + timedelta(hours=24):
                     continue
                 verified = await self.store.get_meta(self.membership_policy.key(member["id"]) + ":history") or {}

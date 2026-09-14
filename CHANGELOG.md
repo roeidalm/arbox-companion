@@ -3,6 +3,15 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.53.4
+
+- Reuse established membership/class eligibility across weeks and restarts without
+  age-based expiry or repeated early booking attempts.
+- Invalidate eligibility on changed membership details or explicit upstream denial;
+  preserve the daily workout review and final identity, validity and quota checks.
+- Preserve established class eligibility when refreshed metadata omits its class
+  list; an explicit new list still replaces the previous one.
+
 ## 1.53.3
 
 - Accept a complete timing-only early-registration refusal for the checked

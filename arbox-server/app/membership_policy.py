@@ -80,8 +80,6 @@ class MembershipPolicy:
     async def get(self, member: dict) -> dict:
         saved = await self.store.get_meta(self.key(member["id"])) or {}
         current = saved.get("fingerprint") == fingerprint(member)
-        stale = bool(saved.get("source") in ("shop", "rejection") and
-                     time.time() - saved.get("verified_at", 0) > 7 * POLICY_TTL)
         catalog = await self.catalog()
         index = {}
         for cat in catalog:
@@ -99,7 +97,7 @@ class MembershipPolicy:
             known = {c["id"] for c in catalog}
             unmatched = [str(cid) for cid in ids if cid not in known]
         category_known = bool(current and saved.get("categories_known")
-                              and not saved.get("contradiction") and not stale)
+                              and not saved.get("contradiction"))
         limits = list(saved.get("limits") or []) if current else []
         finite = member.get("sessions_on_purchase")
         if finite is not None:
@@ -110,7 +108,7 @@ class MembershipPolicy:
         confirmed = list(saved.get('confirmed_category_ids') or []) if current and not saved.get('contradiction') else []
         preflight = [int(cid) for cid, evidence in (saved.get('preflight_categories') or {}).items()
                      if current and not saved.get('contradiction')
-                     and 0 <= time.time() - evidence.get('at', 0) < 7 * POLICY_TTL]
+                     and 0 < evidence.get('at', 0) <= time.time()]
         return {
             **saved, "fingerprint": fingerprint(member), "category_ids": sorted(set(ids)),
             "categories_known": category_known, "quota_known": quota_known,
@@ -119,7 +117,6 @@ class MembershipPolicy:
             "preflight_category_ids": preflight,
             "state": "ready" if (category_known or confirmed or preflight) and quota_known else "needs_review",
             "reason": ("פרטי המנוי השתנו — נדרש אימות מחדש" if saved and not current else
-                       "מידע הזכאות התיישן — נדרש רענון או אישור ידני" if stale else
                        "השרת דחה את ההגדרה — נדרש לבדוק את ההתאמה" if saved.get("contradiction") else
                        "נדרשת השלמת סוגי השיעורים המותרים" if not category_known else
                        "נדרשת השלמת המכסה והתקופה" if not quota_known else ""),
@@ -156,10 +153,13 @@ class MembershipPolicy:
                            == "available classes"]
                 limits, unsupported = parse_limits(sections)
                 state.update(source="shop", verified_at=time.time(), limits=limits,
-                             unsupported=unsupported, categories_known=bool(classes),
-                             category_names=[str(v).strip() for s in classes
-                                             for v in s.get("values") or [] if str(v).strip()],
-                             evidence=sections, read_error=None)
+                             unsupported=unsupported, evidence=sections, read_error=None)
+                # An omitted class list is not a revocation of earlier evidence.
+                # An explicit list, including an empty one, replaces that evidence.
+                if classes:
+                    state.update(categories_known=True,
+                                 category_names=[str(v).strip() for s in classes
+                                                 for v in s.get("values") or [] if str(v).strip()])
             except (ArboxError, TypeError, ValueError, KeyError) as err:
                 # Failure says nothing about eligibility. Retain prior explicit
                 # evidence; show the failed refresh without inventing a whitelist.
@@ -177,7 +177,7 @@ class MembershipPolicy:
                 or session['category_id'] in policy.get('denied_category_ids', [])):
             return False
         at = time.time() if checked_at is None else checked_at
-        if not 0 <= time.time() - at < 7 * POLICY_TTL:
+        if not 0 < at <= time.time():
             return False
         saved = await self.store.get_meta(key) or {}
         if saved.get('fingerprint') != fingerprint(member):

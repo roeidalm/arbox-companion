@@ -3,7 +3,7 @@ import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar
 import {renderJournal, journalSignature} from './panel-journal.js?v=3.4.0';
 import {policySummary, policyEditor} from './membership-policy.js?v=3';
 import {quotaSummary, quotaRow, membershipDisclosure} from './membership-ui.js?v=1';
-import {membershipChoice} from './membership-choice.js?v=1';
+import {membershipChoice} from './membership-choice.js?v=2';
 import {calendarLinks} from './session-calendar.js?v=1';
 import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
 
@@ -175,7 +175,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.4.2", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.4.3", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -248,7 +248,7 @@ export class ArboxAppPanel extends HTMLElement {
       this._nav,
     );
     const membershipCSS = node('link'); membershipCSS.rel = 'stylesheet';
-    membershipCSS.href = new URL('./membership-ui.css?v=3', import.meta.url).href;
+    membershipCSS.href = new URL('./membership-ui.css?v=4', import.meta.url).href;
     this.shadowRoot.replaceChildren(css, membershipCSS, this._shell);
   }
   navigate(tab) {

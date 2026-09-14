@@ -192,7 +192,7 @@ async def test_unknown_write_is_not_retried_after_restart_and_reserves_capacity(
 
 
 @pytest.mark.asyncio
-async def test_safe_preflight_learns_once_and_timing_alone_does_not_verify(engine):
+async def test_safe_preflight_timing_only_passes_planning_once(engine):
     m = (await engine.store.get_meta('memberships'))[1]
     await engine.store.set_meta(engine.membership_policy.key(20), {'fingerprint':fingerprint(m),'checked_at':time.time()})
     await engine.store.watch(77,membership_user_id=20)
@@ -200,8 +200,8 @@ async def test_safe_preflight_learns_once_and_timing_alone_does_not_verify(engin
         {'name':'registerScheduleDisabled','value':{'hours':168}}]}})
     await engine.preflight_plans(); await engine.preflight_plans()
     engine.client.book.assert_awaited_once_with(77,20)
-    assert (await engine.membership_policy.get(m))['state'] == 'needs_review'
-    assert (await engine.quota_status())['unresolved_plans'] == [77]
+    assert (await engine.membership_policy.get(m))['preflight_category_ids'] == [1]
+    assert (await engine.quota_status())['plan_states']['77']['state'] == 'ready'
 
 
 @pytest.mark.asyncio

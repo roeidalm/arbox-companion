@@ -1323,7 +1323,7 @@ async function renderFacetSelect(host, text, values, selected, change) {
 }
 
 async function mountSessionMembership(host, session, studio) {
-  const {membershipChoice} = await import('/static/membership-choice.js?v=1');
+  const {membershipChoice} = await import('/static/membership-choice.js?v=2');
   if (studio !== state.selectedStudioId || !host.isConnected) return;
   const request = (path, body) => {
     if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');

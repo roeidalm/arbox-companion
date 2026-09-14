@@ -123,8 +123,11 @@ server may make one early registration attempt per membership revision/category,
 with a maximum of two such attempts per day. It requires a known registration
 window still more than 24 hours away, including advance-registration bonuses.
 This is **not a dry-run API**: an unexpected success is saved as a real booking
-of that desired class and announced. A timing-only rejection does not establish
-eligibility; users can complete missing information immediately. Failed shop
+of that desired class and announced. A complete 425 response containing only the recognized early-registration
+restriction passes the preliminary eligibility check for that membership revision
+and category for seven days. Cached responses are reused, including after restart.
+Other or additional errors keep the plan paused; final registration still checks
+dates, capacity and the current upstream response. Failed shop
 reads are cached for a day; automatic eligibility older than seven days requires
 review. Existing authentication tokens are reused.
 

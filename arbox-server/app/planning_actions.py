@@ -106,7 +106,7 @@ class PlanningActions:
                                     'available': False, 'reason': reason, 'manual': False})
                     continue
                 option = await self.member_option(context, session, member)
-                choice = {k: option.get(k) for k in ('available', 'reason', 'manual')}
+                choice = {k: option.get(k) for k in ('available', 'reason', 'manual', 'preflight')}
                 choice.update(id=member['id'], name=member.get('plan') or 'מנוי',
                               start=member.get('start'), end=member.get('end'),
                               entries=member.get('sessions_on_purchase'),
@@ -275,6 +275,7 @@ class PlanningActions:
         state = quota.get('plan_states', {}).get(str(session['schedule_id']), {})
         return {'member': member, 'policy': policy, 'manual': manual,
                 'available': state.get('state') == 'ready', 'reason': state.get('reason'),
+                'preflight': category in policy.get('preflight_category_ids', []),
                 'quota': next((m for m in quota.get('memberships', []) if m['id'] == member['id']), {})}
 
     async def choose_member(self, c, session):

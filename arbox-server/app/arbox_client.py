@@ -49,6 +49,18 @@ class ArboxError(Exception):
     def message(self, name: str) -> dict:
         return next((m for m in self.messages() if m["name"] == name), {})
 
+    def timing_only(self) -> bool:
+        """Recognize the complete early-registration refusal, not just its first item."""
+        if self.status != 425 or self.transient or not isinstance(self.body, dict):
+            return False
+        error = self.body.get('error')
+        messages = error.get('messageToUser') if isinstance(error, dict) else None
+        return bool(isinstance(messages, list) and messages and all(
+            isinstance(m, dict) and m.get('name') == 'registerScheduleDisabled'
+            and isinstance(m.get('value'), dict)
+            and type(m['value'].get('hours')) in (int, float)
+            and 0 < m['value']['hours'] < float('inf') for m in messages))
+
     def _first_message(self) -> dict:
         return next(iter(self.messages()), {})
 

@@ -3,6 +3,17 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.53.3
+
+- Accept a complete timing-only early-registration refusal for the checked
+  membership revision and class type. Reuse cached checks for seven days;
+  preserve explicit denials, dates, quota and final booking checks.
+- Review existing plans when refreshing memberships and keep other confirmed
+  class types in the quota calculation before any early attempt.
+- Keep the fallback confirmation beside the selected membership on narrow
+  screens, with explicit native checkbox styling and refreshed asset versions.
+- Update dependency locks to include the merged uvicorn 0.53.0 and tzdata 2026.4 updates.
+
 ## 1.53.2
 
 - Choose a membership for an automatic occurrence directly in My, on desktop,

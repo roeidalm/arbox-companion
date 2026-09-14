@@ -2,11 +2,11 @@
 .membership-choice{width:100%;min-width:0;box-sizing:border-box;text-align:start;color:var(--ink,var(--text));padding-block:8px}
 .membership-choice-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.membership-choice button{min-height:44px;cursor:pointer}.membership-choice button:disabled{cursor:default}
 .membership-choice-options{border:0;padding:0;margin:8px 0;min-width:0;display:grid;gap:4px}.membership-choice-options legend{font-size:.85em;color:var(--muted);margin-bottom:8px}
-.membership-choice-option,.membership-choice-confirm{display:flex;align-items:flex-start;gap:10px;margin:0;padding:8px 0;line-height:1.45;font-size:.94em;min-width:0}.membership-choice-option+.membership-choice-option{border-top:1px solid var(--line,#ddd)}
+.membership-choice-option,.membership-choice-confirm{display:flex;align-items:flex-start;gap:10px;margin:0;padding:8px 0;line-height:1.45;font-size:.94em;min-width:0}.membership-choice-row+.membership-choice-row{border-top:1px solid var(--line,#ddd)}
 .membership-choice-option>span{min-width:0;overflow-wrap:anywhere}.membership-choice-option small{display:block;margin-top:3px;font-size:.85em;color:var(--muted)}
 .membership-choice input[type=radio],.membership-choice input[type=checkbox]{flex:0 0 20px;width:20px;height:20px;margin:2px 0;padding:0;accent-color:var(--accent,#2563eb)}
 .membership-choice-option:has(input:checked){color:var(--accent,#2563eb)}.membership-choice-option:has(input:disabled){color:var(--muted)}
-.membership-choice-confirm{padding:12px 0}.membership-choice-status{font-size:.9em;margin:8px 0;line-height:1.5;overflow-wrap:anywhere}.membership-choice-status:empty{display:none}.membership-choice [hidden]{display:none!important}
+.membership-choice-confirm{padding:12px 0;min-height:44px;box-sizing:border-box;cursor:pointer}.membership-choice input[type=checkbox]{appearance:auto;-webkit-appearance:checkbox}.membership-choice-status{font-size:.9em;margin:8px 0;line-height:1.5;overflow-wrap:anywhere}.membership-choice-status:empty{display:none}.membership-choice [hidden]{display:none!important}
 .mu-summary,.mu-membership{--mu-ink:var(--ink,var(--text,#20313d));--mu-line:var(--line,#d9e0e7);color:var(--mu-ink);min-width:0}
 .mu-quota-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;padding:14px 0;min-width:0}
 .mu-quota-row+.mu-quota-row{border-top:1px solid var(--mu-line)}

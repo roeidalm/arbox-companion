@@ -108,12 +108,16 @@ class MembershipPolicy:
         quota_known = bool(limits and not saved.get("unsupported") and
                            (current or finite is not None))
         confirmed = list(saved.get('confirmed_category_ids') or []) if current and not saved.get('contradiction') else []
+        preflight = [int(cid) for cid, evidence in (saved.get('preflight_categories') or {}).items()
+                     if current and not saved.get('contradiction')
+                     and 0 <= time.time() - evidence.get('at', 0) < 7 * POLICY_TTL]
         return {
             **saved, "fingerprint": fingerprint(member), "category_ids": sorted(set(ids)),
             "categories_known": category_known, "quota_known": quota_known,
             "limits": limits, "unmatched": unmatched,
             "confirmed_category_ids": confirmed,
-            "state": "ready" if (category_known or confirmed) and quota_known else "needs_review",
+            "preflight_category_ids": preflight,
+            "state": "ready" if (category_known or confirmed or preflight) and quota_known else "needs_review",
             "reason": ("פרטי המנוי השתנו — נדרש אימות מחדש" if saved and not current else
                        "מידע הזכאות התיישן — נדרש רענון או אישור ידני" if stale else
                        "השרת דחה את ההגדרה — נדרש לבדוק את ההתאמה" if saved.get("contradiction") else
@@ -162,12 +166,37 @@ class MembershipPolicy:
                 state["read_error"] = str(err)
             await self.store.set_meta(key, state)
 
+    async def learn_preflight(self, member: dict, session: dict, err: ArboxError, *, checked_at=None) -> bool:
+        """A timing-only response passes early planning, not the final booking checks."""
+        if not err.timing_only() or not session.get('category_id'):
+            return False
+        key = self.key(member['id'])
+        policy = await self.get(member)
+        if (policy.get('categories_known') or policy.get('contradiction')
+                or policy.get('source') == 'manual'
+                or session['category_id'] in policy.get('denied_category_ids', [])):
+            return False
+        at = time.time() if checked_at is None else checked_at
+        if not 0 <= time.time() - at < 7 * POLICY_TTL:
+            return False
+        saved = await self.store.get_meta(key) or {}
+        if saved.get('fingerprint') != fingerprint(member):
+            saved = {'fingerprint': fingerprint(member)}
+        checks = saved.setdefault('preflight_categories', {})
+        checks[str(session['category_id'])] = {'at': at, 'schedule_id': session['schedule_id'],
+                                              'messages': err.messages()}
+        await self.store.set_meta(key, saved)
+        await self.store.set_meta('quota_cache', None)
+        return True
+
     async def learn_rejection(self, member: dict, session: dict, err: ArboxError) -> bool:
         message = err.message("classTypeRestricts")
         if not message:
             return False
         key = self.key(member["id"])
         state = await self.store.get_meta(key) or {}
+        if state.get('fingerprint') != fingerprint(member):
+            state.pop('preflight_categories', None)
         value = message.get("value") or {}
         names = [s.strip() for s in str(value.get("allowedText") or "").splitlines() if s.strip()]
         state.update(fingerprint=fingerprint(member), verified_at=time.time(),
@@ -230,5 +259,6 @@ def eligible(member: dict, session: dict) -> bool:
     policy = member.get("policy") or {}
     return bool(policy.get("state") == "ready"
                 and session.get('category_id') in (policy.get('category_ids', [])
-                    if policy.get('categories_known', True) else policy.get('confirmed_category_ids', []))
+                    if policy.get('categories_known', True) else [*policy.get('confirmed_category_ids', []),
+                                                                *policy.get('preflight_category_ids', [])])
                 and session.get("category_id") not in policy.get("denied_category_ids", []))

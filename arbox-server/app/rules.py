@@ -672,8 +672,8 @@ class RulesEngine:
         """One early attempt for an existing intent, never an arbitrary class.
 
         There is no dry-run endpoint. Even far outside the documented window a
-        surprising success is a real booking: persist it and stop. Timing-only
-        rejection is NOT proof that this membership permits the category.
+        surprising success is a real booking: persist it and stop. A complete
+        timing-only refusal passes early planning; final booking checks remain.
         """
         from .membership_policy import fingerprint
         import time
@@ -683,8 +683,6 @@ class RulesEngine:
         probes = await self.store.get_meta(history_key) or {}
         recent = sum(time.time() - p.get("at", 0) < 86400 for p in probes.values())
         for plan in plans:
-            if recent >= 2:
-                break
             if plan.get('intent_change'):
                 continue
             # Pin rows deliberately carry only cached presentation fields;
@@ -695,11 +693,7 @@ class RulesEngine:
                 continue
             start = datetime.fromisoformat(f"{session['date']}T{session['start_time']}")
             bonus = max((int(m.get("extra_advance_hours") or 0) for m in members), default=0)
-            if opening_moment(start, advance + bonus) < datetime.now() + timedelta(hours=24):
-                continue
             for member in members:
-                if recent >= 2:
-                    break
                 if not self._membership_valid_on(member, session["date"]):
                     continue
                 if plan.get("membership_user_id") not in (None, member["id"]):
@@ -708,10 +702,22 @@ class RulesEngine:
                 # Explicit evidence/manual decisions are never probed again.
                 if (policy.get("categories_known") or not policy.get("quota_known")
                         or session['category_id'] in policy.get('confirmed_category_ids', [])
+                        or session['category_id'] in policy.get('preflight_category_ids', [])
+                        or session['category_id'] in policy.get('denied_category_ids', [])
                         or policy.get("contradiction") or policy.get("source") == "manual"):
                     continue
                 probe_id = f"{member['id']}:{fingerprint(member)}:{session['category_id']}"
-                if probe_id in probes:
+                previous = probes.get(probe_id)
+                if previous:
+                    error = ArboxError('cached early check', status=previous.get('status'),
+                        body={'error': {'messageToUser': previous.get('messages')}})
+                    if await self.membership_policy.learn_preflight(member, session, error, checked_at=previous.get('at', 0)):
+                        continue
+                    # Only successful timing evidence expires and can be checked
+                    # again. Unknown outcomes and refusals are never auto-retried.
+                    if not error.timing_only() or time.time() - previous.get('at', 0) < 7 * 86400:
+                        continue
+                if recent >= 2 or opening_moment(start, advance + bonus) < datetime.now() + timedelta(hours=24):
                     continue
                 verified = await self.store.get_meta(self.membership_policy.key(member["id"]) + ":history") or {}
                 if not verified.get("ok") or time.time() - verified.get('checked_at', 0) > 86400:
@@ -721,7 +727,8 @@ class RulesEngine:
                 details = [{**m, "policy": await self.membership_policy.get(m)} for m in members]
                 for d in details:
                     if d["id"] == member["id"]:
-                        d["policy"] = {**policy, "state": "ready", "categories_known": True, "category_ids": [session["category_id"]]}
+                        d["policy"] = {**policy, "state": "ready", "confirmed_category_ids":
+                            list(set(policy.get('confirmed_category_ids', [])) | {session['category_id']})}
                 commitments = await self._quota_commitments(members)
                 pending_key = self.membership_policy.key(0) + ":uncertain"
                 pending = await self.store.get_meta(pending_key) or {}
@@ -750,7 +757,9 @@ class RulesEngine:
                         pending.pop(str(session["schedule_id"]), None)
                         await self.store.set_meta(pending_key, pending)
                     await self.membership_policy.learn_rejection(member, session, err)
-                    probes[probe_id]["messages"] = err.messages()
+                    await self.membership_policy.learn_preflight(member, session, err)
+                    error_body = err.body.get('error') if isinstance(err.body, dict) else None
+                    probes[probe_id]["messages"] = error_body.get('messageToUser') if isinstance(error_body, dict) else []
                     probes[probe_id]["status"] = err.status
                     await self.store.set_meta(history_key, probes)
                     continue
@@ -878,7 +887,7 @@ class RulesEngine:
             _LOGGER.warning("Membership refresh after action failed: %s", err)
 
     async def refresh_membership_inventory(self, *, force=False) -> None:
-        """User-requested inventory/evidence read, without booking or notifying."""
+        """User-requested inventory refresh and bounded review of existing plans."""
         import time
         async with self._tick_lock:
             key = self.membership_policy.key(0)
@@ -888,6 +897,8 @@ class RulesEngine:
             # Keep the active studio and cached upstream login intact.
             await self.syncer.refresh_profile()
             await self.refresh_planning_evidence(force_history=True)
+            await self.preflight_plans()
+            await self.reconcile_planned_quota()
             await self.store.set_meta('quota_cache', None)
             self._inventory_refresh = {key: time.monotonic()}
 

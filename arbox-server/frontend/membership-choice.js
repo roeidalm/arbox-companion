@@ -31,8 +31,9 @@ export function membershipChoice({load, save, onSaved, onInventory, isCurrent = 
     submit.disabled = busy || saved || requireRefresh || !selected?.available || (!!selected?.manual && !checkbox.checked);
     root.setAttribute('aria-busy', String(busy));
   };
-  const choose = option => {
+  const choose = (option, row) => {
     selected = option; checkbox.checked = false;
+    row.append(confirmation);
     confirmation.hidden = !option.manual;
     confirmationText.textContent = `אישרתי מול הסטודיו שהמנוי כולל ${data.category_name}`;
     update();
@@ -47,16 +48,18 @@ export function membershipChoice({load, save, onSaved, onInventory, isCurrent = 
       checkbox.checked = false; confirmation.hidden = true;
       optionsHost.replaceChildren(node('legend', 'באיזה מנוי להשתמש?'));
       for (const option of data.options || []) {
+        const row = node('div', null, 'membership-choice-row');
         const label = node('label', null, 'membership-choice-option');
         const radio = node('input'); radio.type = 'radio'; radio.name = group;
         radio.value = String(option.id); radio.disabled = !option.available;
         const text = node('span'); text.append(node('span', option.name + (option.entries != null ? ` · ${option.entries} כניסות` : '')));
         const detail = !option.available ? option.reason : option.manual ? 'נדרש אישור שסוג השיעור כלול' :
-          `מתאים${option.remaining_after != null ? ` · ${option.remaining_after} פנויים לאחר השיוך` : ''}`;
+          `${option.preflight ? 'עבר בדיקה מוקדמת' : 'מתאים'}${option.remaining_after != null ? ` · ${option.remaining_after} פנויים לאחר השיוך` : ''}`;
         text.append(node('small', detail)); label.append(radio, text);
-        radio.onchange = () => choose(option);
-        if (option.selected && option.available) { radio.checked = true; choose(option); }
-        optionsHost.append(label);
+        row.append(label);
+        radio.onchange = () => choose(option, row);
+        if (option.selected && option.available) { radio.checked = true; choose(option, row); }
+        optionsHost.append(row);
       }
       status.textContent = data.options?.length ? '' : 'לא נמצאו מנויים. אפשר לרענן אחרי עדכון בסטודיו.';
       onInventory?.(data.memberships || []);

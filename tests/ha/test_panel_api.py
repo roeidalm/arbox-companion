@@ -100,6 +100,25 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kw['json']['fingerprint'],'revision')
         self.server._session.request.assert_called_once()
 
+    async def test_membership_repair_and_refresh_require_action_access(self):
+        actions = [
+            ('membership_refresh', {}, '/memberships/refresh'),
+            ('planning_membership_options', {'schedule_id':123,'refresh':True}, '/planning/123/membership-options'),
+            ('planning_membership_assign', {'schedule_id':123,'token':'scoped','confirm_category':True}, '/planning/123/membership'),
+        ]
+        for action,data,path in actions:
+            self.entry.options = {api.VIEW_USERS:['user']}
+            self.server._session.request.reset_mock()
+            msg = {'id':1,'entry_id':'one','action':action,'studio_id':8,'data':data}
+            await api.ws_action.__wrapped__(self.hass,self.conn,msg)
+            self.server._session.request.assert_not_called()
+            self.entry.options[api.ACTION_USERS] = ['user']
+            await api.ws_action.__wrapped__(self.hass,self.conn,msg)
+            args,kw = self.server._session.request.call_args
+            self.assertEqual(args, ('POST','http://internal-arbox:8000/api'+path))
+            self.assertEqual(kw['headers']['X-Arbox-Studio-Id'], '8')
+            self.assertNotIn('schedule_id', kw['json'])
+
     async def test_read_cannot_trigger_refresh_and_readonly_cannot_mutate(self):
         self.entry.options[api.VIEW_USERS] = ["user"]
         await api.ws_read.__wrapped__(self.hass, self.conn, {"id": 1, "entry_id": "one",

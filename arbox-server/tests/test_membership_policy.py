@@ -106,6 +106,18 @@ def test_card_capacity_spans_months_and_prior_usage():
     assert q['memberships'][0]['used'] == 1
 
 
+def test_unknown_extra_card_with_balance_needs_confirmation_not_more_capacity():
+    full = member(1, [1], quota=1)
+    extra = member(2, [], quota=2, card=True)
+    extra['policy'].update(state='needs_review', categories_known=False)
+    q = plan_quota([full,extra], [plan(1,commitment='used',membership_user_id=1)],
+                   [plan(2)], '2026-09')
+    assert q['plan_states']['2']['state'] == 'needs_review'
+    assert q['unresolved_plans'] == [2]
+    assert q['uncovered_plans'] == []
+    assert q['plan_allocations'] == {}
+
+
 def test_unknown_attribution_is_visible_and_cannot_use_preferred_bucket():
     q = plan_quota([member(1,[1])], [plan(1, commitment='used', membership_user_id=None)], [plan(2)], '2026-09')
     assert q['unattributed_sessions'] == [1]

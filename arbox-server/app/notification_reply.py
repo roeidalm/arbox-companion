@@ -7,3 +7,4 @@ class NotificationReply:
     text: str
     buttons: list[list[dict]] = field(default_factory=list)
     tag: str | None = None
+    result: dict | None = None

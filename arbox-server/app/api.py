@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .rules import PlanningBlocked
 from .arbox_client import ArboxAuthError, ArboxError
@@ -1679,6 +1679,55 @@ async def membership_policies(request: Request, x_api_key: str | None = Header(N
     members = await s.store.get_meta("memberships") or []
     return {"memberships": [{**m, "policy": await s.rules_engine.membership_policy.get(m)} for m in members],
             "categories": await s.rules_engine.membership_policy.catalog()}
+
+
+@router.post('/memberships/refresh')
+async def refresh_memberships(request: Request, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    try:
+        await s.rules_engine.refresh_membership_inventory()
+    except ArboxError as err:
+        raise HTTPException(502, 'לא ניתן לרענן מנויים כרגע. נסו שוב מאוחר יותר') from err
+    return {'ok': True, 'quota_note': 'המנויים עודכנו מהסטודיו',
+            'memberships': await s.store.get_meta('memberships') or []}
+
+
+class PlanningMembershipOptionsBody(BaseModel):
+    refresh: bool = True
+
+
+class PlanningMembershipChoiceBody(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    confirm_category: bool = False
+
+
+@router.post('/planning/{schedule_id}/membership-options')
+async def planning_membership_options(request: Request, schedule_id: int,
+                                      body: PlanningMembershipOptionsBody,
+                                      x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    try:
+        return await ctx(request).rules_engine.planning_actions.membership_options(
+            schedule_id, refresh=body.refresh)
+    except ValueError as err:
+        raise HTTPException(409, str(err)) from err
+    except ArboxError as err:
+        raise HTTPException(502, 'לא ניתן לעדכן את המנויים כרגע. נסו לרענן שוב') from err
+
+
+@router.post('/planning/{schedule_id}/membership')
+async def planning_membership_choice(request: Request, schedule_id: int,
+                                     body: PlanningMembershipChoiceBody,
+                                     x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    try:
+        return await ctx(request).rules_engine.planning_actions.submit_membership(
+            schedule_id, body.token, confirm_category=body.confirm_category)
+    except ValueError as err:
+        raise HTTPException(409, str(err)) from err
+    except ArboxError as err:
+        raise HTTPException(502, 'לא ניתן לאמת את המנוי כרגע. הבחירה לא נשמרה') from err
 
 
 @router.put("/membership-policies/{membership_id}")

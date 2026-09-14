@@ -119,7 +119,12 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
         reason = "uncertain" if str(sid) in uncertain else "unattributed" if unknown_here else None
         chosen = assign(plan, set(), [1000]) if not reason else None
         if chosen is None:
-            reason = reason or ("no_capacity" if allowed else "needs_review" if any(
+            unverified_capacity = any(
+                not m.get('policy', {}).get('categories_known')
+                and not m.get('policy', {}).get('contradiction')
+                and plan.get('category_id') not in m.get('policy', {}).get('denied_category_ids', [])
+                and remaining(m, plan) > 0 for m in possible)
+            reason = reason or ("needs_review" if unverified_capacity else "no_capacity" if allowed else "needs_review" if any(
                 m.get("policy", {}).get("state") != "ready" or
                 m.get("policy", {}).get("unmatched") for m in possible) else "no_membership")
             states[str(sid)] = {"state": reason, "reason": REASONS[reason],

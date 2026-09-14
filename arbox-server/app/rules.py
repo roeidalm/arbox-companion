@@ -877,6 +877,20 @@ class RulesEngine:
         except Exception as err:  # noqa: BLE001 — refresh never undoes booking
             _LOGGER.warning("Membership refresh after action failed: %s", err)
 
+    async def refresh_membership_inventory(self, *, force=False) -> None:
+        """User-requested inventory/evidence read, without booking or notifying."""
+        import time
+        async with self._tick_lock:
+            key = self.membership_policy.key(0)
+            previous = getattr(self, '_inventory_refresh', {})
+            if not force and time.monotonic() - previous.get(key, 0) < 10:
+                return
+            # Keep the active studio and cached upstream login intact.
+            await self.syncer.refresh_profile()
+            await self.refresh_planning_evidence(force_history=True)
+            await self.store.set_meta('quota_cache', None)
+            self._inventory_refresh = {key: time.monotonic()}
+
     async def _validate_watch_membership(
         self, watch: dict, session: dict, *, notify: bool = True,
     ) -> tuple[int | None, bool]:

@@ -1322,27 +1322,25 @@ async function renderFacetSelect(host, text, values, selected, change) {
   host.replaceChildren(picker);
 }
 
-function mountSessionMembership(host, session, studio) {
-  const label = document.createElement('label'); label.textContent = 'מנוי לאימון הזה';
-  const select = document.createElement('select'); select.append(new Option('בחירה אוטומטית של המערכת', ''));
-  for (const member of eligibleMemberships(session)) select.append(new Option(member.plan, member.id));
-  select.value = state.membershipOverrides.get(session.schedule_id) || '';
-  label.append(select);
-  const save = document.createElement('button'); save.textContent = 'עדכון המנוי לאימון';
-  save.onclick = async () => {
-    if (save.disabled) return;
-    if (studio !== state.selectedStudioId) { toast('הסטודיו השתנה. פתחו את האימון מחדש'); return; }
-    save.disabled = true;
-    try {
-      const selected = select.value ? Number(select.value) : null;
-      if (session.watched || state.watchlist.has(session.schedule_id))
-        await api(`/api/watchlist/${session.schedule_id}/membership`, {method:'PUT', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify({membership_user_id:selected})});
-      if (studio !== state.selectedStudioId) return;
-      if (selected) state.membershipOverrides.set(session.schedule_id, selected); else state.membershipOverrides.delete(session.schedule_id);
-      toast('הבחירה עודכנה לאימון הזה'); await loadMine();
-    } catch(e) { toast(e.message); save.disabled = false; }
+async function mountSessionMembership(host, session, studio) {
+  const {membershipChoice} = await import('/static/membership-choice.js?v=1');
+  if (studio !== state.selectedStudioId || !host.isConnected) return;
+  const request = (path, body) => {
+    if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');
+    return api(`/api/planning/${session.schedule_id}/${path}`, {method:'POST',
+      headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify(body)});
   };
-  host.append(label, save);
+  host.append(membershipChoice({
+    load: () => request('membership-options', {refresh:true}),
+    save: body => request('membership', body),
+    isCurrent: () => studio === state.selectedStudioId && host.isConnected,
+    onInventory: members => { state.memberships = members; },
+    onSaved: async result => {
+      if (result.membership_user_id == null) state.membershipOverrides.delete(session.schedule_id);
+      else state.membershipOverrides.set(session.schedule_id, result.membership_user_id);
+      toast('המנוי עודכן לאימון הזה'); await loadMine();
+    },
+  }));
 }
 
 function confirmChangedWorkout(s) {
@@ -1369,6 +1367,17 @@ async function renderStudioMemberships(profile) {
     const [ui, policies, policyUI] = await Promise.all([membershipUI(), api('/api/membership-policies'), import('/static/membership-policy.js?v=3')]);
     if (studio !== state.selectedStudioId) return;
     host.replaceChildren();
+    const refresh = document.createElement('button'); refresh.textContent = 'רענון מנויים';
+    refresh.onclick = async () => {
+      if (refresh.disabled || studio !== state.selectedStudioId) return;
+      refresh.disabled = true;
+      try {
+        const result = await api('/api/memberships/refresh', {method:'POST', headers:{'X-Arbox-Studio-Id':String(studio)}});
+        if (studio !== state.selectedStudioId) return;
+        state.memberships = result.memberships; toast('המנויים עודכנו מהסטודיו'); await loadProfile();
+      } catch(e) { toast(e.message); refresh.disabled = false; }
+    };
+    host.append(refresh);
     for (const configured of policies.memberships || []) {
       const data = profile.quota?.memberships?.find(x => x.id === configured.id);
       const member = {...configured, ...data};
@@ -1388,7 +1397,7 @@ async function renderStudioMemberships(profile) {
       body.append(policyUI.policySummary(member, state.apiKey ? edit : null), editorHost);
       host.append(ui.membershipDisclosure(member, body));
     }
-    if (!host.childElementCount) host.textContent = 'לא נמצאו מנויים בסטודיו הזה';
+    if (!policies.memberships?.length) host.append(document.createTextNode('לא נמצאו מנויים בסטודיו הזה'));
   } catch(e) { if (studio === state.selectedStudioId) host.textContent = 'לא ניתן לטעון מנויים: ' + e.message; }
 }
 
@@ -1526,11 +1535,8 @@ async function renderMineData(data, studio, quotaLoad) {
       check.ontoggle = async () => {
         if (!check.open || loaded) return; loaded = true;
         try {
-          const [q, ui] = await quotaLoad;
           if (studio !== state.selectedStudioId || !check.isConnected) return;
-          check.append(ui.quotaSummary(q));
-          if (pick) mountSessionMembership(check, s, studio);
-          else { const text = document.createElement('p'); text.textContent = 'המערכת בוחרת מנוי מתאים לאוטומציה. הגדרות השיעורים והמכסה נמצאות בסטודיו.'; check.append(text); }
+          await mountSessionMembership(check, s, studio);
         } catch(e) { loaded = false; toast(e.message); }
       };
       c.append(check);

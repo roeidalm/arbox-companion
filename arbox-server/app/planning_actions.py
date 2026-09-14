@@ -66,8 +66,85 @@ class PlanningActions:
         return [[await self.button('התעלם מסוג השיעור', 'ignore', context),
                  await self.button('בחירת מנוי', 'members', context, page=0)]]
 
-    def reply(self, context, text, buttons=None):
-        return NotificationReply(text, buttons or [], context.get('tag'))
+    def reply(self, context, text, buttons=None, *, result=None):
+        return NotificationReply(text, buttons or [], context.get('tag'), result)
+
+    async def membership_options(self, schedule_id, *, refresh=True):
+        """The same guarded choices in the web app, HA and notifications."""
+        from .rules import date, datetime
+        async with self.e._tick_lock:
+            if refresh:
+                await self.e.refresh_membership_inventory()
+            session = await self.e.store.get_session(schedule_id)
+            plans = await self.e._planned_sessions(date.today().isoformat(), '9999-12-31')
+            plan = next((p for p in plans if p['schedule_id'] == schedule_id), None)
+            if (not session or not plan or session.get('user_booked') is not None
+                    or session.get('user_in_standby') is not None
+                    or datetime.fromisoformat(f"{session['date']}T{session['start_time']}") <= datetime.now()):
+                raise ValueError('האימון כבר אינו ממתין לתכנון. רעננו את הרשימה')
+            if await self.e.store.intent_change(session):
+                raise ValueError('פרטי האימון השתנו — יש לאשר את האימון לפני בחירת מנוי')
+            context = {'studio': self.e.store.active_box_id,
+                       'account': self.e.membership_policy.key(0),
+                       'tag': 'arbox-plan-ui-' + secrets.token_urlsafe(12),
+                       'created': time.time(), 'schedule_id': schedule_id,
+                       'identity': session_identity(session),
+                       'selected': plan.get('membership_user_id'),
+                       'group': secrets.token_urlsafe(12), 'origin': 'panel'}
+            members = await self.e.store.get_meta('memberships') or []
+            options = []
+            if plan.get('membership_user_id') is not None:
+                button = await self.button('בחירה אוטומטית', 'assign_auto', context)
+                options.append({'id': None, 'name': 'בחירה אוטומטית של המערכת',
+                                'available': True, 'manual': False,
+                                'token': button['data'].split(':', 1)[1]})
+            for member in members:
+                if not self.e._membership_valid_on(member, session['date']):
+                    reason = (f"מתחיל ב־{member['start']} — אחרי האימון" if member.get('start') and member['start'] > session['date'] else
+                              f"מסתיים ב־{member['end']} — לפני האימון" if member.get('end') and member['end'] < session['date'] else 'המנוי אינו פעיל')
+                    options.append({'id': member['id'], 'name': member.get('plan') or 'מנוי',
+                                    'available': False, 'reason': reason, 'manual': False})
+                    continue
+                option = await self.member_option(context, session, member)
+                choice = {k: option.get(k) for k in ('available', 'reason', 'manual')}
+                choice.update(id=member['id'], name=member.get('plan') or 'מנוי',
+                              start=member.get('start'), end=member.get('end'),
+                              entries=member.get('sessions_on_purchase'),
+                              selected=plan.get('membership_user_id') == member['id'])
+                quota = option.get('quota') or {}
+                choice['remaining_after'] = quota.get('available_after_planned')
+                if option['available']:
+                    button = await self.button('אישור ושיוך', 'assign', context,
+                        member_id=member['id'], fingerprint=fingerprint(member),
+                        policy_digest=digest(option['policy']),
+                        requires_confirmation=bool(option.get('manual')))
+                    choice['token'] = button['data'].split(':', 1)[1]
+                options.append(choice)
+            return {'schedule_id': schedule_id, 'category_name': session['category_name'],
+                    'options': options, 'memberships': members}
+
+    async def submit_membership(self, schedule_id, token, *, confirm_category=False):
+        async with self.e._tick_lock:
+            prompt = await self.e.store.peek_prompt(token)
+            try:
+                context = json.loads(prompt['payload']) if prompt else {}
+            except (TypeError, ValueError, KeyError):
+                context = {}
+            if (not prompt or prompt.get('action') != 'planning_action'
+                    or context.get('operation') not in ('assign', 'assign_auto')
+                    or context.get('schedule_id') != schedule_id):
+                raise ValueError('הבחירה אינה תקפה. רעננו את רשימת המנויים')
+            if context.get('requires_confirmation') and not confirm_category:
+                raise ValueError('נדרש אישור מפורש שהמנוי כולל את סוג השיעור')
+            if prompt.get('answered_at'):
+                raise ValueError('הבקשה כבר טופלה. רעננו את הרשימה')
+            # Date/activation changes made in Arbox since opening the picker
+            # must be checked before the explicit selection is saved.
+            await self.e.refresh_membership_inventory(force=True)
+            reply = await self.callback(token)
+            if not reply.result or not reply.result.get('ok'):
+                raise ValueError(reply.text)
+            return {**reply.result, 'message': reply.text}
 
     async def callback(self, cid):
         # The same lock also serializes studio switches and every booking tick.
@@ -152,6 +229,15 @@ class PlanningActions:
                 return await self.choose_member(c, session)
             if op in ('member', 'assign'):
                 return await self.assign(c, session, cid, confirm=op == 'assign')
+            if op == 'assign_auto':
+                if not await self.e.store.take_prompt(cid):
+                    return self.reply(c, 'הבקשה כבר טופלה.')
+                await self.e.store.set_watch_membership(session['schedule_id'], None)
+                await self.e.store.answer_batch(c.get('group'))
+                await self.e.reconcile_planned_quota()
+                await self.e.schedule_openings()
+                return self.reply(c, 'הבחירה האוטומטית הוחזרה לאימון הזה.',
+                                  result={'ok': True, 'membership_user_id': None})
             return self.reply(c, 'פעולה לא מוכרת.')
 
     async def choose_session(self, c):
@@ -244,6 +330,8 @@ class PlanningActions:
         await self.e.store.answer_batch(c.get('group'))
         await self.e.reconcile_planned_quota()
         await self.e.schedule_openings()
-        await self.e.store.log_event('info', 'planning', 'מנוי שויך מההתראה',
+        await self.e.store.log_event('info', 'planning',
+                                     'מנוי שויך לאימון' if c.get('origin') == 'panel' else 'מנוי שויך מההתראה',
                                      member.get('plan'), session['schedule_id'])
-        return self.reply(c, f"✓ האימון שויך ל־{member.get('plan')}.\nהתכנון פעיל, בכפוף לבדיקת ההתאמה והמכסה בעת ההרשמה.")
+        return self.reply(c, f"✓ האימון שויך ל־{member.get('plan')}.\nהתכנון פעיל, בכפוף לבדיקת ההתאמה והמכסה בעת ההרשמה.",
+                          result={'ok': True, 'membership_user_id': member['id']})

@@ -176,6 +176,19 @@ History survives removal of the plan and follows the existing history retention
 setting. Detection time records when we observed a change, not when the studio
 made it. These planning events do not count as attendance or membership usage.
 
+From server **1.53.2** and integration **3.4.2**, open **My → Check here / Choose
+membership** on either a scheduled workout or an automatic occurrence. The picker
+refreshes membership inventory and evidence from Arbox, including newly granted
+cards. **Refresh memberships** is also available in Studio. This is a read, not a
+registration or a new login. Choose a membership and save it for that occurrence;
+the recurring automation and default membership stay unchanged. When Arbox omits
+allowed class types, explicitly confirm with the studio that the selected class
+type is included; this confirms only that type, not every class. Capacity,
+membership start/end dates **on the workout date**, and upstream changes are
+checked again before saving. Future or expired memberships cannot be selected
+for dates outside their validity. Upgrade the server through Compose, then the
+integration through HACS and restart HA; no manual component copying is needed.
+
 Once per day, **at the configured nightly digest time**, Arbox refreshes the
 workouts currently in My (bookings, waitlists, pins and automatic occurrences)
 before composing the same daily message. Changes appear together in that digest,

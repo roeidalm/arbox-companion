@@ -3,6 +3,7 @@ import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar
 import {renderJournal, journalSignature} from './panel-journal.js?v=3.4.0';
 import {policySummary, policyEditor} from './membership-policy.js?v=3';
 import {quotaSummary, quotaRow, membershipDisclosure} from './membership-ui.js?v=1';
+import {membershipChoice} from './membership-choice.js?v=1';
 import {calendarLinks} from './session-calendar.js?v=1';
 import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
 
@@ -174,7 +175,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.4.1", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.4.2", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -247,7 +248,7 @@ export class ArboxAppPanel extends HTMLElement {
       this._nav,
     );
     const membershipCSS = node('link'); membershipCSS.rel = 'stylesheet';
-    membershipCSS.href = new URL('./membership-ui.css?v=2', import.meta.url).href;
+    membershipCSS.href = new URL('./membership-ui.css?v=3', import.meta.url).href;
     this.shadowRoot.replaceChildren(css, membershipCSS, this._shell);
   }
   navigate(tab) {
@@ -667,6 +668,7 @@ export class ArboxAppPanel extends HTMLElement {
   }
   render_studio() {
     this._content.append(node('p', 'פתחו מנוי כדי לראות ולערוך את סוגי השיעורים והמכסה שלו.', 'muted'));
+    if (this.canWrite()) this._content.append(this.actionButton('רענון מנויים', 'membership_refresh', {}, {...this.context()}));
     for (const configured of this._data.membership_policies?.memberships || []) {
       const data = this._data.summary?.quota?.memberships?.find(m => m.id === configured.id);
       const member = {...configured, ...data};
@@ -1092,9 +1094,8 @@ export class ArboxAppPanel extends HTMLElement {
     if (inlineHost) {
       body.append(button('סגירה', () => {this.closeInline(); this.render();}));
       inlineHost.append(body); this.keepInline(body);
-      body.append(quotaSummary(this._data.summary?.quota));
     }
-    body.append(
+    if (!inlineHost) body.append(
       node(
         "p",
         [
@@ -1196,7 +1197,7 @@ export class ArboxAppPanel extends HTMLElement {
       }
       return;
     }
-    body.append(
+    if (!inlineHost) body.append(
       node(
         "p",
         `${s.registered ?? "—"} / ${s.max_users ?? "—"} רשומים${s.free > 0 ? ` · ${s.free} מקומות פנויים` : ""}`,
@@ -1231,7 +1232,26 @@ export class ArboxAppPanel extends HTMLElement {
         (!m.start || m.start <= s.date) &&
         (!m.end || m.end >= s.date),
     );
-    if (members.length && s.user_booked == null && s.user_in_standby == null && (s.watched || !(s.planning_source === 'autobook' || s.autobook_match))) {
+    const planned = s.watched || s.planning_source === 'autobook' || s.autobook_match;
+    if (planned && !s.automation_skipped && s.user_booked == null && s.user_in_standby == null) {
+      const entry = this._entry.entry_id;
+      const current = () => body.isConnected && entry === this._entry.entry_id && context.studio_id === this.context().studio_id && this.canWrite();
+      const request = async (action, data) => {
+        if (!current()) throw new Error('החיבור השתנה. פתחו את האימון מחדש');
+        const result = await this._hass.callWS({type:'arbox/panel/action', entry_id:entry,
+          action, studio_id:context.studio_id, data:{schedule_id:s.schedule_id, ...data}});
+        if (!current()) throw new Error('החיבור השתנה. פתחו את האימון מחדש');
+        return result.data ?? result;
+      };
+      body.append(membershipChoice({
+        load: () => request('planning_membership_options', {refresh:true}),
+        save: data => request('planning_membership_assign', data),
+        isCurrent: current,
+        onInventory: inventory => { if (this._data.summary) this._data.summary.memberships = inventory; },
+        onSaved: async () => { this.toast('המנוי עודכן לאימון הזה'); this._dialog?.close(); this.closeInline(); await this.load(); },
+      }));
+      if (inlineHost) return;
+    } else if (members.length && s.user_booked == null && s.user_in_standby == null && !planned) {
       const wrap = node("label", "באיזה מנוי להשתמש?", "field");
       membership = node("select");
       membership.append(new Option("בחירה אוטומטית של המערכת", ""));

@@ -3,6 +3,20 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.53.2
+
+- Choose a membership for an automatic occurrence directly in My, on desktop,
+  mobile and HA panel 3.4.2. Preserve the recurring rule and allow restoring
+  automatic membership selection for the occurrence.
+- Refresh inventory and evidence when opening the picker, with an explicit
+  Refresh memberships button there and in Studio so new cards can be selected.
+- Require explicit class-type confirmation when Arbox omits eligibility. Keep
+  denial, quota and history checks; report missing eligibility rather than full
+  capacity when an unverified extra card has available entries.
+- Disable memberships outside the workout date's validity and re-read inventory
+  before saving. Bind confirmations to the account, studio, workout and current
+  membership revision, with one-use actions and no automatic write retry.
+
 ## 1.53.1
 
 - Keep original workout details for planned occurrences. Pause on changes to

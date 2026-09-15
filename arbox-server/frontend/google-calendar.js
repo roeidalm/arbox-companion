@@ -48,9 +48,14 @@
     if (String(amount).trim() === '' || !factor || !Number.isInteger(n) || n < 0 || n * factor > 40320) return null;
     return n * factor;
   }
+  async function saveAndSync(api, preferences) {
+    await api('/api/calendar/google/preferences',{method:'POST',body:JSON.stringify(preferences)});
+    return await api('/api/calendar/google/sync',{method:'POST'});
+  }
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent=text; if(cls)n.className=cls; return n; };
   let refresh;
   function mount(host, api) {
+    let savedPrefs = '';
     let status = null, prefs = null, palette = [], selected = 'booked', step = 1, busy = false, uploaded = null;
     host.innerHTML = `<details class="gc-disclosure" id="gcDisclosure"><summary class="gc-heading"><span><strong>סנכרון עם Google Calendar</strong><span class="gc-subtitle">צבעים ותזכורות לכל מצב · חיבור אופציונלי</span></span><span class="gc-badge" id="gcBadge">הגדרת חיבור</span></summary><div class="gc-content">
       <ol class="gc-steps" aria-label="שלבי חיבור"><li><button type="button" data-step="1">1 · הכנה</button></li><li><button type="button" data-step="2">2 · קובץ</button></li><li><button type="button" data-step="3">3 · העדפות</button></li></ol>
@@ -71,13 +76,13 @@
       <h4>תזכורות לפני האימון</h4><div class="gc-reminders" id="gcReminders"></div>
       <div class="gc-reminder-add"><label for="gcMinutes">כמה זמן לפני?</label><div class="gc-reminder-fields"><input type="number" id="gcMinutes" min="0" max="40320" step="1" value="30" aria-label="מספר יחידות זמן"><select id="gcReminderUnit" aria-label="יחידת זמן"><option value="minutes">דקות</option><option value="hours">שעות</option><option value="days">ימים</option></select></div><button type="button" id="gcAddReminder">הוסף תזכורת</button></div><p class="hint">עד 5 תזכורות לכל אירוע. ללא תזכורות? הסירו את כולן.</p></div></div>
       <details class="gc-preview"><summary>תצוגה מקדימה · דוגמה</summary><div class="gc-day"><strong>יום רביעי</strong><span>האימונים שלי</span></div><div class="gc-timegrid"><span>08:00</span><article id="gcPreviewEvent"><strong>Movement basics</strong><span>08:00–09:00 · רוני גוזלי</span><b id="gcPreviewStatus"></b><div id="gcPreviewAlarms"></div></article><span>09:00</span></div><p class="hint">כשמצב האימון משתנה, אותו אירוע מתעדכן ביומן.</p></details></div>
-      <div class="gc-actions"><button type="button" class="primary" id="gcSave">שמירת העדפות</button><button type="button" class="primary" id="gcEnable" hidden>יצירת יומן והפעלת הסנכרון</button><button type="button" id="gcSync" hidden>סנכרון עכשיו</button><button type="button" id="gcPause" hidden>השהיית הסנכרון</button><button type="button" id="gcDisconnect" hidden>ניתוק Google</button></div>
+      <p id="gcUnsaved" class="hint" hidden>יש שינויים שטרם נשמרו</p><div class="gc-actions"><button type="button" class="primary" id="gcSave">שמירת העדפות</button><button type="button" class="primary" id="gcEnable" hidden>יצירת יומן והפעלת הסנכרון</button><button type="button" id="gcSync" hidden>שמירה וסנכרון עכשיו</button><button type="button" id="gcPause" hidden>השהיית הסנכרון</button><button type="button" id="gcDisconnect" hidden>ניתוק Google</button></div><div id="gcFeedback"></div>
       <details class="gc-explanation"><summary>איך הסנכרון עובד?</summary><p class="hint">הסנכרון מציג את 30 הימים הקרובים ומתעדכן בכל דקה. ביטול או דילוג מסירים אירוע עתידי. השהיה וניתוק משאירים את האירועים שכבר נוצרו. שינויים בהרשמות עושים ב־Arbox Companion. עריכות ידניות באירועים המנוהלים ב־Google נדרסות בבדיקה תקופתית.</p></details>
       <div id="gcRecovery" hidden><p>אם היומן כבר נוצר ב־Google, אפשר לחבר אותו בלי ליצור עותק נוסף. בהגדרות היומן ב־Google, תחת ״שילוב היומן״, העתיקו את מזהה היומן.</p><input id="gcRecoverId" aria-label="מזהה היומן שנוצר" dir="ltr"><button id="gcRecover" type="button">חיבור ליומן שנוצר</button></div></section></div></details>`;
     const $ = s => host.querySelector(s);
     function message(text, error=false) { const n=$('#gcMessage');n.hidden=!text;n.textContent=text;n.className=error?'gc-error':'gc-success'; }
-    function show(n) { step=n;host.querySelectorAll('[data-gc-step]').forEach(x=>x.hidden=Number(x.dataset.gcStep)!==n);host.querySelectorAll('[data-step]').forEach(b=>{b.classList.toggle('active',Number(b.dataset.step)===n);b.setAttribute('aria-current',Number(b.dataset.step)===n?'step':'false');}); }
-    async function action(fn) { if(busy)return;busy=true;host.setAttribute('aria-busy','true');message('');try{await fn();}catch(e){message(e.message,true);}finally{busy=false;host.removeAttribute('aria-busy');} }
+    function show(n) { step=n;if(n===3)$('#gcFeedback').append($('#gcMessage'));else $('.gc-steps').after($('#gcMessage'));host.querySelectorAll('[data-gc-step]').forEach(x=>x.hidden=Number(x.dataset.gcStep)!==n);host.querySelectorAll('[data-step]').forEach(b=>{b.classList.toggle('active',Number(b.dataset.step)===n);b.setAttribute('aria-current',Number(b.dataset.step)===n?'step':'false');}); }
+    async function action(fn, progress='') { if(busy)return;busy=true;host.setAttribute('aria-busy','true');message(progress);try{await fn();}catch(e){message(e.message,true);}finally{busy=false;host.removeAttribute('aria-busy');} }
     function guide() {
       const id=projectId($('#gcProject').value), q=id?'?project='+encodeURIComponent(id):'';
       const suggested=status?.redirect_uri||status?.suggested_redirect||'';
@@ -96,6 +101,7 @@
     function currentColor(id) { return palette.find(c=>c.id===id)||{name:colors[id]?.[0]||'צבע שהוסר',color:colors[id]?.[1]||'#616161'}; }
     function renderPrefs() {
       if(!prefs)return;
+      $('#gcUnsaved').hidden=JSON.stringify(prefs)===savedPrefs;
       const list=$('#gcKindList');list.replaceChildren();
       Object.entries(kinds).forEach(([k,label])=>{const b=el('button',label);b.type='button';b.className=k===selected?'active':'';b.setAttribute('aria-pressed',String(k===selected));const dot=el('span');dot.className='gc-dot';dot.style.background=currentColor(prefs[k].color).color;b.prepend(dot);b.onclick=()=>{selected=k;renderPrefs();};list.append(b);});
       const p=prefs[selected];$('#gcEditorTitle').textContent=kinds[selected];$('#gcVisible').checked=p.enabled;$('#gcBusy').checked=p.busy;$('#gcColorName').textContent='· '+currentColor(p.color).name;
@@ -116,6 +122,7 @@
     }
     async function load() {await action(async()=>{status=await api('/api/calendar/google/status');prefs=structuredClone(status.preferences);palette=paletteOptions(status.palette);
       Object.values(prefs).forEach(p=>{const match=palette.find(c=>c.color===colors[p.color]?.[1]);if(match)p.color=match.id;});
+      savedPrefs=JSON.stringify(prefs);
       const grid=$('#gcColor');grid.replaceChildren();palette.forEach(c=>{
         const label=el('label',undefined,'gc-swatch');label.title=c.name;
         const input=el('input');input.type='radio';input.name='gcEventColor';input.value=c.id;input.setAttribute('aria-label',c.name);
@@ -131,13 +138,14 @@
     $('#gcVisible').onchange=e=>{prefs[selected].enabled=e.target.checked;renderPrefs();};$('#gcBusy').onchange=e=>{prefs[selected].busy=e.target.checked;renderPrefs();};$('#gcColor').onchange=e=>{prefs[selected].color=e.target.value;renderPrefs();};
     $('#gcReminderUnit').onchange=()=>{const max={minutes:40320,hours:672,days:28}[$('#gcReminderUnit').value];$('#gcMinutes').max=String(max);};
     $('#gcAddReminder').onclick=()=>{const n=reminderMinutes($('#gcMinutes').value,$('#gcReminderUnit').value),p=prefs[selected];if(n===null)return message('בחרו מספר שלם ולא שלילי. אפשר להגדיר תזכורת עד 28 ימים לפני האימון.',true);if(p.reminders.includes(n))return message('התזכורת הזאת כבר נוספה');if(p.reminders.length>=5)return message('אפשר עד חמש תזכורות',true);p.reminders=[...p.reminders,n].sort((a,b)=>b-a);message('');renderPrefs();};
-    async function save(){status=await api('/api/calendar/google/preferences',{method:'POST',body:JSON.stringify(prefs)});renderStatus();}
+    async function save(){const snapshot=JSON.stringify(prefs);status=await api('/api/calendar/google/preferences',{method:'POST',body:snapshot});savedPrefs=snapshot;renderPrefs();renderStatus();}
     $('#gcSave').onclick=()=>action(async()=>{await save();message('ההעדפות נשמרו. אירועים עתידיים יתעדכנו בסנכרון הבא.');});
     $('#gcEnable').onclick=()=>action(async()=>{await save();status=await api('/api/calendar/google/enable',{method:'POST'});renderStatus();message(status.error||'הסנכרון פעיל. אפשר לפתוח את Google Calendar ולראות את האימונים.',!!status.error);});
-    ['Sync','Pause','Disconnect'].forEach(name=>{$('#gc'+name).onclick=()=>action(async()=>{status=await api('/api/calendar/google/'+name.toLowerCase(),{method:'POST'});renderStatus();message(status.error||(name==='Disconnect'?'החיבור נותק. האירועים הקיימים נשארו ביומן.':name==='Pause'?'הסנכרון הושהה. האירועים הקיימים נשארו ביומן.':'הסנכרון הושלם'),!!status.error);});});
+    $('#gcSync').onclick=()=>action(async()=>{const snapshot=structuredClone(prefs);status=await saveAndSync(api,snapshot);savedPrefs=JSON.stringify(snapshot);renderPrefs();renderStatus();message(status.error||`נשמר וסונכרן בהצלחה · ${status.event_count} אירועים מנוהלים ביומן`,!!status.error);},'שומר העדפות ומסנכרן עם Google…');
+    ['Pause','Disconnect'].forEach(name=>{$('#gc'+name).onclick=()=>action(async()=>{status=await api('/api/calendar/google/'+name.toLowerCase(),{method:'POST'});renderStatus();message(status.error||(name==='Disconnect'?'החיבור נותק. האירועים הקיימים נשארו ביומן.':name==='Pause'?'הסנכרון הושהה. האירועים הקיימים נשארו ביומן.':'הסנכרון הושלם'),!!status.error);});});
     $('#gcRecover').onclick=()=>action(async()=>{status=await api('/api/calendar/google/recover',{method:'POST',body:JSON.stringify({calendar_id:$('#gcRecoverId').value.trim()})});renderStatus();message('היומן חובר');});
     refresh=load;load();
   }
   root.GoogleCalendarUI={mount,refresh:()=>refresh?.(),projectId,readUpload,reminderText};
-  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions,reminderMinutes};
+  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions,reminderMinutes,saveAndSync};
 })(typeof window!=='undefined'?window:globalThis);

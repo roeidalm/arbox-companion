@@ -39,3 +39,16 @@ test('reminder units convert with bounds and readable day and hour labels',()=>{
  assert.equal(reminderText(1440),'יום לפני');
  assert.equal(reminderText(2880),'2 ימים לפני');
 });
+
+
+test('sync saves the current draft first and stops if saving fails',async()=>{
+ const {saveAndSync}=require('../frontend/google-calendar.js');
+ const calls=[],prefs={booked:{busy:true,reminders:[240,30]}};
+ const api=async(path,options)=>{calls.push([path,options]);return {event_count:9};};
+ assert.deepEqual(await saveAndSync(api,prefs),{event_count:9});
+ assert.deepEqual(calls.map(c=>c[0]),['/api/calendar/google/preferences','/api/calendar/google/sync']);
+ assert.deepEqual(JSON.parse(calls[0][1].body),prefs);
+ let attempts=0;
+ await assert.rejects(saveAndSync(async()=>{attempts++;throw Error('save failed');},prefs),/save failed/);
+ assert.equal(attempts,1);
+});

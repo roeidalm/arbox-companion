@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.6
+
+- Save the current calendar preferences before manual sync. Show unsaved changes,
+  progress and completion beside the action buttons.
+
 ## 1.54.5
 
 - Choose reminder amounts in minutes, hours or days in Google Calendar settings,

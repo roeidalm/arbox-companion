@@ -416,3 +416,70 @@ async def test_interrupted_write_keeps_capacity_when_studio_deletes_calendar_row
     assert snapshot['schedule_id'] == 77 and 'raw_json' not in snapshot
     await engine.preflight_plans()
     engine.client.book.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('refresh_case,clears_denial', [
+    ('explicit', True),
+    ('failed', False),
+    ('omitted', False),
+    ('empty', False),
+    ('other_category', False),
+    ('unknown_name', False),
+    ('ambiguous_name', False),
+    ('malformed', False),
+])
+async def test_refresh_reconciles_only_explicit_unambiguous_denials(engine, refresh_case, clears_denial):
+    m = (await engine.store.get_meta('memberships'))[1]
+    key = engine.membership_policy.key(m['id'])
+    await engine.store.set_meta(key, {'fingerprint': fingerprint(m)})
+    session = await engine.store.get_session(77)
+    denial = ArboxError('denied', status=425, body={'error': {'messageToUser': [
+        {'name': 'classTypeRestricts', 'value': {'allowedText': 'Class 2'}}]}})
+    await engine.membership_policy.learn_rejection(m, session, denial)
+    # An unrelated denial must survive even when Class 1 becomes allowed.
+    await engine.membership_policy.learn_rejection(m, {'category_id': 3}, denial)
+    assert not eligible({**m, 'policy': await engine.membership_policy.get(m)}, session)
+
+    saved = await engine.store.get_meta(key)
+    saved['checked_at'] = 0  # A refresh is due; do not change membership identity.
+    await engine.store.set_meta(key, saved)
+    sections = [{'header': 'Available Classes', 'values': ['  CLASS  1  ', 'Class 2']}]
+    if refresh_case == 'omitted':
+        sections = []
+    elif refresh_case == 'empty':
+        sections[0]['values'] = []
+    elif refresh_case == 'other_category':
+        sections[0]['values'] = ['Class 2']
+    elif refresh_case == 'unknown_name':
+        sections[0]['values'] = ['Class 1 renamed']
+    elif refresh_case == 'ambiguous_name':
+        await engine.store.upsert_sessions([
+            raw(90, 4, box_categories={'id': 4, 'name': 'Class 1'})], box_id=73)
+    elif refresh_case == 'malformed':
+        sections[0]['values'] = 'Class 1'
+    if refresh_case != 'failed':
+        engine.client.membership_details.side_effect = None
+        engine.client.membership_details.return_value = {'limitations': sections}
+
+    await engine.membership_policy.refresh([m])
+    engine.client.membership_details.assert_awaited_once()
+    # Recreate the policy reader to verify the corrected decision was persisted.
+    reader = MembershipPolicy(engine.store, engine.client, engine.syncer)
+    policy = await reader.get(m)
+    assert (1 not in policy['denied_category_ids']) is clears_denial
+    assert 3 in policy['denied_category_ids']
+    assert eligible({**m, 'policy': policy}, session) is clears_denial
+    if clears_denial:
+        assert policy['state'] == 'ready'
+        assert policy['category_ids'] == [1, 2]
+        quota = plan_quota([{**m, 'policy': policy}], [], [session], '2026-09')
+        assert quota['plan_states']['77']['state'] == 'ready'
+        # Clearing a stale denial cannot bypass capacity or workout-date validity.
+        full = {**m, 'sessions_left': 0, 'policy': policy}
+        assert plan_quota([full], [], [session], '2026-09')['plan_states']['77']['state'] == 'no_capacity'
+        expired = {**m, 'end': '2026-09-01', 'policy': policy}
+        assert plan_quota([expired], [], [session], '2026-09')['plan_states']['77']['state'] == 'no_membership'
+        # A subsequent explicit rejection is newer evidence and blocks again.
+        await reader.learn_rejection(m, session, denial)
+        assert not eligible({**m, 'policy': await reader.get(m)}, session)

@@ -22,6 +22,21 @@ def normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+def resolve_categories(names: list[str], catalog: list[dict]) -> tuple[list[int], list[str]]:
+    """Only a unique exact normalized name establishes a category's identity."""
+    index = {}
+    for cat in catalog:
+        index.setdefault(normalized(cat["name"]), set()).add(cat["id"])
+    ids, unmatched = set(), []
+    for name in names:
+        matches = index.get(normalized(name), set())
+        if len(matches) == 1:
+            ids.update(matches)
+        else:
+            unmatched.append(name)
+    return sorted(ids), unmatched
+
+
 def fingerprint(member: dict) -> str:
     # Balances change on every booking. They do not change eligibility.
     fields = ("id", "membership_type_id", "active", "start", "end",
@@ -81,18 +96,10 @@ class MembershipPolicy:
         saved = await self.store.get_meta(self.key(member["id"])) or {}
         current = saved.get("fingerprint") == fingerprint(member)
         catalog = await self.catalog()
-        index = {}
-        for cat in catalog:
-            index.setdefault(normalized(cat["name"]), set()).add(cat["id"])
         ids = list(saved.get("category_ids") or []) if saved.get("source") == "manual" else []
         unmatched = []
         if saved.get("source") != "manual":
-            for name in saved.get("category_names") or []:
-                matches = index.get(normalized(name), set())
-                if len(matches) == 1:
-                    ids.extend(matches)
-                else:
-                    unmatched.append(name)
+            ids, unmatched = resolve_categories(saved.get("category_names") or [], catalog)
         else:
             known = {c["id"] for c in catalog}
             unmatched = [str(cid) for cid in ids if cid not in known]
@@ -160,6 +167,12 @@ class MembershipPolicy:
                     state.update(categories_known=True,
                                  category_names=[str(v).strip() for s in classes
                                                  for v in s.get("values") or [] if str(v).strip()])
+                    # Fresh explicit permission supersedes an older denial only
+                    # for the categories we can identify unambiguously. Missing
+                    # lists, failed reads and other denials remain unchanged.
+                    allowed, _ = resolve_categories(state["category_names"], await self.catalog())
+                    state["denied_category_ids"] = sorted(
+                        set(state.get("denied_category_ids") or []) - set(allowed))
             except (ArboxError, TypeError, ValueError, KeyError) as err:
                 # Failure says nothing about eligibility. Retain prior explicit
                 # evidence; show the failed refresh without inventing a whitelist.

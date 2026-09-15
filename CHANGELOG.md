@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.53.5
+
+- Clear an older class-type denial when refreshed Arbox membership details
+  explicitly allow that exact, uniquely identified class type. Failed reads,
+  omitted or ambiguous class lists and unrelated denials retain their safeguards;
+  quota and workout-date validity checks still apply.
+
 ## 1.53.4
 
 - Reuse established membership/class eligibility across weeks and restarts without

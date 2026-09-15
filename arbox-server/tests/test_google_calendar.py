@@ -195,3 +195,23 @@ def test_oauth_returns_to_validated_browser_origin(client,origin,expected):
     assert r.status_code==200
     ticket=parse_qs(urlsplit(r.json()['url']).query)['ticket'][0]
     assert g.pending[ticket]['return']==expected
+
+@pytest.mark.asyncio
+async def test_description_and_color_changes_update_existing_event(calendar):
+    from app.ical import calendar_description
+    row=calendar.engine.store.get_sessions.return_value[0]
+    row.update(category_bio='תיאור האימון\nלכל הרמות', registered=8, max_users=15, user_booked=12)
+    p=calendar.profile();calendar.google=AsyncMock(return_value={})
+    await calendar.sync()
+    first=calendar.google.call_args_list[0].kwargs['json']
+    assert first['description'].startswith(calendar_description(row)+'\n\n')
+    assert 'תיאור האימון\nלכל הרמות\n8/15 רשומים' in first['description']
+    p['preferences']['booked']['color']='3'
+    calendar.google.reset_mock();calendar.google.return_value=first
+    await calendar.sync()
+    assert [c.args[1] for c in calendar.google.call_args_list]==['GET','PATCH']
+    patch=calendar.google.call_args_list[-1]
+    assert patch.args[2].endswith('/'+first['id'])
+    assert patch.kwargs['json']['colorId']=='3'
+    assert patch.kwargs['json']['description']==first['description']
+    assert len(p['events'])==1

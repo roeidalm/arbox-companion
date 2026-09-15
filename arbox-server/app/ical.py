@@ -92,6 +92,19 @@ def google_calendar_url(
     return "https://calendar.google.com/calendar/render?" + urlencode(params)
 
 
+def calendar_description(session: dict, *, standby: bool | None = None) -> str:
+    """The same class description and attendance information in every export."""
+    if standby is None:
+        standby = session.get("user_in_standby") is not None
+    parts = []
+    if session.get("category_bio"):
+        parts.append(str(session["category_bio"]).strip())
+    if standby:
+        parts.append("את/ה ברשימת ההמתנה — המקום עדיין לא מובטח.")
+    parts.append(f"{session.get('registered', '?')}/{session.get('max_users', '?')} רשומים")
+    return "\n".join(parts)
+
+
 def build_calendar(
     sessions: list[dict],
     *,
@@ -134,17 +147,6 @@ def build_calendar(
             pos = s.get("stand_by_position")
             title = f"⏳ המתנה{f' ({pos})' if pos else ''} — {title}"
 
-        desc_parts = []
-        if s.get("category_bio"):
-            desc_parts.append(str(s["category_bio"]).strip())
-        if standby:
-            desc_parts.append(
-                "את/ה ברשימת ההמתנה — המקום עדיין לא מובטח."
-            )
-        desc_parts.append(
-            f"{s.get('registered', '?')}/{s.get('max_users', '?')} רשומים"
-        )
-
         lines += [
             "BEGIN:VEVENT",
             # stable per class, so re-fetches update instead of duplicating
@@ -153,7 +155,7 @@ def build_calendar(
             f"DTSTART:{start}",
             f"DTEND:{end}",
             f"SUMMARY:{_esc(title)}",
-            f"DESCRIPTION:{_esc(chr(10).join(desc_parts))}",
+            f"DESCRIPTION:{_esc(calendar_description(s, standby=standby))}",
             "STATUS:" + ("TENTATIVE" if standby else "CONFIRMED"),
             "TRANSP:OPAQUE",
         ]

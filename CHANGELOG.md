@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.3
+
+- Include the original class description, attendance counts and waiting-list
+  notice in synced Google events, using the same content as calendar files.
+  Existing future events receive the missing description on the next sync.
+- Verify that changing a status color patches existing events without duplicates.
+
 ## 1.54.2
 
 - Return from Google OAuth to the validated browser origin, preserving sign-in

@@ -21,6 +21,8 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
+from .ical import calendar_description
+
 SCOPE = 'https://www.googleapis.com/auth/calendar.app.created'
 CALLBACK = '/api/calendar/google/callback'
 API = 'https://www.googleapis.com/calendar/v3'
@@ -85,7 +87,8 @@ def event_body(session, kind, prefs, tz, location, owner):
     if session.get('coach_name'):
         title += ' · ' + session['coach_name']
     return {'summary': f"{LABELS[kind]} · {title}", 'location': location,
-            'description': 'מנוהל על ידי Arbox Companion. שינוי הרשמה נעשה באפליקציית Arbox Companion.',
+            'description': calendar_description(session, standby=kind == 'standby') + '\n\n'
+                + 'מנוהל על ידי Arbox Companion. שינוי הרשמה נעשה באפליקציית Arbox Companion.',
             'start': {'dateTime': start.isoformat(), 'timeZone': tz},
             'end': {'dateTime': end.isoformat(), 'timeZone': tz},
             'colorId': prefs['color'], 'transparency': 'opaque' if prefs['busy'] else 'transparent',

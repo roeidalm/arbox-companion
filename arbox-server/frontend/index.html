@@ -17,7 +17,7 @@
 <link rel="stylesheet" href="/static/style.css?v=2.63.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
-<link rel="stylesheet" href="/static/google-calendar.css?v=1">
+<link rel="stylesheet" href="/static/google-calendar.css?v=2">
 </head>
 <body>
 <header>
@@ -426,14 +426,12 @@
     </div>
 
     <div class="pane" data-pane="calendar" hidden>
-      <div id="googleCalendarPanel" class="gc-panel"></div>
-      <div class="card narrow">
-        <h2>לוח שנה</h2>
+      <div class="cards-2 calendar-settings-grid">
+      <div class="card">
+        <h2>הוספה ידנית ליומן</h2>
       <fieldset>
         <legend>אירועי יומן</legend>
-        <p class="hint">אחרי הזמנה מגיע קובץ יומן — בטלגרם כקובץ מצורף,
-           ובאתר ככפתור 📅 על השיעור. לחיצה אחת מוסיפה אותו ליומן שתבחר/י
-           (Google או Apple — המכשיר שואל).</p>
+        <p class="hint">הוספת אימון דרך כפתור היומן או הקובץ המצורף להודעה.</p>
         <span class="lbl">תזכורות לפני שיעור</span>
         <div class="rule-row" style="align-items:flex-end">
           <label>כמה <input id="alarmAmount" type="number" min="1" max="99" value="1" style="width:4.5em"></label>
@@ -446,19 +444,17 @@
           </label>
           <button id="alarmAdd">➕ הוסף</button>
         </div>
-        <p class="hint warn-hint">⚠️ התזכורות האלה נכנסות רק דרך כפתור
-           <strong>📅 קובץ</strong>. הקישור <strong>🗓️ Google</strong> לא יכול
-           לשאת אותן — לקישור ההוספה של גוגל אין פרמטר לתזכורות — ולכן אירוע שנוצר
-           דרכו יקבל את ברירת המחדל של היומן שלך (בדרך כלל 30 דקות).</p>
         <div class="chips" id="alarmList"></div>
-        <p class="hint">כל פריט ברשימה הוא תזכורת נפרדת באירוע היומן; לחיצה על
-           פריט מסירה אותו. רשימה ריקה = אירוע בלי תזכורת. שמור/י אחרי שינוי.
-           המיקום של הסטודיו נוסף לאירוע אוטומטית.</p>
+        <details class="calendar-help"><summary>איך התזכורות האלה עובדות?</summary>
+          <p class="hint">התזכורות מתווספות לקובץ היומן (ICS). קישור ההוספה הידנית ל־Google משתמש בברירת המחדל של היומן. להסרת תזכורת לחצו עליה; רשימה ריקה משאירה את האירוע ללא תזכורות.</p>
+        </details>
       </fieldset>
-      </div>
       <div class="pane-actions">
         <button class="settingsSave primary">שמור הגדרות</button>
         <p class="settingsMsg msg"></p>
+      </div>
+      </div>
+      <div id="googleCalendarPanel" class="card gc-panel"></div>
       </div>
     </div>
 
@@ -789,7 +785,7 @@
 
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
-<script src="/static/google-calendar.js?v=1"></script>
+<script src="/static/google-calendar.js?v=2"></script>
 <script src="/static/app.js?v=2.64.0"></script>
 </body>
 </html>

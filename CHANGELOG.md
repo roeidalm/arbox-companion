@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.1
+
+- Put manual calendar settings first and align Google Calendar setup with the
+  existing settings cards. Collapse the optional wizard and preview, shorten
+  instructions, and use a single-column layout with touch-friendly controls on phones.
+
 ## 1.54.0
 
 - Add optional Google Calendar sync with an in-app setup wizard and OAuth JSON

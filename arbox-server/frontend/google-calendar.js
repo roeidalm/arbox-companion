@@ -27,8 +27,8 @@
   let refresh;
   function mount(host, api) {
     let status = null, prefs = null, selected = 'booked', step = 1, busy = false, uploaded = null;
-    host.innerHTML = `<div class="gc-heading"><div><h2>האימונים מגיעים ליומן שלך</h2><p>מחברים את Google פעם אחת. האימונים, הצבעים והתזכורות מתעדכנים אוטומטית.</p></div><span class="gc-badge" id="gcBadge">חיבור אופציונלי</span></div>
-      <ol class="gc-steps" aria-label="שלבי חיבור"><li><button type="button" data-step="1">1 · הכנת Google</button></li><li><button type="button" data-step="2">2 · העלאת קובץ</button></li><li><button type="button" data-step="3">3 · היומן שלך</button></li></ol>
+    host.innerHTML = `<details class="gc-disclosure" id="gcDisclosure"><summary class="gc-heading"><span><strong>סנכרון עם Google Calendar</strong><span class="gc-subtitle">צבעים ותזכורות לכל מצב · חיבור אופציונלי</span></span><span class="gc-badge" id="gcBadge">הגדרת חיבור</span></summary><div class="gc-content">
+      <ol class="gc-steps" aria-label="שלבי חיבור"><li><button type="button" data-step="1">1 · הכנה</button></li><li><button type="button" data-step="2">2 · קובץ</button></li><li><button type="button" data-step="3">3 · העדפות</button></li></ol>
       <p id="gcMessage" role="status" aria-live="polite" hidden></p>
       <section data-gc-step="1"><h3>נכין את החיבור ל־Google</h3><p>הגדרה חד־פעמית בחשבון שלך. בכל שלב נפתח את המסך המתאים ונציג בדיוק מה למלא.</p>
       <label for="gcProject">קישור לפרויקט Google או Project ID</label><input id="gcProject" dir="ltr" placeholder="הדביקו קישור מהדפדפן של Google Cloud">
@@ -38,17 +38,17 @@
       <p id="gcFileInfo" role="status"></p><label id="gcRedirectLabel" hidden>כתובת החזרה מתוך הקובץ<select id="gcRedirect" dir="ltr"></select></label>
       <div class="gc-actions"><button type="button" class="primary" id="gcUpload" disabled>שמירת הקובץ</button><button type="button" id="gcConnect" hidden>חיבור ל־Google</button></div>
       <p class="hint">לאחר השמירה נפתח את Google לבחירת חשבון ולאישור גישה ליומן הייעודי.</p></section>
-      <section data-gc-step="3" hidden><div class="gc-connected"><div><h3 id="gcConnectionTitle">כך ייראה היומן שלך</h3><p id="gcConnectionInfo">בחרו צבע ותזכורות לכל מצב. ניתן לשנות הכול גם בהמשך.</p></div></div>
+      <section data-gc-step="3" hidden><div class="gc-connected"><div><h3 id="gcConnectionTitle">צבעים ותזכורות</h3><p id="gcConnectionInfo">בחרו צבע ותזכורות לכל מצב. ניתן לשנות הכול גם בהמשך.</p></div></div>
       <div class="gc-personalize"><div><div id="gcKindList" class="gc-kind-list" role="group" aria-label="מצבי האימון"></div>
       <div class="gc-editor"><h4 id="gcEditorTitle"></h4><label class="gc-check"><input type="checkbox" id="gcVisible">הצגת המצב הזה ביומן</label>
       <label for="gcColor">צבע האירוע</label><select id="gcColor"></select>
       <label class="gc-check"><input type="checkbox" id="gcBusy">סימון הזמן כ״עסוק״</label>
       <h4>תזכורות לפני האימון</h4><div class="gc-reminders" id="gcReminders"></div>
       <div class="gc-reminder-add"><label for="gcMinutes">דקות לפני</label><input type="number" id="gcMinutes" min="0" max="40320" value="30"><button type="button" id="gcAddReminder">הוסף תזכורת</button></div><p class="hint">עד 5 תזכורות לכל אירוע. ללא תזכורות? הסירו את כולן.</p></div></div>
-      <aside class="gc-preview"><p class="gc-preview-label">תצוגה מקדימה · דוגמה</p><div class="gc-day"><strong>יום רביעי</strong><span>האימונים שלי</span></div><div class="gc-timegrid"><span>08:00</span><article id="gcPreviewEvent"><strong>Movement basics</strong><span>08:00–09:00 · רוני גוזלי</span><b id="gcPreviewStatus"></b><div id="gcPreviewAlarms"></div></article><span>09:00</span></div><p class="hint">כשמצב האימון משתנה, אותו אירוע מתעדכן ביומן.</p></aside></div>
+      <details class="gc-preview"><summary>תצוגה מקדימה · דוגמה</summary><div class="gc-day"><strong>יום רביעי</strong><span>האימונים שלי</span></div><div class="gc-timegrid"><span>08:00</span><article id="gcPreviewEvent"><strong>Movement basics</strong><span>08:00–09:00 · רוני גוזלי</span><b id="gcPreviewStatus"></b><div id="gcPreviewAlarms"></div></article><span>09:00</span></div><p class="hint">כשמצב האימון משתנה, אותו אירוע מתעדכן ביומן.</p></details></div>
       <div class="gc-actions"><button type="button" class="primary" id="gcSave">שמירת העדפות</button><button type="button" class="primary" id="gcEnable" hidden>יצירת יומן והפעלת הסנכרון</button><button type="button" id="gcSync" hidden>סנכרון עכשיו</button><button type="button" id="gcPause" hidden>השהיית הסנכרון</button><button type="button" id="gcDisconnect" hidden>ניתוק Google</button></div>
-      <p class="hint">הסנכרון מציג את 30 הימים הקרובים ומתעדכן בכל דקה. ביטול או דילוג מסירים אירוע עתידי. השהיה וניתוק משאירים את האירועים שכבר נוצרו. שינויים בהרשמות עושים ב־Arbox Companion. עריכות ידניות באירועים המנוהלים ב־Google נדרסות בבדיקה תקופתית.</p>
-      <div id="gcRecovery" hidden><p>אם היומן כבר נוצר ב־Google, אפשר לחבר אותו בלי ליצור עותק נוסף. בהגדרות היומן ב־Google, תחת ״שילוב היומן״, העתיקו את מזהה היומן.</p><input id="gcRecoverId" aria-label="מזהה היומן שנוצר" dir="ltr"><button id="gcRecover" type="button">חיבור ליומן שנוצר</button></div></section>`;
+      <details class="gc-explanation"><summary>איך הסנכרון עובד?</summary><p class="hint">הסנכרון מציג את 30 הימים הקרובים ומתעדכן בכל דקה. ביטול או דילוג מסירים אירוע עתידי. השהיה וניתוק משאירים את האירועים שכבר נוצרו. שינויים בהרשמות עושים ב־Arbox Companion. עריכות ידניות באירועים המנוהלים ב־Google נדרסות בבדיקה תקופתית.</p></details>
+      <div id="gcRecovery" hidden><p>אם היומן כבר נוצר ב־Google, אפשר לחבר אותו בלי ליצור עותק נוסף. בהגדרות היומן ב־Google, תחת ״שילוב היומן״, העתיקו את מזהה היומן.</p><input id="gcRecoverId" aria-label="מזהה היומן שנוצר" dir="ltr"><button id="gcRecover" type="button">חיבור ליומן שנוצר</button></div></section></div></details>`;
     const $ = s => host.querySelector(s);
     function message(text, error=false) { const n=$('#gcMessage');n.hidden=!text;n.textContent=text;n.className=error?'gc-error':'gc-success'; }
     function show(n) { step=n;host.querySelectorAll('[data-gc-step]').forEach(x=>x.hidden=Number(x.dataset.gcStep)!==n);host.querySelectorAll('[data-step]').forEach(b=>{b.classList.toggle('active',Number(b.dataset.step)===n);b.setAttribute('aria-current',Number(b.dataset.step)===n?'step':'false');}); }
@@ -78,8 +78,9 @@
       const alarms=$('#gcPreviewAlarms');alarms.replaceChildren();p.reminders.forEach(m=>alarms.append(el('span','◷ '+reminderText(m))));
     }
     function renderStatus() {
-      $('#gcBadge').textContent=status.enabled?'סנכרון פעיל':status.connected?'Google מחובר':status.uploaded?'הקובץ מוכן':'חיבור אופציונלי';
-      $('#gcConnect').hidden=!status.uploaded;$('#gcConnectionTitle').textContent=status.connected?'היומן שלך, בדרך שלך':'כך ייראה היומן שלך';
+      if(status.connected&&!status.enabled||status.error)$('#gcDisclosure').open=true;
+      $('#gcBadge').textContent=status.enabled?'סנכרון פעיל':status.connected?'Google מחובר':status.uploaded?'הקובץ מוכן':'הגדרת חיבור';
+      $('#gcConnect').hidden=!status.uploaded;$('#gcConnectionTitle').textContent='צבעים ותזכורות';
       $('#gcConnectionInfo').textContent=status.connected?`${status.email||'חשבון Google מחובר'}${status.last_sync?' · עודכן '+new Date(status.last_sync).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}):''}`:'בחרו צבע ותזכורות לכל מצב. ניתן לשנות הכול גם בהמשך.';
       $('#gcEnable').hidden=!status.connected||status.enabled||status.creation_pending;$('#gcEnable').textContent=status.calendar_id?'הפעלת הסנכרון':'יצירת יומן והפעלת הסנכרון';
       $('#gcSync').hidden=!status.enabled;$('#gcPause').hidden=!status.enabled;$('#gcDisconnect').hidden=!status.connected;$('#gcRecovery').hidden=!status.creation_pending;

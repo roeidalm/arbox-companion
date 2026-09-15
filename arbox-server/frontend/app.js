@@ -2916,6 +2916,11 @@ function showPane(name) {
   $$(".subtab[data-pane]").forEach(
     (b) => b.classList.toggle("active", b.dataset.pane === name));
   if (name === "profile" || name === "studio") loadProfile();
+  if (name === "calendar") {
+    const host = $("#googleCalendarPanel");
+    if (!host.dataset.mounted) { host.dataset.mounted = "1"; GoogleCalendarUI.mount(host, api); }
+    else GoogleCalendarUI.refresh();
+  }
 }
 
 function kvRow(el, label, value, cls) {
@@ -3574,3 +3579,8 @@ function fmtSince(isoStr) {
 }
 
 boot();
+
+if (new URLSearchParams(location.search).has("google_calendar")) {
+  state.settingsPane = "calendar";
+  history.replaceState(null, "", "/settings");
+}

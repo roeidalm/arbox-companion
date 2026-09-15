@@ -20,6 +20,8 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router
+from .google_calendar import GoogleCalendar
+from .google_calendar_api import router as google_router, HideOAuthQuery
 from .feedback_form import router as feedback_router
 from .arbox_client import ArboxClient, ArboxError
 from .notify import Notifier
@@ -114,6 +116,8 @@ async def lifespan(app: FastAPI):
     app.state.notifier = notifier
     app.state.syncer = syncer
     app.state.rules_engine = rules_engine
+    google_calendar = GoogleCalendar(DATA_DIR, rules_engine)
+    app.state.google_calendar = google_calendar
 
     # APScheduler's default misfire_grace_time is one second: a paused VM, a
     # redeploy, or a busy host at 20:00 discards the digest for that day
@@ -173,6 +177,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(rules_engine.journal_tick, IntervalTrigger(minutes=5))
     # no-ops instantly unless a late-cancel lead time is configured
     scheduler.add_job(rules_engine.late_cancel_tick, IntervalTrigger(minutes=5))
+    scheduler.add_job(google_calendar.sync, IntervalTrigger(minutes=1), id="google_calendar")
     scheduler.start()
     app.state.scheduler = scheduler
     rules_engine.scheduler = scheduler
@@ -193,6 +198,7 @@ async def lifespan(app: FastAPI):
         startup_sync.cancel()
 
     scheduler.shutdown(wait=False)
+    await google_calendar.close()
     await notifier.close()
     await client.close()
     await store.close()
@@ -248,6 +254,20 @@ def _is_ip(host: str) -> bool:
 
 
 app.include_router(router)
+app.include_router(google_router)
+logging.getLogger("uvicorn.access").addFilter(HideOAuthQuery())
+
+
+@app.middleware("http")
+async def google_privacy(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/calendar/google/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    return response
+
 app.include_router(feedback_router)
 
 

@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="/static/style.css?v=2.63.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
+<link rel="stylesheet" href="/static/google-calendar.css?v=1">
 </head>
 <body>
 <header>
@@ -425,6 +426,7 @@
     </div>
 
     <div class="pane" data-pane="calendar" hidden>
+      <div id="googleCalendarPanel" class="gc-panel"></div>
       <div class="card narrow">
         <h2>לוח שנה</h2>
       <fieldset>
@@ -446,7 +448,7 @@
         </div>
         <p class="hint warn-hint">⚠️ התזכורות האלה נכנסות רק דרך כפתור
            <strong>📅 קובץ</strong>. הקישור <strong>🗓️ Google</strong> לא יכול
-           לשאת אותן — ל-API של גוגל אין פרמטר לתזכורות — ולכן אירוע שנוצר
+           לשאת אותן — לקישור ההוספה של גוגל אין פרמטר לתזכורות — ולכן אירוע שנוצר
            דרכו יקבל את ברירת המחדל של היומן שלך (בדרך כלל 30 דקות).</p>
         <div class="chips" id="alarmList"></div>
         <p class="hint">כל פריט ברשימה הוא תזכורת נפרדת באירוע היומן; לחיצה על
@@ -787,6 +789,7 @@
 
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
-<script src="/static/app.js?v=2.63.3"></script>
+<script src="/static/google-calendar.js?v=1"></script>
+<script src="/static/app.js?v=2.64.0"></script>
 </body>
 </html>

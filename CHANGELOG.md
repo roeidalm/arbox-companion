@@ -3,6 +3,17 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.0
+
+- Add optional Google Calendar sync with an in-app setup wizard and OAuth JSON
+  upload. Each Arbox account/studio can connect its own dedicated calendar.
+- Customize colors, availability and up to five reminders for scheduled,
+  automated, booked, waiting-list and review events; booked events default to
+  60- and 30-minute reminders. Existing manual calendar exports remain available.
+- Reconcile future events with deterministic inserts, ownership checks, safe
+  retries and cancellation/replanning support. Pause or disconnect preserves
+  existing events. OAuth secrets remain in private server storage.
+
 ## 1.53.5
 
 - Clear an older class-type denial when refreshed Arbox membership details

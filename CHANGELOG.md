@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.7
+
+- Home Assistant integration 3.5.0 adds Google Calendar status, last sync and
+  errors to Overview, with a permitted sync action and link to website settings.
+- Expose a Google Calendar status sensor and sync button for HA dashboards and
+  automations. Connection setup and calendar preferences stay on the website.
+
 ## 1.54.6
 
 - Save the current calendar preferences before manual sync. Show unsaved changes,

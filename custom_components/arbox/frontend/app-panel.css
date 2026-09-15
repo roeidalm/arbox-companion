@@ -717,3 +717,11 @@ blockquote {
 .session-capacity{color:var(--muted);font-size:.85em}.toolbar>button{margin-inline-start:0}.toolbar>button:last-child{margin-inline-start:auto}
 @media(max-width:600px){.quota-compact{padding:4px 14px}.mine-heading{flex-basis:100%}.session-card.mine-card{padding:14px}.toolbar{gap:8px;padding:8px 12px}.toolbar>button{padding:8px 10px}}
 .quota-card .mu-warning{color:light-dark(#9a580d,#efbe6b)}
+
+.google-calendar-status{border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}
+.google-calendar-status h2{margin:0 0 10px}
+.google-calendar-status p{overflow-wrap:anywhere}
+.google-calendar-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.google-calendar-actions button,.google-calendar-actions a{min-height:44px;display:inline-flex;align-items:center}
+
+.google-calendar-actions a{color:var(--accent)}

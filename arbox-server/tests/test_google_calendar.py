@@ -258,3 +258,22 @@ async def test_calendar_palette_migrates_and_updates_same_event(calendar):
     p['palette_checked_at'] = 0; labels.pop()
     await calendar.sync()
     assert p['error'] and writes == ['POST', 'PATCH']
+
+
+def test_monitoring_status_has_no_credentials_or_account_email(calendar):
+    p=calendar.profile();p['email']='private@example.test'
+    public=calendar.monitoring_status()
+    assert public['state']=='active'
+    assert set(public)=={'state','connected','enabled','last_sync','error','event_count','settings_url'}
+    p['error']='Sync failed'
+    assert calendar.monitoring_status()['state']=='error'
+    p['error']=None;p['enabled']=False
+    assert calendar.monitoring_status()['state']=='paused'
+    p.pop('refresh_token')
+    assert calendar.monitoring_status()['state']=='disconnected'
+
+
+def test_manual_sync_rejects_inactive_connection(client):
+    g=client.app.state.google_calendar;g.engine.client.email='user@example.test';g.engine.store.active_box_id=73
+    response=client.post('/api/calendar/google/sync',headers={'X-Api-Key':api_key(client)})
+    assert response.status_code==409

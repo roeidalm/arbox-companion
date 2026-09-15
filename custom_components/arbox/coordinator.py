@@ -104,6 +104,19 @@ class ArboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
         return True
 
+    async def sync_google_calendar(self) -> None:
+        """Sync saved preferences; setup stays on the server website."""
+        from homeassistant.exceptions import HomeAssistantError
+        from .panel_api import request, PanelError
+        try:
+            result = await request(self, 'POST', '/calendar/google/sync', data={})
+            if result.get('error'):
+                raise HomeAssistantError(result['error'])
+        except PanelError as err:
+            raise HomeAssistantError(str(err)) from err
+        finally:
+            await self.async_request_refresh()
+
     async def book_class(self, schedule_id: int) -> bool:
         return await self._action("book", schedule_id)
 

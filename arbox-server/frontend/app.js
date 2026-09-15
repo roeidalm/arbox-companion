@@ -3580,7 +3580,7 @@ function fmtSince(isoStr) {
 
 boot();
 
-if (new URLSearchParams(location.search).has("google_calendar")) {
+if (new URLSearchParams(location.search).has("google_calendar") || new URLSearchParams(location.search).get("settings") === "calendar") {
   state.settingsPane = "calendar";
   history.replaceState(null, "", "/settings");
 }

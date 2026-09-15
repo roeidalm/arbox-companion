@@ -175,7 +175,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.4.3", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.5.0", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -734,12 +734,38 @@ export class ArboxAppPanel extends HTMLElement {
         );
       this._content.append(section);
     }
+    this.googleCalendarCard();
     this._content.append(node("h2", "האימונים הקרובים"));
     this.list(
       (this._data.me?.sessions || [])
         .filter((s) => !s.automation_skipped)
         .slice(0, 5),
     );
+  }
+  googleCalendarCard() {
+    const data=this._data.summary?.google_calendar;
+    if(!data)return;
+    const card=node('section',null,'google-calendar-status');
+    const states={active:'סנכרון פעיל',paused:'הסנכרון מושהה',disconnected:'Google לא מחובר',error:'נדרשת תשומת לב',unavailable:'החיבור אינו זמין'};
+    card.append(node('h2','Google Calendar'),node('p',states[data.state]||'מצב לא ידוע'));
+    if(data.last_sync)card.append(node('p','סנכרון אחרון: '+new Date(data.last_sync).toLocaleString('he-IL'),'muted'));
+    if(data.error)card.append(node('p',data.error,'error'));
+    const actions=node('div',null,'google-calendar-actions');
+    const context={...this.context()};
+    const sync=button('סנכרון עכשיו',async()=>{
+      sync.disabled=true;sync.textContent='מסנכרן…';
+      try{await this.act('google_calendar_sync',{},context,{close:false});}
+      finally{sync.disabled=!this.canWrite()||!data.enabled||!data.connected;sync.textContent='סנכרון עכשיו';}
+    });
+    sync.disabled=!this.canWrite()||!data.enabled||!data.connected;
+    actions.append(sync);
+    try {
+      const url=new URL(data.settings_url);
+      if(['http:','https:'].includes(url.protocol)){
+        const link=node('a','הגדרות החיבור באתר');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';actions.append(link);
+      }
+    }catch(_){}
+    card.append(actions);this._content.append(card);
   }
   select(label, options, value, onchange) {
     const wrap = node("label", label, "field");
@@ -1000,10 +1026,10 @@ export class ArboxAppPanel extends HTMLElement {
         );
         return response;
       }
-      if (response.ok === false)
+      if (response.ok === false || (action === "google_calendar_sync" && response.error))
         throw new Error(response.error || "הפעולה לא הושלמה.");
       if (close) { this._dialog?.close(); this.closeInline(); }
-      this.toast(response.quota_note || "השינוי נשמר");
+      this.toast(action === "google_calendar_sync" ? "הסנכרון עם Google הושלם" : response.quota_note || "השינוי נשמר");
       await this._loading;
       await this.load();
       return response;

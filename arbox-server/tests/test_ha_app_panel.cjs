@@ -263,3 +263,14 @@ test('My history is read lazily and keeps cancelled and accepted changes visible
   for (const text of ['Modern dance','Noa','HS','Original class','השינוי אושר','בוטל בעקבות שינוי'])
     assert.ok(visible.includes(text), text);
 });
+
+
+test('Google sync is studio scoped and backend errors are not shown as success',async()=>{
+ const {panel,calls}=harness();
+ await panel.act('google_calendar_sync',{}, {studio_id:7});
+ assert.equal(calls[0].action,'google_calendar_sync');assert.equal(calls[0].studio_id,7);
+ const messages=[];panel.toast=text=>messages.push(text);
+ panel._hass.callWS=async()=>({data:{error:'Google rejected sync'}});
+ await assert.rejects(panel.act('google_calendar_sync',{}, {studio_id:7}),/Google rejected sync/);
+ assert.ok(messages.every(text=>!text.includes('הושלם')));
+});

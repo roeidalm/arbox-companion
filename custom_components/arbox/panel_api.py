@@ -26,6 +26,7 @@ READS = {
 }
 # Method, path, path identifier, permitted JSON fields. Identifiers must be integers.
 ACTIONS = {
+    "google_calendar_sync": ("POST", "/calendar/google/sync", None, set()),
     "membership_refresh": ("POST", "/memberships/refresh", None, set()),
     "planning_membership_options": ("POST", "/planning/{id}/membership-options", "schedule_id", {"refresh"}),
     "planning_membership_assign": ("POST", "/planning/{id}/membership", "schedule_id", {"token", "confirm_category"}),

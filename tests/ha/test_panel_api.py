@@ -40,6 +40,18 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.conn.send_result.call_args.args[1], {"entries": [
             {"entry_id": "one", "title": "My Arbox", "can_write": False}]})
 
+    async def test_google_sync_requires_action_permission_and_frozen_studio(self):
+        msg = {'id':1, 'entry_id':'one', 'action':'google_calendar_sync', 'studio_id':8, 'data':{}}
+        self.entry.options[api.VIEW_USERS] = ['user']
+        await api.ws_action.__wrapped__(self.hass, self.conn, msg)
+        self.server._session.request.assert_not_called()
+        self.entry.options[api.ACTION_USERS] = ['user']
+        await api.ws_action.__wrapped__(self.hass, self.conn, msg)
+        args,kw = self.server._session.request.call_args
+        self.assertEqual(args, ('POST','http://internal-arbox:8000/api/calendar/google/sync'))
+        self.assertEqual(kw['headers']['X-Arbox-Studio-Id'], '8')
+        self.assertEqual(kw['json'], {})
+
     async def test_fixed_mutation_endpoint_with_studio_header(self):
         self.entry.options[api.ACTION_USERS] = ["user"]
         await api.ws_action.__wrapped__(self.hass, self.conn, {"id": 1, "entry_id": "one",

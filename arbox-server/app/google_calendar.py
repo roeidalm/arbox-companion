@@ -150,6 +150,17 @@ class GoogleCalendar:
                 'last_sync': p.get('last_sync'), 'error': p.get('error'),
                 'event_count': len(p['events']), 'creation_pending': bool(p.get('creation_pending'))}
 
+    def monitoring_status(self):
+        status = self.status()
+        state = ('unavailable' if not status.get('available') else
+                 'disconnected' if not status.get('connected') else
+                 'error' if status.get('error') else
+                 'active' if status.get('enabled') else 'paused')
+        return {'state': state, 'connected': bool(status.get('connected')),
+                'enabled': bool(status.get('enabled')), 'last_sync': status.get('last_sync'),
+                'error': status.get('error'), 'event_count': status.get('event_count', 0),
+                'settings_url': self.engine.settings.base_url.rstrip('/') + '/settings?settings=calendar'}
+
     async def request(self, method, url, **kwargs):
         if self.http is None:
             self.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25))

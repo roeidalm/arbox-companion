@@ -31,6 +31,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             ArboxRefreshButton(coordinator, entry.entry_id),
+            ArboxGoogleCalendarSyncButton(coordinator, entry.entry_id),
             ArboxCancelNextButton(coordinator, entry.entry_id),
         ]
     )
@@ -75,3 +76,19 @@ class ArboxCancelNextButton(ArboxEntity, ButtonEntity):
                 "Cancel failed — inside the late-cancel window? Use the "
                 "arbox.cancel_booking service with late_cancel: true"
             )
+
+
+class ArboxGoogleCalendarSyncButton(ArboxEntity, ButtonEntity):
+    _attr_name = "Sync Google Calendar"
+    _attr_icon = "mdi:calendar-sync"
+
+    def __init__(self, coordinator: ArboxCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id, "google_calendar_sync")
+
+    @property
+    def available(self) -> bool:
+        status = (self.coordinator.data or {}).get("google_calendar") or {}
+        return super().available and bool(status.get("connected") and status.get("enabled"))
+
+    async def async_press(self) -> None:
+        await self.coordinator.sync_google_calendar()

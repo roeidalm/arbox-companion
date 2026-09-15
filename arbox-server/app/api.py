@@ -601,6 +601,7 @@ async def summary(request: Request, x_api_key: str | None = Header(None)):
         # the wall-clock times below are studio-local; HA cannot know that on
         # its own, and a HA instance left on UTC published every class hours off
         "timezone": s.settings.timezone,
+        "google_calendar": request.app.state.google_calendar.monitoring_status(),
         "membership": await s.store.get_meta("membership"),
         "memberships": await s.store.get_meta("memberships") or [],
         "quota": await s.rules_engine.quota_status(),

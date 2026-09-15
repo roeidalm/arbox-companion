@@ -193,5 +193,9 @@ async def disconnect(request: Request):
 @router.post('/sync')
 async def sync(request: Request):
     g = protected(request)
+    async with g.engine.syncer.exclusive(), g.lock:
+        p = g.profile()
+        if not p.get('enabled') or not p.get('refresh_token') or not p.get('calendar_id'):
+            raise HTTPException(409, 'יש לחבר ולהפעיל סנכרון Google בהגדרות לוח השנה באתר')
     await g.sync()
     return g.status()

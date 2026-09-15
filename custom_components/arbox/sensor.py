@@ -29,6 +29,7 @@ async def async_setup_entry(
             ArboxBookedClassesSensor(coordinator, entry.entry_id),
             ArboxNextClassNameSensor(coordinator, entry.entry_id),
             ArboxJournalSensor(coordinator, entry.entry_id),
+            ArboxGoogleCalendarSensor(coordinator, entry.entry_id),
         ]
     )
 
@@ -169,3 +170,22 @@ class ArboxJournalSensor(ArboxEntity, SensorEntity):
         journal = (self.coordinator.data or {}).get("journal") or {}
         return {"level": journal.get("level"),
                 "entries": journal.get("entries") or []}
+
+
+class ArboxGoogleCalendarSensor(ArboxEntity, SensorEntity):
+    _attr_name = "Google Calendar sync"
+    _attr_icon = "mdi:calendar-sync"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["active", "paused", "disconnected", "error", "unavailable"]
+
+    def __init__(self, coordinator: ArboxCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id, "google_calendar_status")
+
+    @property
+    def native_value(self) -> str | None:
+        return ((self.coordinator.data or {}).get("google_calendar") or {}).get("state")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        status = (self.coordinator.data or {}).get("google_calendar") or {}
+        return {key: status.get(key) for key in ("last_sync", "error", "event_count", "settings_url")}

@@ -358,6 +358,14 @@ Arbox settings and **save before sending a new test**. This setting defaults
 off and is not enabled by a HACS update. Old notifications keep their old links.
 See the [installation checklist, verification and troubleshooting guide](dashboard/feedback-notifications.md).
 
+**Google Calendar in HA:** server **1.54.7+** and integration **3.5.0+** add a
+status card to Overview, a sync button, and a link to calendar settings on the
+server website. The `Google Calendar sync` sensor reports connection state, last
+sync, errors and event count. The `Sync Google Calendar` button can also be used
+in dashboards and automations. Sync uses the preferences saved on the website;
+OAuth setup, colors and reminders remain there. Panel sync requires action
+permission. Update via HACS and restart HA to load the new entities.
+
 Entities:
 
 - `sensor.arbox_next_class` — timestamp of your next booked class, with

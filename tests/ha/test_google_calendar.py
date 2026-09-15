@@ -30,6 +30,20 @@ class GoogleCalendarTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(sensor.native_value)
         self.assertFalse(button.available)
 
+    async def test_setup_removes_legacy_cancel_button_and_never_recreates_it(self):
+        from custom_components.arbox.button import async_setup_entry
+        c=self.coordinator()
+        hass=SimpleNamespace(data={'arbox':{'test':c}})
+        registry=Mock()
+        registry.async_get_entity_id.return_value='button.arbox_cancel_next_class'
+        add=Mock()
+        with patch('custom_components.arbox.button.er.async_get',return_value=registry):
+            await async_setup_entry(hass,SimpleNamespace(entry_id='test'),add)
+        registry.async_get_entity_id.assert_called_once_with('button','arbox','test_cancel_next')
+        registry.async_remove.assert_called_once_with('button.arbox_cancel_next_class')
+        self.assertEqual([entity.unique_id for entity in add.call_args.args[0]],
+                         ['test_refresh','test_google_calendar_sync'])
+
     async def test_sync_failure_raises_and_refreshes_state(self):
         c=self.coordinator()
         with patch('custom_components.arbox.panel_api.request',AsyncMock(return_value={'error':'Google rejected access'})):

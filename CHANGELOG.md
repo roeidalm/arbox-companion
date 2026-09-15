@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.8
+
+- Home Assistant integration 3.5.1 removes the one-tap Cancel next class button
+  and cleans up its existing entity on integration setup. Cancellation remains
+  available through explicit class selection and the existing cancellation flow.
+
 ## 1.54.7
 
 - Home Assistant integration 3.5.0 adds Google Calendar status, last sync and

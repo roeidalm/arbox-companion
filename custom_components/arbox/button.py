@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
 from .coordinator import ArboxCoordinator
@@ -27,12 +28,16 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Arbox buttons."""
+    # Remove the old one-tap destructive action from existing installations too.
+    registry = er.async_get(hass)
+    legacy = registry.async_get_entity_id("button", DOMAIN, f"{entry.entry_id}_cancel_next")
+    if legacy:
+        registry.async_remove(legacy)
     coordinator: ArboxCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
             ArboxRefreshButton(coordinator, entry.entry_id),
             ArboxGoogleCalendarSyncButton(coordinator, entry.entry_id),
-            ArboxCancelNextButton(coordinator, entry.entry_id),
         ]
     )
 
@@ -49,33 +54,6 @@ class ArboxRefreshButton(ArboxEntity, ButtonEntity):
     async def async_press(self) -> None:
         if not await self.coordinator.refresh_from_arbox():
             raise HomeAssistantError("Refresh failed — see log")
-
-
-class ArboxCancelNextButton(ArboxEntity, ButtonEntity):
-    """Cancel the next booked class, without needing its schedule_id."""
-
-    _attr_name = "Cancel next class"
-    _attr_icon = "mdi:calendar-remove"
-
-    def __init__(self, coordinator: ArboxCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id, "cancel_next")
-
-    @property
-    def available(self) -> bool:
-        """Only pressable when there is actually something to cancel."""
-        data = self.coordinator.data or {}
-        nxt = data.get("next_class")
-        return super().available and bool(nxt and nxt.get("schedule_id"))
-
-    async def async_press(self) -> None:
-        nxt = (self.coordinator.data or {}).get("next_class")
-        if not nxt:
-            raise HomeAssistantError("No upcoming booked class")
-        if not await self.coordinator.cancel_booking(nxt["schedule_id"]):
-            raise HomeAssistantError(
-                "Cancel failed — inside the late-cancel window? Use the "
-                "arbox.cancel_booking service with late_cancel: true"
-            )
 
 
 class ArboxGoogleCalendarSyncButton(ArboxEntity, ButtonEntity):

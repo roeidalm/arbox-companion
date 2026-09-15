@@ -55,9 +55,6 @@
     "button": {
       "refresh": {
         "name": "Refresh schedule"
-      },
-      "cancel_next": {
-        "name": "Cancel next class"
       }
     }
   },

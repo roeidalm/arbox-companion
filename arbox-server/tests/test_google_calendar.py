@@ -181,3 +181,17 @@ async def test_foreign_event_is_never_patched_or_deleted(calendar):
     await calendar.sync()
     assert calendar.profile()['error']
     assert [c.args[1] for c in calendar.google.call_args_list]==['GET']
+
+@pytest.mark.parametrize('origin,expected',[
+    ('http://testserver','http://testserver/settings?google_calendar=connected'),
+    ('https://evil.example','http://server.example:8177/settings?google_calendar=connected'),
+    ('http://testserver/evil','http://server.example:8177/settings?google_calendar=connected'),
+])
+def test_oauth_returns_to_validated_browser_origin(client,origin,expected):
+    g=client.app.state.google_calendar;g.engine.client.email='user@example.test';g.engine.store.active_box_id=73
+    g.engine.settings.update({'base_url':'http://server.example:8177'})
+    g.profile()['credentials']=validate_credentials(CREDS,REDIRECT,'server.example')
+    r=client.post('/api/calendar/google/connect',headers={'X-Api-Key':api_key(client),'Origin':origin})
+    assert r.status_code==200
+    ticket=parse_qs(urlsplit(r.json()['url']).query)['ticket'][0]
+    assert g.pending[ticket]['return']==expected

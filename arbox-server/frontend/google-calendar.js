@@ -37,7 +37,7 @@
       <label class="gc-upload" for="gcFile"><strong>בחירת קובץ JSON</strong><span>אפשר גם לגרור את הקובץ לכאן</span><input id="gcFile" type="file" accept=".json,application/json"></label>
       <p id="gcFileInfo" role="status"></p><label id="gcRedirectLabel" hidden>כתובת החזרה מתוך הקובץ<select id="gcRedirect" dir="ltr"></select></label>
       <div class="gc-actions"><button type="button" class="primary" id="gcUpload" disabled>שמירת הקובץ</button><button type="button" id="gcConnect" hidden>חיבור ל־Google</button></div>
-      <p class="hint">לאחר השמירה נפתח את Google לבחירת חשבון ולאישור גישה ליומן הייעודי.</p></section>
+      <p><a id="gcContinueLink" hidden rel="noreferrer">פתיחת Google ידנית</a></p><p class="hint">לאחר השמירה נפתח את Google לבחירת חשבון ולאישור גישה ליומן הייעודי.</p></section>
       <section data-gc-step="3" hidden><div class="gc-connected"><div><h3 id="gcConnectionTitle">צבעים ותזכורות</h3><p id="gcConnectionInfo">בחרו צבע ותזכורות לכל מצב. ניתן לשנות הכול גם בהמשך.</p></div></div>
       <div class="gc-personalize"><div><div id="gcKindList" class="gc-kind-list" role="group" aria-label="מצבי האימון"></div>
       <div class="gc-editor"><h4 id="gcEditorTitle"></h4><label class="gc-check"><input type="checkbox" id="gcVisible">הצגת המצב הזה ביומן</label>
@@ -93,7 +93,7 @@
     $('#gcProject').oninput=guide;$('#gcPrepared').onclick=()=>show(2);
     $('#gcFile').onchange=e=>receive(e.target.files[0]);const drop=$('.gc-upload');drop.ondragover=e=>{e.preventDefault();drop.classList.add('dragover');};drop.ondragleave=()=>drop.classList.remove('dragover');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('dragover');receive(e.dataTransfer.files[0]);};
     $('#gcUpload').onclick=()=>action(async()=>{status=await api('/api/calendar/google/credentials',{method:'POST',body:JSON.stringify({credentials:uploaded,redirect_uri:$('#gcRedirect').value})});uploaded=null;$('#gcFile').value='';$('#gcUpload').disabled=true;renderStatus();message('הקובץ נשמר. עכשיו אפשר להתחבר ל־Google.');});
-    $('#gcConnect').onclick=()=>action(async()=>{const d=await api('/api/calendar/google/connect',{method:'POST'});window.location.assign(d.url);});
+    $('#gcConnect').onclick=()=>action(async()=>{const d=await api('/api/calendar/google/connect',{method:'POST'});const link=$('#gcContinueLink');link.href=d.url;link.hidden=false;message('מעבירים אותך ל־Google. אם הדף לא נפתח, לחצו על הקישור שמתחת לכפתורים.');window.location.assign(d.url);});
     Object.entries(colors).forEach(([id,[name]])=>{const o=el('option',name);o.value=id;$('#gcColor').append(o);});
     $('#gcVisible').onchange=e=>{prefs[selected].enabled=e.target.checked;renderPrefs();};$('#gcBusy').onchange=e=>{prefs[selected].busy=e.target.checked;renderPrefs();};$('#gcColor').onchange=e=>{prefs[selected].color=e.target.value;renderPrefs();};
     $('#gcAddReminder').onclick=()=>{const n=Number($('#gcMinutes').value),p=prefs[selected];if($('#gcMinutes').value===''||!Number.isInteger(n)||n<0||n>40320)return message('בחרו מספר דקות בין 0 ל־40320',true);if(p.reminders.length>=5)return message('אפשר עד חמש תזכורות',true);p.reminders=[...new Set([...p.reminders,n])].sort((a,b)=>b-a);message('');renderPrefs();};

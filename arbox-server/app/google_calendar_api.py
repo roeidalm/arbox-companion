@@ -92,8 +92,16 @@ async def connect(request: Request):
     g = protected(request)
     try:
         async with g.engine.syncer.exclusive(), g.lock:
-            # Use the configured trusted origin for return navigation; never a body URL.
+            # Preserve the browser's origin (including local hostname aliases),
+            # otherwise its localStorage API key disappears after OAuth. Only
+            # accept an Origin matching the Host already validated by middleware.
             origin = g.engine.settings.base_url or str(request.base_url).rstrip('/')
+            browser_origin = request.headers.get('origin', '')
+            parsed = urlsplit(browser_origin)
+            if (parsed.scheme in ('http', 'https') and parsed.netloc.lower() == request.url.netloc.lower()
+                    and not parsed.username and not parsed.password
+                    and not parsed.path and not parsed.query and not parsed.fragment):
+                origin = browser_origin
             return {'url': g.begin(origin.rstrip('/') + '/settings?google_calendar=connected')}
     except ValueError as err:
         raise HTTPException(409, str(err))

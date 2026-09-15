@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.2
+
+- Return from Google OAuth to the validated browser origin, preserving sign-in
+  when setup starts on a local hostname alias. Offer an explicit Google link if
+  automatic browser navigation does not complete.
+
 ## 1.54.1
 
 - Put manual calendar settings first and align Google Calendar setup with the

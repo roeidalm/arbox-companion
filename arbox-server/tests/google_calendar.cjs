@@ -15,3 +15,14 @@ test('upload accepts only the local HTTPS callback',()=>{
 test('multiple reminders retain individual labels',()=>{
  assert.equal(reminderText(60),'שעה לפני');assert.equal(reminderText(30),'30 דקות לפני');assert.equal(reminderText(0),'בזמן האימון');
 });
+
+
+test('calendar palette preserves label ids, colors and custom names', () => {
+  const {paletteOptions}=require('../frontend/google-calendar.js');
+  const options=paletteOptions([{id:'custom-id',color:'#009688',name:'My color'}, {id:'red-id',color:'#d50000',name:''}]);
+  assert.equal(options.length,2);
+  assert.equal(options[0].id,'red-id');
+  assert.equal(options[1].name,'My color');
+  assert.equal(options[1].color,'#009688');
+  assert.equal(paletteOptions([]).length,11);
+});

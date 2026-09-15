@@ -1,6 +1,7 @@
 import copy
 import json
 import re
+import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -27,7 +28,7 @@ def calendar(tmp_path):
         _planned_sessions=AsyncMock(return_value=[{**row, 'planning_source':'scheduled'}]),
         quota_status=AsyncMock(return_value={'plan_states': {'42': {'state':'ready'}}}))
     g=GoogleCalendar(tmp_path,e)
-    g.profile().update(credentials=validate_credentials(CREDS,REDIRECT,'server.example'), refresh_token='test-refresh',calendar_id='test-calendar',enabled=True)
+    g.profile().update(credentials=validate_credentials(CREDS,REDIRECT,'server.example'), refresh_token='test-refresh',calendar_id='test-calendar',enabled=True, palette_checked_at=time.time())
     return g
 
 def test_validation():
@@ -215,3 +216,45 @@ async def test_description_and_color_changes_update_existing_event(calendar):
     assert patch.kwargs['json']['colorId']=='3'
     assert patch.kwargs['json']['description']==first['description']
     assert len(p['events'])==1
+
+
+@pytest.mark.asyncio
+async def test_calendar_palette_migrates_and_updates_same_event(calendar):
+    p = calendar.profile()
+    p.pop('palette_checked_at')
+    blue, extra = 'blue-label-uuid', 'extra-label-uuid'
+    labels = [{'id': blue, 'backgroundColor': '#3f51b5'},
+              {'id': extra, 'backgroundColor': '#009688', 'name': 'My eucalyptus'}]
+    remote = {}
+    writes = []
+    async def google(profile, method, path, **kw):
+        if path == '/calendars/test-calendar':
+            return {'labelProperties': {'eventLabels': labels}}
+        eid = path.rsplit('/', 1)[-1]
+        if method == 'POST':
+            body = kw['json']; remote[body['id']] = copy.deepcopy(body)
+        elif method == 'GET':
+            return remote[eid]
+        elif method == 'PATCH':
+            remote[eid].update(kw['json'])
+        if method in ('POST', 'PATCH'):
+            assert kw['params'] == {'eventLabelVersion': '1'}
+            assert 'colorId' not in kw['json']
+            writes.append(method)
+        return {}
+    calendar.google = google
+    await calendar.sync()
+    assert not p['error']
+    assert calendar.status()['palette'][1]['name'] == 'My eucalyptus'
+    eid = next(iter(remote))
+    assert remote[eid]['eventLabelId'] == blue
+    prefs = copy.deepcopy(p['preferences']); prefs['scheduled']['color'] = extra
+    with pytest.raises(ValueError): validate_preferences(prefs)
+    p['preferences'] = validate_preferences(prefs, p['palette'])
+    await calendar.sync()
+    assert remote[eid]['eventLabelId'] == extra and len(remote) == 1
+    assert writes == ['POST', 'PATCH']
+    # A removed label must not silently reset an event's color.
+    p['palette_checked_at'] = 0; labels.pop()
+    await calendar.sync()
+    assert p['error'] and writes == ['POST', 'PATCH']

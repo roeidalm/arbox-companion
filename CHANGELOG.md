@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.4
+
+- Show the actual Google calendar event palette as accessible color swatches,
+  including all 24 default colors and custom label names. Use Google event labels
+  for syncing these colors, preserving existing event identities and preferences.
+
 ## 1.54.3
 
 - Include the original class description, attendance counts and waiting-list

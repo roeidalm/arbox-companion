@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -60,14 +61,19 @@ def validate_credentials(data, redirect, server_host):
     return {k: web[k] for k in ('client_id', 'client_secret', 'project_id')} | {'redirect_uri': redirect}
 
 
-def validate_preferences(data):
+LEGACY_COLORS = dict(zip(map(str, range(1, 12)), (
+    '#7986cb', '#33b679', '#8e24aa', '#e67c73', '#f6bf26', '#f4511e',
+    '#039be5', '#616161', '#3f51b5', '#0b8043', '#d50000')))
+
+
+def validate_preferences(data, palette=()):
     if not isinstance(data, dict) or set(data) != set(LABELS):
         raise ValueError('חסרות הגדרות למצבי האימון')
     out = {}
     for kind, p in data.items():
         if not isinstance(p, dict) or type(p.get('enabled')) is not bool or type(p.get('busy')) is not bool:
             raise ValueError('הגדרת מצב לא תקינה')
-        if str(p.get('color')) not in {str(i) for i in range(1, 12)}:
+        if str(p.get('color')) not in set(LEGACY_COLORS) | {c['id'] for c in palette}:
             raise ValueError('יש לבחור צבע מתוך צבעי Google')
         reminders = p.get('reminders')
         if not isinstance(reminders, list) or len(reminders) > 5 or any(
@@ -91,7 +97,7 @@ def event_body(session, kind, prefs, tz, location, owner):
                 + 'מנוהל על ידי Arbox Companion. שינוי הרשמה נעשה באפליקציית Arbox Companion.',
             'start': {'dateTime': start.isoformat(), 'timeZone': tz},
             'end': {'dateTime': end.isoformat(), 'timeZone': tz},
-            'colorId': prefs['color'], 'transparency': 'opaque' if prefs['busy'] else 'transparent',
+            **({'colorId': prefs['color']} if prefs['color'] in LEGACY_COLORS else {'eventLabelId': prefs['color']}), 'transparency': 'opaque' if prefs['busy'] else 'transparent',
             'reminders': {'useDefault': False, 'overrides': [
                 {'method': 'popup', 'minutes': m} for m in prefs['reminders']]},
             'extendedProperties': {'private': {'arbox_owner': owner, 'schedule_id': str(session['schedule_id'])}}}
@@ -136,7 +142,7 @@ class GoogleCalendar:
         except ValueError:
             return {'available': False, 'preferences': copy.deepcopy(DEFAULTS)}
         return {'available': True, 'uploaded': bool(p.get('credentials')), 'connected': bool(p.get('refresh_token')),
-                'enabled': p['enabled'], 'preferences': p['preferences'],
+                'enabled': p['enabled'], 'preferences': p['preferences'], 'palette': p.get('palette', []),
                 'project_id': p.get('credentials', {}).get('project_id'),
                 'suggested_redirect': os.environ.get('GOOGLE_CALENDAR_REDIRECT_URI') or (self.engine.settings.base_url.rstrip('/') + CALLBACK if self.engine.settings.base_url.startswith('https://') else ''),
                 'redirect_uri': p.get('credentials', {}).get('redirect_uri'),
@@ -180,6 +186,18 @@ class GoogleCalendar:
     async def google(self, p, method, path, **kwargs):
         token = await self.access(p)
         return await self.request(method, API + path, headers={'Authorization': 'Bearer ' + token}, **kwargs)
+
+    async def refresh_palette(self, p):
+        if not p.get('calendar_id') or not p.get('refresh_token'):
+            return
+        if p.get('palette_checked_at', 0) > time.time() - 900:
+            return
+        d = await self.google(p, 'GET', '/calendars/' + quote(p['calendar_id'], safe=''))
+        p['palette'] = [dict(id=c['id'], color=c['backgroundColor'].lower(), name=c.get('name', ''))
+                        for c in d.get('labelProperties', {}).get('eventLabels', [])
+                        if isinstance(c.get('id'), str) and re.fullmatch(r'#[0-9a-fA-F]{6}', c.get('backgroundColor', ''))]
+        p['palette_checked_at'] = time.time()
+        self.save()
 
     def begin(self, return_url):
         p = self.profile()
@@ -229,6 +247,8 @@ class GoogleCalendar:
             raise ValueError('לא ניתן לאמת את חשבון Google')
         if p.get('google_sub') and p['google_sub'] != who['sub']:
             # A different Google account must never reuse event/calendar mappings.
+            p.pop('palette', None)
+            p.pop('palette_checked_at', None)
             p.pop('calendar_id', None)
             p.pop('creation_pending', None)
             p['events'] = {}
@@ -302,6 +322,13 @@ class GoogleCalendar:
             prefs = p['preferences'][kind]
             if not prefs['enabled']:
                 continue
+            prefs = dict(prefs)
+            if prefs['color'] in LEGACY_COLORS:
+                matching = next((c for c in p.get('palette', []) if c['color'] == LEGACY_COLORS[prefs['color']]), None)
+                if matching:
+                    prefs['color'] = matching['id']
+            elif prefs['color'] not in {c['id'] for c in p.get('palette', [])}:
+                raise CalendarError('צבע שנבחר הוסר מהיומן. בחרו צבע חדש בהגדרות לוח השנה')
             body = event_body(row, kind, prefs, e.settings.timezone, location, p['owner'])
             if datetime.fromisoformat(body['end']['dateTime']) <= now:
                 continue
@@ -321,6 +348,7 @@ class GoogleCalendar:
                 if not p.get('enabled') or not p.get('refresh_token'):
                     return
                 try:
+                    await self.refresh_palette(p)
                     desired = await self.desired(p)
                     base = '/calendars/' + quote(p['calendar_id'], safe='') + '/events'
                     for eid, body in desired.items():
@@ -335,7 +363,8 @@ class GoogleCalendar:
                         try:
                             if saved.get('digest'):
                                 raise CalendarError('existing', 409)
-                            await self.google(p, 'POST', base, json={'id': eid, **body})
+                            await self.google(p, 'POST', base, json={'id': eid, **body},
+                                              **({'params': {'eventLabelVersion': '1'}} if 'eventLabelId' in body else {}))
                         except CalendarError as err:
                             if err.status != 409:
                                 raise
@@ -350,7 +379,8 @@ class GoogleCalendar:
                                 continue  # Google tombstones cannot reuse IDs; next tick recreates it.
                             if existing.get('extendedProperties', {}).get('private', {}).get('arbox_owner') != p['owner']:
                                 raise CalendarError('האירוע ביומן אינו שייך לחיבור הזה')
-                            await self.google(p, 'PATCH', base + '/' + eid, json=body)
+                            await self.google(p, 'PATCH', base + '/' + eid, json=body,
+                                              **({'params': {'eventLabelVersion': '1'}} if 'eventLabelId' in body else {}))
                         p['events'][eid].update(digest=digest, checked_at=time.time())
                         self.save()
                     now = datetime.now(ZoneInfo(self.engine.settings.timezone))

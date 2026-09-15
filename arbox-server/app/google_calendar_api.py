@@ -49,6 +49,10 @@ def protected(request):
 async def status(request: Request):
     g = protected(request)
     async with g.engine.syncer.exclusive(), g.lock:
+        try:
+            await g.refresh_palette(g.profile())
+        except (CalendarError, ValueError):
+            pass  # Keep setup and cached preferences available while offline.
         return g.status()
 
 
@@ -64,7 +68,7 @@ async def upload(request: Request):
             if p.get('refresh_token'):
                 raise ValueError('יש לנתק את החיבור הקיים לפני החלפת הקובץ')
             if p.get('credentials', {}).get('client_id') != credentials['client_id']:
-                for key in ('calendar_id', 'creation_pending', 'google_sub', 'email', 'last_sync', 'error'):
+                for key in ('calendar_id', 'creation_pending', 'google_sub', 'email', 'last_sync', 'error', 'palette', 'palette_checked_at'):
                     p.pop(key, None)
                 p.update(events={}, generations={}, owner=secrets.token_hex(16))
             p['credentials'] = credentials
@@ -78,9 +82,9 @@ async def upload(request: Request):
 async def preferences(request: Request):
     g = protected(request)
     try:
-        prefs = validate_preferences(await limited_json(request))
+        data = await limited_json(request)
         async with g.engine.syncer.exclusive(), g.lock:
-            g.profile()['preferences'] = prefs
+            g.profile()['preferences'] = validate_preferences(data, g.profile().get('palette', []))
             g.save()
             return g.status()
     except ValueError as err:

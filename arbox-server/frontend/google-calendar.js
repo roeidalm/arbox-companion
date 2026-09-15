@@ -7,6 +7,23 @@
     5:['צהוב','#f6bf26'],6:['כתום','#f4511e'],7:['טורקיז','#039be5'],8:['אפור','#616161'],
     9:['כחול','#3f51b5'],10:['ירוק','#0b8043'],11:['אדום','#d50000']
   };
+  // Google's current event palette; custom calendar labels keep their own names.
+  const paletteNames = {
+    '#ad1457':'סלק', '#d81b60':'פריחת דובדבן', '#e67c73':'פלמינגו', '#d50000':'עגבנייה',
+    '#f4511e':'מנדרינה', '#ef6c00':'דלעת', '#f09300':'מנגו', '#f6bf26':'בננה',
+    '#e4c441':'אתרוג', '#c0ca33':'אבוקדו', '#7cb342':'פיסטוק', '#0b8043':'בזיליקום',
+    '#33b679':'מרווה', '#009688':'אקליפטוס', '#039be5':'טווס', '#4285f4':'קובלט',
+    '#7986cb':'לבנדר', '#3f51b5':'אוכמניות', '#b39ddb':'ויסטריה', '#9e69af':'אחלמה',
+    '#8e24aa':'ענבים', '#795548':'קקאו', '#616161':'גרפיט', '#a79b8e':'ליבנה'
+  };
+  function paletteOptions(palette) {
+    if (!palette?.length) return Object.entries(colors).map(([id,[name,color]])=>({id,name,color}));
+    const order=Object.keys(paletteNames);
+    return palette.map(c=>({...c,name:c.name||paletteNames[c.color]||c.color})).sort((a,b)=>{
+      const rank=c=>order.includes(c.color)?order.indexOf(c.color):order.length;
+      return rank(a)-rank(b);
+    });
+  }
   function projectId(value) {
     let id = String(value || '').trim();
     try { if (id.startsWith('https://')) id = new URL(id).searchParams.get('project') || ''; } catch (_) { return ''; }
@@ -26,7 +43,7 @@
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent=text; if(cls)n.className=cls; return n; };
   let refresh;
   function mount(host, api) {
-    let status = null, prefs = null, selected = 'booked', step = 1, busy = false, uploaded = null;
+    let status = null, prefs = null, palette = [], selected = 'booked', step = 1, busy = false, uploaded = null;
     host.innerHTML = `<details class="gc-disclosure" id="gcDisclosure"><summary class="gc-heading"><span><strong>סנכרון עם Google Calendar</strong><span class="gc-subtitle">צבעים ותזכורות לכל מצב · חיבור אופציונלי</span></span><span class="gc-badge" id="gcBadge">הגדרת חיבור</span></summary><div class="gc-content">
       <ol class="gc-steps" aria-label="שלבי חיבור"><li><button type="button" data-step="1">1 · הכנה</button></li><li><button type="button" data-step="2">2 · קובץ</button></li><li><button type="button" data-step="3">3 · העדפות</button></li></ol>
       <p id="gcMessage" role="status" aria-live="polite" hidden></p>
@@ -41,7 +58,7 @@
       <section data-gc-step="3" hidden><div class="gc-connected"><div><h3 id="gcConnectionTitle">צבעים ותזכורות</h3><p id="gcConnectionInfo">בחרו צבע ותזכורות לכל מצב. ניתן לשנות הכול גם בהמשך.</p></div></div>
       <div class="gc-personalize"><div><div id="gcKindList" class="gc-kind-list" role="group" aria-label="מצבי האימון"></div>
       <div class="gc-editor"><h4 id="gcEditorTitle"></h4><label class="gc-check"><input type="checkbox" id="gcVisible">הצגת המצב הזה ביומן</label>
-      <label for="gcColor">צבע האירוע</label><select id="gcColor"></select>
+      <fieldset class="gc-colors"><legend>צבע האירוע <span id="gcColorName"></span></legend><div id="gcColor" class="gc-color-grid"></div></fieldset>
       <label class="gc-check"><input type="checkbox" id="gcBusy">סימון הזמן כ״עסוק״</label>
       <h4>תזכורות לפני האימון</h4><div class="gc-reminders" id="gcReminders"></div>
       <div class="gc-reminder-add"><label for="gcMinutes">דקות לפני</label><input type="number" id="gcMinutes" min="0" max="40320" value="30"><button type="button" id="gcAddReminder">הוסף תזכורת</button></div><p class="hint">עד 5 תזכורות לכל אירוע. ללא תזכורות? הסירו את כולן.</p></div></div>
@@ -68,13 +85,15 @@
       steps.forEach(([title,url,text],i)=>{const d=el('details');if(i===0&&!id)d.open=true;d.append(el('summary',`${i+1}. ${title}`),el('p',text));if(i===4||i===5){const value=i===4?'https://www.googleapis.com/auth/calendar.app.created':suggested;const code=el('code',value||'נדרשת כתובת HTTPS תקינה של השרת עם הנתיב /api/calendar/google/callback');code.dir='ltr';d.append(code);if(value){const b=el('button','העתק');b.type='button';b.onclick=()=>action(async()=>{try{await navigator.clipboard.writeText(value);message('הועתק');}catch(_){message('סמנו את הטקסט המוצג והעתיקו אותו');}});d.append(b);}}const a=el('a','פתיחת המסך ב־Google');a.href=url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);out.append(d);});
       out.append(el('p','במצב Testing הרשאת החיבור עשויה לפוג לאחר שבוע. לשימוש קבוע יש להסדיר מעבר ל־Production בהתאם לדרישות Google.','hint'));
     }
+    function currentColor(id) { return palette.find(c=>c.id===id)||{name:colors[id]?.[0]||'צבע שהוסר',color:colors[id]?.[1]||'#616161'}; }
     function renderPrefs() {
       if(!prefs)return;
       const list=$('#gcKindList');list.replaceChildren();
-      Object.entries(kinds).forEach(([k,label])=>{const b=el('button',label);b.type='button';b.className=k===selected?'active':'';b.setAttribute('aria-pressed',String(k===selected));const dot=el('span');dot.className='gc-dot';dot.style.background=colors[prefs[k].color][1];b.prepend(dot);b.onclick=()=>{selected=k;renderPrefs();};list.append(b);});
-      const p=prefs[selected];$('#gcEditorTitle').textContent=kinds[selected];$('#gcVisible').checked=p.enabled;$('#gcBusy').checked=p.busy;$('#gcColor').value=p.color;
+      Object.entries(kinds).forEach(([k,label])=>{const b=el('button',label);b.type='button';b.className=k===selected?'active':'';b.setAttribute('aria-pressed',String(k===selected));const dot=el('span');dot.className='gc-dot';dot.style.background=currentColor(prefs[k].color).color;b.prepend(dot);b.onclick=()=>{selected=k;renderPrefs();};list.append(b);});
+      const p=prefs[selected];$('#gcEditorTitle').textContent=kinds[selected];$('#gcVisible').checked=p.enabled;$('#gcBusy').checked=p.busy;$('#gcColorName').textContent='· '+currentColor(p.color).name;
+      $('#gcColor').querySelectorAll('input').forEach(input=>{input.checked=input.value===p.color;});
       const chips=$('#gcReminders');chips.replaceChildren();p.reminders.forEach(m=>{const b=el('button',reminderText(m)+' ×');b.type='button';b.setAttribute('aria-label','הסרת תזכורת '+reminderText(m));b.onclick=()=>{p.reminders=p.reminders.filter(x=>x!==m);renderPrefs();};chips.append(b);});if(!p.reminders.length)chips.append(el('span','ללא תזכורות','hint'));
-      $('#gcPreviewEvent').style.borderInlineStartColor=colors[p.color][1];$('#gcPreviewEvent').style.opacity=p.enabled?'1':'.4';$('#gcPreviewStatus').textContent=kinds[selected]+(p.enabled?'':' · לא מוצג ביומן');
+      $('#gcPreviewEvent').style.borderInlineStartColor=currentColor(p.color).color;$('#gcPreviewEvent').style.opacity=p.enabled?'1':'.4';$('#gcPreviewStatus').textContent=kinds[selected]+(p.enabled?'':' · לא מוצג ביומן');
       const alarms=$('#gcPreviewAlarms');alarms.replaceChildren();p.reminders.forEach(m=>alarms.append(el('span','◷ '+reminderText(m))));
     }
     function renderStatus() {
@@ -87,14 +106,20 @@
       if(status.error)message(status.error,true);
       if(status.uploaded)$('#gcFileInfo').textContent='✓ קובץ החיבור שמור בשרת';
     }
-    async function load() {await action(async()=>{status=await api('/api/calendar/google/status');prefs=structuredClone(status.preferences);guide();renderPrefs();renderStatus();if(!status.available){message('יש להתחבר ל־Arbox ולבחור סטודיו לפני חיבור היומן',true);return;}show(status.connected?3:status.uploaded?2:step);});}
+    async function load() {await action(async()=>{status=await api('/api/calendar/google/status');prefs=structuredClone(status.preferences);palette=paletteOptions(status.palette);
+      Object.values(prefs).forEach(p=>{const match=palette.find(c=>c.color===colors[p.color]?.[1]);if(match)p.color=match.id;});
+      const grid=$('#gcColor');grid.replaceChildren();palette.forEach(c=>{
+        const label=el('label',undefined,'gc-swatch');label.title=c.name;
+        const input=el('input');input.type='radio';input.name='gcEventColor';input.value=c.id;input.setAttribute('aria-label',c.name);
+        const dot=el('span',undefined,'gc-color-dot');dot.style.background=c.color;dot.setAttribute('aria-hidden','true');
+        label.append(input,dot);grid.append(label);
+      });guide();renderPrefs();renderStatus();if(!status.available){message('יש להתחבר ל־Arbox ולבחור סטודיו לפני חיבור היומן',true);return;}show(status.connected?3:status.uploaded?2:step);});}
     async function receive(file){await action(async()=>{uploaded=null;$('#gcUpload').disabled=true;if(!file)return;if(file.size>32768)throw Error('הקובץ גדול מדי. בחרו את קובץ ה־JSON שהורד מ־Google.');let d;try{d=JSON.parse(await file.text());}catch(_){throw Error('הקובץ אינו JSON תקין');}const hostname=new URL(status?.suggested_redirect||window.location.href).hostname;const options=readUpload(d,hostname);uploaded=d;const select=$('#gcRedirect');select.replaceChildren();options.forEach(uri=>{const o=el('option',uri);o.value=uri;select.append(o);});$('#gcRedirectLabel').hidden=options.length===1;$('#gcFileInfo').textContent=`${file.name} · ${d.web.project_id||'פרויקט Google'} · הקובץ תקין`;$('#gcUpload').disabled=false;});}
     host.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>show(Number(b.dataset.step)));
     $('#gcProject').oninput=guide;$('#gcPrepared').onclick=()=>show(2);
     $('#gcFile').onchange=e=>receive(e.target.files[0]);const drop=$('.gc-upload');drop.ondragover=e=>{e.preventDefault();drop.classList.add('dragover');};drop.ondragleave=()=>drop.classList.remove('dragover');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('dragover');receive(e.dataTransfer.files[0]);};
     $('#gcUpload').onclick=()=>action(async()=>{status=await api('/api/calendar/google/credentials',{method:'POST',body:JSON.stringify({credentials:uploaded,redirect_uri:$('#gcRedirect').value})});uploaded=null;$('#gcFile').value='';$('#gcUpload').disabled=true;renderStatus();message('הקובץ נשמר. עכשיו אפשר להתחבר ל־Google.');});
     $('#gcConnect').onclick=()=>action(async()=>{const d=await api('/api/calendar/google/connect',{method:'POST'});const link=$('#gcContinueLink');link.href=d.url;link.hidden=false;message('מעבירים אותך ל־Google. אם הדף לא נפתח, לחצו על הקישור שמתחת לכפתורים.');window.location.assign(d.url);});
-    Object.entries(colors).forEach(([id,[name]])=>{const o=el('option',name);o.value=id;$('#gcColor').append(o);});
     $('#gcVisible').onchange=e=>{prefs[selected].enabled=e.target.checked;renderPrefs();};$('#gcBusy').onchange=e=>{prefs[selected].busy=e.target.checked;renderPrefs();};$('#gcColor').onchange=e=>{prefs[selected].color=e.target.value;renderPrefs();};
     $('#gcAddReminder').onclick=()=>{const n=Number($('#gcMinutes').value),p=prefs[selected];if($('#gcMinutes').value===''||!Number.isInteger(n)||n<0||n>40320)return message('בחרו מספר דקות בין 0 ל־40320',true);if(p.reminders.length>=5)return message('אפשר עד חמש תזכורות',true);p.reminders=[...new Set([...p.reminders,n])].sort((a,b)=>b-a);message('');renderPrefs();};
     async function save(){status=await api('/api/calendar/google/preferences',{method:'POST',body:JSON.stringify(prefs)});renderStatus();}
@@ -105,5 +130,5 @@
     refresh=load;load();
   }
   root.GoogleCalendarUI={mount,refresh:()=>refresh?.(),projectId,readUpload,reminderText};
-  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText};
+  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions};
 })(typeof window!=='undefined'?window:globalThis);

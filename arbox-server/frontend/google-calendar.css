@@ -39,7 +39,16 @@
 .gc-kind-list button{display:flex;align-items:center;gap:6px;font-size:.85rem;padding:9px 10px;min-height:40px}
 .gc-kind-list button.active{outline:2px solid var(--accent);outline-offset:1px}
 .gc-dot{width:9px;height:9px;flex-shrink:0;border-radius:50%}
-.gc-editor select{width:100%}
+.gc-colors{border:0;padding:0;margin:16px 0;min-width:0}
+.gc-colors legend{font-size:.9rem;padding:0;margin-bottom:8px}
+#gcColorName{color:var(--muted);font-weight:400}
+.gc-color-grid{display:grid;grid-template-columns:repeat(auto-fill,44px);gap:2px;max-width:366px}
+.gc-swatch{position:relative;width:44px;height:44px;display:grid!important;place-items:center;cursor:pointer;margin:0!important}
+.gc-panel .gc-swatch input{position:absolute;width:44px;height:44px;margin:0;opacity:0;cursor:pointer}
+.gc-color-dot{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;pointer-events:none}
+.gc-swatch input:checked+.gc-color-dot{outline:2px solid var(--text);outline-offset:3px}
+.gc-swatch input:checked+.gc-color-dot::after{content:'✓';color:#fff;text-shadow:0 1px 3px #000;font-size:18px;font-weight:700}
+.gc-swatch input:focus-visible+.gc-color-dot{outline:3px solid var(--accent);outline-offset:4px}
 .gc-check{display:flex!important;align-items:center;gap:10px;margin:12px 0;min-height:32px}
 .gc-check input{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
 .gc-reminders{display:flex;flex-wrap:wrap;gap:8px}

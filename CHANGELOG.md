@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.5
+
+- Choose reminder amounts in minutes, hours or days in Google Calendar settings,
+  with readable reminder labels and automatic conversion.
+
 ## 1.54.4
 
 - Show the actual Google calendar event palette as accessible color swatches,

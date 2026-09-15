@@ -26,3 +26,16 @@ test('calendar palette preserves label ids, colors and custom names', () => {
   assert.equal(options[1].color,'#009688');
   assert.equal(paletteOptions([]).length,11);
 });
+
+
+test('reminder units convert with bounds and readable day and hour labels',()=>{
+ const {reminderMinutes}=require('../frontend/google-calendar.js');
+ assert.equal(reminderMinutes('4','hours'),240);
+ assert.equal(reminderMinutes('2','days'),2880);
+ assert.equal(reminderMinutes('28','days'),40320);
+ assert.equal(reminderMinutes('0','minutes'),0);
+ for(const [amount,unit] of [['29','days'],['-1','hours'],['','minutes'],['1.5','hours'],['4','unknown']]) assert.equal(reminderMinutes(amount,unit),null);
+ assert.equal(reminderText(240),'4 שעות לפני');
+ assert.equal(reminderText(1440),'יום לפני');
+ assert.equal(reminderText(2880),'2 ימים לפני');
+});

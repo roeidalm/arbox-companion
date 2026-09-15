@@ -38,7 +38,15 @@
     return options;
   }
   function reminderText(minutes) {
-    return minutes === 0 ? 'בזמן האימון' : minutes === 60 ? 'שעה לפני' : minutes % 60 === 0 ? `${minutes / 60} שעות לפני` : `${minutes} דקות לפני`;
+    if (minutes === 0) return 'בזמן האימון';
+    if (minutes % 1440 === 0) return minutes === 1440 ? 'יום לפני' : `${minutes / 1440} ימים לפני`;
+    if (minutes % 60 === 0) return minutes === 60 ? 'שעה לפני' : `${minutes / 60} שעות לפני`;
+    return `${minutes} דקות לפני`;
+  }
+  function reminderMinutes(amount, unit) {
+    const factor = {minutes:1,hours:60,days:1440}[unit], n = Number(amount);
+    if (String(amount).trim() === '' || !factor || !Number.isInteger(n) || n < 0 || n * factor > 40320) return null;
+    return n * factor;
   }
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent=text; if(cls)n.className=cls; return n; };
   let refresh;
@@ -61,7 +69,7 @@
       <fieldset class="gc-colors"><legend>צבע האירוע <span id="gcColorName"></span></legend><div id="gcColor" class="gc-color-grid"></div></fieldset>
       <label class="gc-check"><input type="checkbox" id="gcBusy">סימון הזמן כ״עסוק״</label>
       <h4>תזכורות לפני האימון</h4><div class="gc-reminders" id="gcReminders"></div>
-      <div class="gc-reminder-add"><label for="gcMinutes">דקות לפני</label><input type="number" id="gcMinutes" min="0" max="40320" value="30"><button type="button" id="gcAddReminder">הוסף תזכורת</button></div><p class="hint">עד 5 תזכורות לכל אירוע. ללא תזכורות? הסירו את כולן.</p></div></div>
+      <div class="gc-reminder-add"><label for="gcMinutes">כמה זמן לפני?</label><div class="gc-reminder-fields"><input type="number" id="gcMinutes" min="0" max="40320" step="1" value="30" aria-label="מספר יחידות זמן"><select id="gcReminderUnit" aria-label="יחידת זמן"><option value="minutes">דקות</option><option value="hours">שעות</option><option value="days">ימים</option></select></div><button type="button" id="gcAddReminder">הוסף תזכורת</button></div><p class="hint">עד 5 תזכורות לכל אירוע. ללא תזכורות? הסירו את כולן.</p></div></div>
       <details class="gc-preview"><summary>תצוגה מקדימה · דוגמה</summary><div class="gc-day"><strong>יום רביעי</strong><span>האימונים שלי</span></div><div class="gc-timegrid"><span>08:00</span><article id="gcPreviewEvent"><strong>Movement basics</strong><span>08:00–09:00 · רוני גוזלי</span><b id="gcPreviewStatus"></b><div id="gcPreviewAlarms"></div></article><span>09:00</span></div><p class="hint">כשמצב האימון משתנה, אותו אירוע מתעדכן ביומן.</p></details></div>
       <div class="gc-actions"><button type="button" class="primary" id="gcSave">שמירת העדפות</button><button type="button" class="primary" id="gcEnable" hidden>יצירת יומן והפעלת הסנכרון</button><button type="button" id="gcSync" hidden>סנכרון עכשיו</button><button type="button" id="gcPause" hidden>השהיית הסנכרון</button><button type="button" id="gcDisconnect" hidden>ניתוק Google</button></div>
       <details class="gc-explanation"><summary>איך הסנכרון עובד?</summary><p class="hint">הסנכרון מציג את 30 הימים הקרובים ומתעדכן בכל דקה. ביטול או דילוג מסירים אירוע עתידי. השהיה וניתוק משאירים את האירועים שכבר נוצרו. שינויים בהרשמות עושים ב־Arbox Companion. עריכות ידניות באירועים המנוהלים ב־Google נדרסות בבדיקה תקופתית.</p></details>
@@ -121,7 +129,8 @@
     $('#gcUpload').onclick=()=>action(async()=>{status=await api('/api/calendar/google/credentials',{method:'POST',body:JSON.stringify({credentials:uploaded,redirect_uri:$('#gcRedirect').value})});uploaded=null;$('#gcFile').value='';$('#gcUpload').disabled=true;renderStatus();message('הקובץ נשמר. עכשיו אפשר להתחבר ל־Google.');});
     $('#gcConnect').onclick=()=>action(async()=>{const d=await api('/api/calendar/google/connect',{method:'POST'});const link=$('#gcContinueLink');link.href=d.url;link.hidden=false;message('מעבירים אותך ל־Google. אם הדף לא נפתח, לחצו על הקישור שמתחת לכפתורים.');window.location.assign(d.url);});
     $('#gcVisible').onchange=e=>{prefs[selected].enabled=e.target.checked;renderPrefs();};$('#gcBusy').onchange=e=>{prefs[selected].busy=e.target.checked;renderPrefs();};$('#gcColor').onchange=e=>{prefs[selected].color=e.target.value;renderPrefs();};
-    $('#gcAddReminder').onclick=()=>{const n=Number($('#gcMinutes').value),p=prefs[selected];if($('#gcMinutes').value===''||!Number.isInteger(n)||n<0||n>40320)return message('בחרו מספר דקות בין 0 ל־40320',true);if(p.reminders.length>=5)return message('אפשר עד חמש תזכורות',true);p.reminders=[...new Set([...p.reminders,n])].sort((a,b)=>b-a);message('');renderPrefs();};
+    $('#gcReminderUnit').onchange=()=>{const max={minutes:40320,hours:672,days:28}[$('#gcReminderUnit').value];$('#gcMinutes').max=String(max);};
+    $('#gcAddReminder').onclick=()=>{const n=reminderMinutes($('#gcMinutes').value,$('#gcReminderUnit').value),p=prefs[selected];if(n===null)return message('בחרו מספר שלם ולא שלילי. אפשר להגדיר תזכורת עד 28 ימים לפני האימון.',true);if(p.reminders.includes(n))return message('התזכורת הזאת כבר נוספה');if(p.reminders.length>=5)return message('אפשר עד חמש תזכורות',true);p.reminders=[...p.reminders,n].sort((a,b)=>b-a);message('');renderPrefs();};
     async function save(){status=await api('/api/calendar/google/preferences',{method:'POST',body:JSON.stringify(prefs)});renderStatus();}
     $('#gcSave').onclick=()=>action(async()=>{await save();message('ההעדפות נשמרו. אירועים עתידיים יתעדכנו בסנכרון הבא.');});
     $('#gcEnable').onclick=()=>action(async()=>{await save();status=await api('/api/calendar/google/enable',{method:'POST'});renderStatus();message(status.error||'הסנכרון פעיל. אפשר לפתוח את Google Calendar ולראות את האימונים.',!!status.error);});
@@ -130,5 +139,5 @@
     refresh=load;load();
   }
   root.GoogleCalendarUI={mount,refresh:()=>refresh?.(),projectId,readUpload,reminderText};
-  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions};
+  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions,reminderMinutes};
 })(typeof window!=='undefined'?window:globalThis);

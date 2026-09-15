@@ -54,7 +54,9 @@
 .gc-reminders{display:flex;flex-wrap:wrap;gap:8px}
 .gc-reminders button{border-radius:20px;font-size:.85rem;min-height:40px}
 .gc-reminder-add{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
-.gc-reminder-add input{width:80px}
+.gc-reminder-fields{display:flex;gap:8px;min-width:0}
+.gc-reminder-add input{width:80px;min-height:44px}
+.gc-reminder-add select{width:100px;min-height:44px}
 .gc-preview{border-top:1px solid var(--line);padding-top:12px}
 .gc-explanation summary,.gc-preview summary{color:var(--muted);font-size:.85rem;cursor:pointer;min-height:32px}
 .gc-day{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);gap:12px}
@@ -79,5 +81,7 @@
  .gc-panel input,.gc-panel select{font-size:16px}
  .gc-actions button{flex:1;min-width:120px}
  .gc-reminder-add label{flex-basis:100%;font-size:.85rem}
- .gc-reminder-add button{flex:1;min-height:44px}
+ .gc-reminder-fields{flex:1}
+ .gc-reminder-add select{flex:1}
+ .gc-reminder-add button{flex-basis:100%;min-height:44px}
 }

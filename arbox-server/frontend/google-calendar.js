@@ -76,7 +76,7 @@
       <section data-gc-step="1"><h3>נכין את החיבור ל־Google</h3><p>הגדרה חד־פעמית בחשבון Google שלכם, עבור השרת שלכם. הקובץ וההרשאות נשמרים אצלכם. נדריך אתכם שלב־שלב; את האישור בחשבון Google מבצעים בעצמכם.</p>
       <label for="gcProject">קישור לפרויקט Google או Project ID</label><input id="gcProject" dir="ltr" placeholder="הדביקו קישור מהדפדפן של Google Cloud">
       <p id="gcProjectHint" class="hint" role="status"></p><p id="gcGuideProgress" class="hint"></p><div id="gcGuide"></div><button type="button" class="primary" id="gcPrepared">כבר יש לי קובץ JSON — להעלאה</button></section>
-      <section data-gc-step="2" hidden><h3>מעלים את הקובץ ש־Google נתן לך</h3><p>אין צורך לפתוח אותו או להעתיק מתוכו פרטים. הקובץ נשמר בשרת שלך בלבד.</p>
+      <section data-gc-step="2" hidden><h3>מעלים את הקובץ ש־Google נתן לך</h3><p>אין צורך לפתוח אותו או להעתיק מתוכו פרטים. הקובץ נשמר בשרת שלך בלבד. <a href="/static/google-privacy.html" target="_blank" rel="noopener noreferrer">מידע על פרטיות החיבור</a></p>
       <label class="gc-upload" for="gcFile"><strong>בחירת קובץ JSON</strong><span>אפשר גם לגרור את הקובץ לכאן</span><input id="gcFile" type="file" accept=".json,application/json"></label>
       <p id="gcFileInfo" role="status"></p><label id="gcRedirectLabel" hidden>כתובת החזרה מתוך הקובץ<select id="gcRedirect" dir="ltr"></select></label>
       <div class="gc-actions"><button type="button" class="primary" id="gcUpload" disabled>שמירת הקובץ</button><button type="button" id="gcConnect" hidden>חיבור ל־Google</button></div>
@@ -120,7 +120,8 @@
         if(item.blocked)d.append(el('p',!id&&i>0?'הדביקו למעלה את קישור הפרויקט כדי להמשיך.':'נדרשת כתובת HTTPS לשרת. הגדירו אותה בהגדרות → מתקדם. כתובת HTTP פנימית אינה מתאימה לחזרה מ־Google.','gc-error'));
         if(item.key==='production'){
           const help=el('details',undefined,'gc-setup-help');help.append(el('summary','Publish app חסום, או רוצים לבדוק קודם?'));
-          help.append(el('p','אם Google מפנה ל־Branding, פתחו אותו והשלימו את הפרטים ש־Google דורשת. השתמשו רק בקישורים אמיתיים ששייכים להתקנה שלכם. אל תמציאו כתובות מדיניות ואל תגישו בקשת אימות רק כדי לנסות להסיר את מגבלת השבוע.'));
+          help.append(el('p','אם Google מפנה ל־Branding, בדקו שם אפליקציה, מייל תמיכה, כתובת בית וקישור פרטיות. בהתקנה רגילה אפשר להשתמש בדף המידע שלהלן, אחרי שבדקתם שהוא מתאר נכון את ההתקנה שלכם. אין צורך להגיש בקשת אימות רק כדי לנסות להסיר את מגבלת השבוע.'));
+          try {const privacy=new URL('/static/google-privacy.html',suggested).href;const link=el('a','פתיחת דף הפרטיות של ההתקנה');link.href=privacy;link.target='_blank';link.rel='noopener noreferrer';help.append(link);const value=el('code',privacy);value.dir='ltr';help.append(value);}catch(_){}
           const branding=el('a','פתיחת Branding בפרויקט שלכם');branding.href='https://console.cloud.google.com/auth/branding'+(id?'?project='+encodeURIComponent(id):'');branding.target='_blank';branding.rel='noopener noreferrer';help.append(branding);
           help.append(el('p','אפשר להתחיל ניסיון: ב־Audience → Test users הוסיפו את חשבון היומן, ואז המשיכו להעלאת הקובץ. במצב Testing החיבור פג אחרי 7 ימים; האירועים נשארים, אבל נדרש חיבור מחדש כדי להמשיך לסנכרן.'));
           help.append(el('p','Production אינו הופך את היומן לציבורי, אך מבטל את רשימת משתמשי הבדיקה. הגבילו את הגישה לשרת שלכם. שימוש אישי עשוי להיות פטור מאימות; פעלו לפי הדרישות שמוצגות בפרויקט.'));

@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.13
+
+- Add a local Google Calendar privacy information page and link it from setup,
+  including accurate retention and disconnect behavior. Clarify the required
+  Branding fields shown by Google without changing reverse-proxy access rules.
+
 ## 1.54.12
 
 - Simplify personal Google setup into six compact steps with project-aware links,

@@ -56,3 +56,17 @@ shows a reconnect message. Calendar creation is a separate explicit UI action.
 References: [Google OAuth web flow](https://developers.google.com/identity/protocols/oauth2/web-server),
 [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth),
 [Event insertion](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert).
+
+### Internal and external addresses
+
+Keep `base_url` as the internal browser address and optionally configure
+`external_url` for links opened from notifications. HA's configured API endpoint
+is independent. Both configured hostnames are allowed by the server.
+
+To move an existing Google connection, add the new HTTPS callback to the same
+Google OAuth client first. In Calendar settings, update the callback and reconnect
+to verify it. This preserves the managed calendar and event IDs. Do not disconnect
+or upload a different OAuth client just to change the server address. Reverse
+proxies must preserve the original Host header. Cloudflare Access must allow the
+signed-in browser through the start and callback routes; background Google sync
+uses outbound API calls and does not need a public authentication bypass.

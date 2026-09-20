@@ -159,6 +159,7 @@ async def lifespan(app: FastAPI):
         CronTrigger(hour=settings.digest_hour, minute=2),
         id="vacation_announce",
     )
+    scheduler.add_job(rules_engine.refresh_pending_evidence, IntervalTrigger(minutes=5))
     scheduler.add_job(rules_engine.autobook_tick, IntervalTrigger(minutes=5))
     # pinned classes: same 5-min safety net, plus exact-moment jobs below
     scheduler.add_job(rules_engine.watchlist_tick, IntervalTrigger(minutes=5))
@@ -220,11 +221,11 @@ async def _host_guard(request, call_next):
     fresh install, and an allowlist built from it would lock the user out of
     their own setup page before they could fill it in.
     """
-    configured = request.app.state.settings.base_url
-    if configured:
+    configured = [request.app.state.settings.base_url, request.app.state.settings.external_url]
+    if any(configured):
         from urllib.parse import urlsplit
 
-        want = (urlsplit(configured).hostname or "").lower()
+        want = {(urlsplit(url).hostname or "").lower() for url in configured if url}
         host = (request.headers.get("host") or "").split(":")[0].lower()
         # Rebinding needs a name an attacker can put in public DNS, which
         # means a registrable domain — so anything with a dot is checked, and
@@ -235,7 +236,7 @@ async def _host_guard(request, call_next):
         #     exactly such a name over the shared Docker network, so rejecting
         #     those would break the integration to stop an attack they cannot
         #     carry.
-        allowed = {want, "localhost", ""}
+        allowed = want | {"localhost", ""}
         if host not in allowed and "." in host and not _is_ip(host):
             _LOGGER.warning("Rejected request for Host %r (expected %r)",
                             host, want)

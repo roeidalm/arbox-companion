@@ -3,6 +3,16 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.9
+
+- Preserve membership history after confirmed bookings and immediately reconcile
+  balances. Retry pending verification and notify persistent or urgent failures
+  without treating a temporary sync gap as a membership eligibility problem.
+- Configure separate internal and external server addresses. Notification links
+  prefer the external address while Home Assistant keeps its internal API URL.
+- Migrate the Google OAuth callback without replacing the existing calendar,
+  events, or credentials, and provide a reconnect action to verify the new URL.
+
 ## 1.54.8
 
 - Home Assistant integration 3.5.1 removes the one-tap Cancel next class button

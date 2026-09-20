@@ -211,7 +211,8 @@ def fmt_class(s: dict) -> str:
 def planning_notice(problems: list[tuple[dict, dict, dict]]) -> tuple[str, list[str]]:
     """A short notice; show a quota fraction only for one matching monthly plan."""
     capacity = all(state.get('state') == 'no_capacity' for _, state, _ in problems)
-    heading = '🎟️ אין יתרה במנוי לאימונים האלה' if capacity else '⏸️ אימונים דורשים בדיקה'
+    syncing = all(state.get('state') == 'sync_pending' for _, state, _ in problems)
+    heading = '⏳ אימות המכסה מול Arbox מתעכב' if syncing else '🎟️ אין יתרה במנוי לאימונים האלה' if capacity else '⏸️ אימונים דורשים בדיקה'
     breakdown = ''
     matches = {}
     if capacity and len({s['date'][:7] for s, _, _ in problems}) == 1:
@@ -232,7 +233,7 @@ def planning_notice(problems: list[tuple[dict, dict, dict]]) -> tuple[str, list[
                 if m.get('uncertain'): breakdown += f" · {m['uncertain']} בבירור"
     count = len(problems)
     subject = 'אימון אחד נשאר' if count == 1 else 'שני אימונים נשארו' if count == 2 else f'{count} אימונים נשארו'
-    introduction = subject + ' ללא כיסוי:' if capacity else 'נדרשת בדיקה לפני ההרשמה:'
+    introduction = 'ההרשמה מושהית עד להשלמת האימות. המערכת תנסה שוב:' if syncing else subject + ' ללא כיסוי:' if capacity else 'נדרשת בדיקה לפני ההרשמה:'
     lines = [heading] + ([breakdown] if breakdown else []) + ['', introduction]
     bold = [heading, introduction]
     for session, state, _ in problems:
@@ -603,8 +604,9 @@ class RulesEngine:
         for detail in details:
             history = await self.store.get_meta(self.membership_policy.key(detail["id"]) + ":history") or {}
             if not history.get("ok") or time.time() - history.get("checked_at", 0) > 86400:
-                detail["policy"] = {**detail["policy"], "state": "needs_review",
-                                    "reason": "היסטוריית המנוי טרם אומתה — נדרש סנכרון"}
+                detail["policy"] = {**detail["policy"], "state": "sync_pending",
+                                    "reason": "ממתין לאימות המכסה מול Arbox",
+                                    "pending_since": history.get("pending_since", history.get("checked_at", 0))}
         commitments = await self._quota_commitments(members)
         uncertain = await self.store.get_meta(self.membership_policy.key(0) + ":uncertain") or {}
         planned_ids = {p['schedule_id'] for p in plans}
@@ -632,7 +634,8 @@ class RulesEngine:
                         {'schedule_id': r['id'], 'date': r['date'], 'membership_user_id': member['id'],
                          'commitment':'used'} for r in groups['lateCancellation']]
                 except (ArboxError, ValueError) as err:
-                    evidence.update(ok=False, error=str(err))
+                    evidence.update(ok=False, error=str(err),
+                                    pending_since=previous.get("pending_since") or time.time())
                 await self.store.set_meta(key, evidence)
             # A positive upstream result resolves an interrupted write. Absence
             # is not proof of rejection and never automatically permits a retry.
@@ -643,6 +646,20 @@ class RulesEngine:
                 if session.get("user_booked") is not None or session.get("user_in_standby") is not None:
                     pending.pop(sid)
             await self.store.set_meta(key, pending)
+
+    async def refresh_pending_evidence(self) -> None:
+        """Retry pending reads without submitting any bookings."""
+        async with self._membership_lock:
+            members = await self.store.get_meta("memberships") or []
+            pending = [m for m in members if
+                       (await self.store.get_meta(self.membership_policy.key(m['id']) + ':history') or {}).get('pending_since')]
+            if pending:
+                try:
+                    await self.syncer.refresh_membership()
+                    await self.refresh_planning_evidence()
+                except Exception as err:
+                    _LOGGER.warning("Pending evidence refresh failed: %s", err)
+                await self.reconcile_planned_quota()
 
     async def review_plans(self) -> None:
         async with self._membership_lock:
@@ -771,6 +788,7 @@ class RulesEngine:
                 await self.store.mark_autobook(session["schedule_id"], "booked")
                 pending.pop(str(session["schedule_id"]), None)
                 await self.store.set_meta(pending_key, pending)
+                await self._refresh_after_confirmed_booking(member["id"])
                 await self.notifier.send(f"🎯 האימון המתוכנן הוזמן כבר בבדיקה המוקדמת: {fmt_class(session)}", kind="autobook")
                 return  # refresh balances before any further probe
 
@@ -792,6 +810,19 @@ class RulesEngine:
                 if state.get("state") not in (None, "ready", "session_changed"):
                     current[sid] = state.get("state")
                     held.setdefault(sid, plan['date'])
+                    if current[sid] == "sync_pending":
+                        import time
+                        since = [m.get('policy', {}).get('pending_since', 0)
+                                 for m in status.get('memberships', [])
+                                 if m.get('policy', {}).get('state') == 'sync_pending']
+                        opens = plan.get('registration_opens')
+                        try:
+                            urgent = bool(opens and datetime.fromisoformat(opens) <= datetime.now() + timedelta(minutes=15))
+                        except ValueError:
+                            urgent = False
+                        if since and time.time() - min(since) < 900 and not urgent:
+                            current.pop(sid)
+                            continue
                     if previous.get(sid) != current[sid]:
                         problems.append((plan, state, status))
         # Save before sending: an uncertain delivery must not become a flood.
@@ -874,9 +905,23 @@ class RulesEngine:
             await self.store.record_booking_success(sid, action, "membership", mid)
             pending.pop(str(sid), None)
             await self.store.set_meta(key, pending)
-            await self.store.set_meta(self.membership_policy.key(mid) + ":history", None)
+            await self._refresh_after_confirmed_booking(mid)
             await self.store.set_meta("quota_cache", None)
             return updated, mid
+
+    async def _refresh_after_confirmed_booking(self, mid: int) -> None:
+        history_key = self.membership_policy.key(mid) + ":history"
+        history = await self.store.get_meta(history_key) or {}
+        import time
+        await self.store.set_meta(history_key, {**history, "ok": False,
+            "pending_since": time.time(), "checked_at": 0})
+        # Keep the confirmed receipt and prior charges while reconciling.
+        # Failure must never turn a successful booking into a failed write.
+        try:
+            await self.syncer.refresh_membership()
+            await self.refresh_planning_evidence(force_history=True)
+        except Exception as err:
+            _LOGGER.warning("Evidence refresh after confirmed booking failed: %s", err)
 
     async def _refresh_memberships_quietly(self) -> None:
         try:
@@ -1776,7 +1821,7 @@ class RulesEngine:
         except Exception as err:  # noqa: BLE001 — never break a booking
             _LOGGER.error("Calendar file build failed for %s: %s", schedule_id, err)
             return
-        base = self.settings.base_url
+        base = self.settings.browser_url
         gcal = google_calendar_url(session, location=location)
         # The caption names the class rather than explaining the file: by the
         # time this arrives you already know you booked something, and what
@@ -1878,9 +1923,9 @@ class RulesEngine:
             text = (f"⏳ עוד {left} לביטול חופשי: {fmt_class(s)}\n"
                     f"אחרי {deadline:%H:%M} ביטול ייספר ככניסה מהמכסה.")
             buttons = None
-            if self.settings.base_url:
+            if self.settings.browser_url:
                 buttons = [[{"text": "📋 לצפייה בפרטים",
-                             "uri": f"{self.settings.base_url}/mine"}]]
+                             "uri": f"{self.settings.browser_url}/mine"}]]
             delivered = await self.notifier.send(
                 text, buttons=buttons, kind="latecancel")
             if not delivered:
@@ -2037,7 +2082,7 @@ class RulesEngine:
             else:
                 lines.append("מחר האוטומציה חוזרת לפעול: הודעה לילית, "
                              "תזמונים והזמנות אוטומטיות כרגיל.")
-            base = self.settings.base_url
+            base = self.settings.browser_url
             lines.append(f"להוספה או עריכה של חופשות: {base}/automations"
                          if base else
                          "להוספה או עריכה של חופשות — פתח/י את האפליקציה.")

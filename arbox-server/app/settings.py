@@ -19,6 +19,7 @@ DEFAULTS: dict = {
     # externally reachable address, used to build calendar links the
     # phone can open from an HA notification. Empty = no link action.
     "base_url": "",
+    "external_url": "",
     # Every time the app reasons about — a registration window opening, the
     # digest hour, an event timestamp — is the studio's wall clock. Pinning it
     # here rather than trusting the container's TZ makes it one thing the user
@@ -207,6 +208,14 @@ class Settings:
     @property
     def base_url(self) -> str:
         return self._data.get("base_url", "")
+
+    @property
+    def external_url(self) -> str:
+        return self._data.get("external_url", "")
+
+    @property
+    def browser_url(self) -> str:
+        return self.external_url or self.base_url
 
     @property
     def calendar_alarms(self) -> list[int]:
@@ -537,7 +546,8 @@ class Settings:
                 "journal": self.journal,
                 "exercise_packs": self.exercise_packs(),
                 "calendar_alarms": self.calendar_alarms,
-                "base_url": self._data.get("base_url", "")}
+                "base_url": self._data.get("base_url", ""),
+                "external_url": self.external_url}
 
     def update(self, patch: dict) -> None:
         """Apply a settings patch from the UI. '***' means keep the stored secret."""
@@ -621,8 +631,16 @@ class Settings:
                 int(m) for m in (patch["calendar_alarms"] or [])
             ]
             self._data.pop("calendar_alarm_minutes", None)  # legacy key
-        if "base_url" in patch:
-            self._data["base_url"] = str(patch["base_url"]).rstrip("/")
+        for field in ("base_url", "external_url"):
+            if field in patch:
+                from urllib.parse import urlsplit
+                value = str(patch[field]).strip().rstrip("/")
+                parsed = urlsplit(value)
+                if value and (parsed.scheme not in ("http", "https") or not parsed.hostname
+                              or parsed.username or parsed.password or parsed.path
+                              or parsed.query or parsed.fragment):
+                    raise ValueError("כתובת השרת חייבת להיות כתובת HTTP או HTTPS ללא נתיב")
+                self._data[field] = value
         if "exercise_packs" in patch:
             active = getattr(self, "_active_studio_id", None)
             if active:

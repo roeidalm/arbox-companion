@@ -70,7 +70,7 @@ class FeedbackForm:
 
     async def create(self, session: dict, level: str, *, demo=False, channel=None):
         in_ha = channel == "ha" and self.settings.ha.get("feedback_in_ha") is True
-        base = self.settings.base_url.rstrip("/")
+        base = self.settings.browser_url.rstrip("/")
         parsed = urlsplit(base)
         if not in_ha and (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.fragment or parsed.query):
             raise ValueError("יש להגדיר בהגדרות כתובת שרת שנגישה מהטלפון לפני שליחת משוב")

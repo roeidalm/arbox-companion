@@ -457,6 +457,7 @@ async def test_late_cancel_warning_retries_until_delivery(monkeypatch):
             self.settings = SimpleNamespace(
                 late_cancel_warning_minutes=60,
                 base_url="http://arbox.example",
+                browser_url="http://arbox.example",
             )
             self.on_callback = None
             self.results = [False, True]
@@ -545,6 +546,7 @@ class DigestNotifier:
         self.settings = SimpleNamespace(
             is_blocked=lambda category: False,
             base_url="http://arbox.example",
+                browser_url="http://arbox.example",
         )
         self.on_callback = None
         self.results = list(results or [True])

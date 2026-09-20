@@ -5,6 +5,7 @@ from .membership_policy import eligible, period_bounds
 
 
 REASONS = {
+    "sync_pending": "לא ניתן לאמת את המכסה מול Arbox — ממתין לסנכרון, ההרשמה מושהית",
     "needs_review": "דורש השלמה — ההרשמה האוטומטית מושהית",
     "no_membership": "אין מנוי מאומת שמתאים לאימון בתאריך הזה",
     "no_capacity": "המכסה של המנוי המתאים מלאה — ההרשמה מושהית",
@@ -124,7 +125,7 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
                 and not m.get('policy', {}).get('contradiction')
                 and plan.get('category_id') not in m.get('policy', {}).get('denied_category_ids', [])
                 and remaining(m, plan) > 0 for m in possible)
-            reason = reason or ("needs_review" if unverified_capacity else "no_capacity" if allowed else "needs_review" if any(
+            reason = reason or ("sync_pending" if any(m.get("policy", {}).get("state") == "sync_pending" for m in possible) else "needs_review" if unverified_capacity else "no_capacity" if allowed else "needs_review" if any(
                 m.get("policy", {}).get("state") != "ready" or
                 m.get("policy", {}).get("unmatched") for m in possible) else "no_membership")
             states[str(sid)] = {"state": reason, "reason": REASONS[reason],
@@ -157,7 +158,7 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
                         "available_after_planned": max(0, available - counts["planned"]) if available is not None else None})
     displayed = [p for p in unique.values() if p["date"][:7] == month]
     unresolved = [p["schedule_id"] for p in displayed if states[str(p["schedule_id"])]["state"] in
-                  ("needs_review", "unattributed", "uncertain", "session_changed")]
+                  ("needs_review", "sync_pending", "unattributed", "uncertain", "session_changed")]
     uncovered = [p["schedule_id"] for p in displayed if states[str(p["schedule_id"])]["state"] in
                  ("no_capacity", "no_membership")]
     actual = [r for r in commitments if r["date"][:7] == month]

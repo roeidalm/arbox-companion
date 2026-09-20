@@ -144,7 +144,7 @@ class GoogleCalendar:
         return {'available': True, 'uploaded': bool(p.get('credentials')), 'connected': bool(p.get('refresh_token')),
                 'enabled': p['enabled'], 'preferences': p['preferences'], 'palette': p.get('palette', []),
                 'project_id': p.get('credentials', {}).get('project_id'),
-                'suggested_redirect': os.environ.get('GOOGLE_CALENDAR_REDIRECT_URI') or (self.engine.settings.base_url.rstrip('/') + CALLBACK if self.engine.settings.base_url.startswith('https://') else ''),
+                'suggested_redirect': os.environ.get('GOOGLE_CALENDAR_REDIRECT_URI') or (getattr(self.engine.settings, "browser_url", self.engine.settings.base_url).rstrip('/') + CALLBACK if getattr(self.engine.settings, "browser_url", self.engine.settings.base_url).startswith('https://') else ''),
                 'redirect_uri': p.get('credentials', {}).get('redirect_uri'),
                 'email': p.get('email'), 'calendar_id': p.get('calendar_id'),
                 'last_sync': p.get('last_sync'), 'error': p.get('error'),
@@ -159,7 +159,7 @@ class GoogleCalendar:
         return {'state': state, 'connected': bool(status.get('connected')),
                 'enabled': bool(status.get('enabled')), 'last_sync': status.get('last_sync'),
                 'error': status.get('error'), 'event_count': status.get('event_count', 0),
-                'settings_url': self.engine.settings.base_url.rstrip('/') + '/settings?settings=calendar'}
+                'settings_url': getattr(self.engine.settings, "browser_url", self.engine.settings.base_url).rstrip('/') + '/settings?settings=calendar'}
 
     async def request(self, method, url, **kwargs):
         if self.http is None:

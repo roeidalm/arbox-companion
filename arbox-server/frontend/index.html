@@ -635,14 +635,14 @@
         </div>
 
         <div class="card">
-          <h2>כתובת השרת</h2>
-          <label>כפי שהטלפון רואה אותה
+          <h2>כתובות השרת</h2>
+          <label>כתובת פנימית
             <input id="baseUrl" placeholder="http://your-host:8177">
           </label>
-          <p class="hint" id="baseUrlHint">משמשת רק כדי לבנות קישורים שההתראות
-             של Home Assistant פותחות — קובץ יומן, או מעבר ל״שלי״.
-             <strong>שום דבר לא נכתב ליומן כלשהו</strong>: הקובץ נפתח אצלך
-             והמכשיר שואל לאיזה יומן להוסיף. בטלגרם לא נדרש כלל.</p>
+          <label>כתובת חיצונית · אופציונלי
+            <input id="externalUrl" dir="ltr" placeholder="https://arbox.example.com">
+          </label>
+          <p class="hint" id="baseUrlHint">קישורים בהתראות ייפתחו בכתובת החיצונית, אם הוגדרה. חיבור Home Assistant לשרת נשאר בכתובת שהוגדרה באינטגרציה. שינוי כתובת החזרה של Google נעשה בלשונית לוח שנה.</p>
         </div>
 
         <div class="card wide">

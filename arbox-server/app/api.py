@@ -1530,7 +1530,10 @@ async def update_settings(request: Request,
                          and m.get("active")), None)
         if not selected:
             raise HTTPException(422, "preferred membership is not active")
-    s.settings.update(patch)
+    try:
+        s.settings.update(patch)
+    except ValueError as err:
+        raise HTTPException(422, str(err))
     if patch.get("preferred_membership_id"):
         s.syncer.membership_user_id = wanted
         await s.store.set_meta("membership", selected)

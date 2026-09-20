@@ -3387,6 +3387,7 @@ async function loadSettings() {
   // useless in a notification opened on a phone.
   const guess = /^(localhost|127\.|\[?::1)/.test(location.hostname) ? "" : location.origin;
   $("#baseUrl").value = s.base_url || guess;
+  $("#externalUrl").value = s.external_url || "";
   if (!s.base_url && guess) {
     $("#baseUrl").dataset.autofilled = "1";
     $("#baseUrlHint").textContent = "מולא אוטומטית מהכתובת שדרכה נכנסת. שמור/י כדי לאשר.";
@@ -3469,6 +3470,7 @@ async function saveSettings() {
         journal: { level: $("#journalLevel").value, delay_minutes: 30 },
         exercise_packs: state.exercisePacks,
         base_url: $("#baseUrl").value.trim(),
+        external_url: $("#externalUrl").value.trim(),
         telegram: {
           log_level: $("#tgLogLevel").value,
           enabled: $("#tgEnabled").checked,

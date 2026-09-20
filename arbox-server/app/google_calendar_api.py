@@ -61,7 +61,7 @@ async def upload(request: Request):
     g = protected(request)
     data = await limited_json(request)
     try:
-        host = urlsplit(g.engine.settings.base_url).hostname or request.url.hostname
+        host = urlsplit(g.engine.settings.browser_url).hostname or request.url.hostname
         credentials = validate_credentials(data.get('credentials'), data.get('redirect_uri', ''), host)
         async with g.engine.syncer.exclusive(), g.lock:
             p = g.profile()
@@ -76,6 +76,24 @@ async def upload(request: Request):
             return g.status()
     except (ValueError, AttributeError) as err:
         raise HTTPException(422, str(err))
+
+
+@router.post('/redirect')
+async def change_redirect(request: Request):
+    """Migrate the callback without discarding tokens or managed calendar IDs."""
+    g = protected(request)
+    data = await limited_json(request)
+    redirect = data.get('redirect_uri')
+    expected = g.engine.settings.browser_url.rstrip('/') + CALLBACK
+    if redirect != expected or not expected.startswith('https://'):
+        raise HTTPException(422, 'יש להשתמש בכתובת HTTPS המוגדרת בהגדרות השרת')
+    async with g.engine.syncer.exclusive(), g.lock:
+        p = g.profile()
+        if not p.get('credentials'):
+            raise HTTPException(409, 'יש להעלות קובץ חיבור תחילה')
+        p['credentials']['redirect_uri'] = redirect
+        g.save()
+        return g.status()
 
 
 @router.post('/preferences')
@@ -99,7 +117,7 @@ async def connect(request: Request):
             # Preserve the browser's origin (including local hostname aliases),
             # otherwise its localStorage API key disappears after OAuth. Only
             # accept an Origin matching the Host already validated by middleware.
-            origin = g.engine.settings.base_url or str(request.base_url).rstrip('/')
+            origin = g.engine.settings.browser_url or str(request.base_url).rstrip('/')
             browser_origin = request.headers.get('origin', '')
             parsed = urlsplit(browser_origin)
             if (parsed.scheme in ('http', 'https') and parsed.netloc.lower() == request.url.netloc.lower()

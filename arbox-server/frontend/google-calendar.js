@@ -78,6 +78,7 @@
       <details class="gc-preview"><summary>תצוגה מקדימה · דוגמה</summary><div class="gc-day"><strong>יום רביעי</strong><span>האימונים שלי</span></div><div class="gc-timegrid"><span>08:00</span><article id="gcPreviewEvent"><strong>Movement basics</strong><span>08:00–09:00 · רוני גוזלי</span><b id="gcPreviewStatus"></b><div id="gcPreviewAlarms"></div></article><span>09:00</span></div><p class="hint">כשמצב האימון משתנה, אותו אירוע מתעדכן ביומן.</p></details></div>
       <p id="gcUnsaved" class="hint" hidden>יש שינויים שטרם נשמרו</p><div class="gc-actions"><button type="button" class="primary" id="gcSave">שמירת העדפות</button><button type="button" class="primary" id="gcEnable" hidden>יצירת יומן והפעלת הסנכרון</button><button type="button" id="gcSync" hidden>שמירה וסנכרון עכשיו</button><button type="button" id="gcPause" hidden>השהיית הסנכרון</button><button type="button" id="gcDisconnect" hidden>ניתוק Google</button></div><div id="gcFeedback"></div>
       <details class="gc-explanation"><summary>איך הסנכרון עובד?</summary><p class="hint">הסנכרון מציג את 30 הימים הקרובים ומתעדכן בכל דקה. ביטול או דילוג מסירים אירוע עתידי. השהיה וניתוק משאירים את האירועים שכבר נוצרו. שינויים בהרשמות עושים ב־Arbox Companion. עריכות ידניות באירועים המנוהלים ב־Google נדרסות בבדיקה תקופתית.</p></details>
+      <details class="gc-explanation"><summary>כתובת החזרה של Google</summary><p id="gcCallback" class="hint" dir="ltr"></p><div id="gcMigration" hidden><p class="hint">לאחר שהוספתם את הכתובת החדשה ל־Authorized redirect URIs ב־Google, ניתן לעדכן כאן. היומן והאירועים הקיימים נשמרים.</p><p id="gcNewCallback" dir="ltr"></p><button id="gcMigrate" type="button">הכתובת נוספה בגוגל — עדכון החיבור</button></div><button id="gcReconnect" type="button">אימות החיבור מחדש עם Google</button></details>
       <div id="gcRecovery" hidden><p>אם היומן כבר נוצר ב־Google, אפשר לחבר אותו בלי ליצור עותק נוסף. בהגדרות היומן ב־Google, תחת ״שילוב היומן״, העתיקו את מזהה היומן.</p><input id="gcRecoverId" aria-label="מזהה היומן שנוצר" dir="ltr"><button id="gcRecover" type="button">חיבור ליומן שנוצר</button></div></section></div></details>`;
     const $ = s => host.querySelector(s);
     function message(text, error=false) { const n=$('#gcMessage');n.hidden=!text;n.textContent=text;n.className=error?'gc-error':'gc-success'; }
@@ -85,7 +86,7 @@
     async function action(fn, progress='') { if(busy)return;busy=true;host.setAttribute('aria-busy','true');message(progress);try{await fn();}catch(e){message(e.message,true);}finally{busy=false;host.removeAttribute('aria-busy');} }
     function guide() {
       const id=projectId($('#gcProject').value), q=id?'?project='+encodeURIComponent(id):'';
-      const suggested=status?.redirect_uri||status?.suggested_redirect||'';
+      const suggested=status?.suggested_redirect||status?.redirect_uri||'';
       const steps=[
         ['יצירת פרויקט','https://console.cloud.google.com/projectcreate','שם הפרויקט: Arbox Calendar. לאחר היצירה הדביקו למעלה את הקישור מלוח הבקרה.'],
         ['הפעלת Calendar API','https://console.cloud.google.com/apis/library/calendar-json.googleapis.com'+q,'לחצו Enable. אם מופיע Manage, ה־API כבר פעיל.'],
@@ -112,6 +113,10 @@
     }
     function renderStatus() {
       if(status.connected&&!status.enabled||status.error)$('#gcDisclosure').open=true;
+      $('#gcCallback').textContent=status.redirect_uri||'';
+      $('#gcNewCallback').textContent=status.suggested_redirect||'';
+      $('#gcMigration').hidden=!status.uploaded||!status.suggested_redirect||status.suggested_redirect===status.redirect_uri;
+      $('#gcReconnect').hidden=!status.uploaded;
       $('#gcBadge').textContent=status.enabled?'סנכרון פעיל':status.connected?'Google מחובר':status.uploaded?'הקובץ מוכן':'הגדרת חיבור';
       $('#gcConnect').hidden=!status.uploaded;$('#gcConnectionTitle').textContent='צבעים ותזכורות';
       $('#gcConnectionInfo').textContent=status.connected?`${status.email||'חשבון Google מחובר'}${status.last_sync?' · עודכן '+new Date(status.last_sync).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}):''}`:'בחרו צבע ותזכורות לכל מצב. ניתן לשנות הכול גם בהמשך.';
@@ -135,6 +140,8 @@
     $('#gcFile').onchange=e=>receive(e.target.files[0]);const drop=$('.gc-upload');drop.ondragover=e=>{e.preventDefault();drop.classList.add('dragover');};drop.ondragleave=()=>drop.classList.remove('dragover');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('dragover');receive(e.dataTransfer.files[0]);};
     $('#gcUpload').onclick=()=>action(async()=>{status=await api('/api/calendar/google/credentials',{method:'POST',body:JSON.stringify({credentials:uploaded,redirect_uri:$('#gcRedirect').value})});uploaded=null;$('#gcFile').value='';$('#gcUpload').disabled=true;renderStatus();message('הקובץ נשמר. עכשיו אפשר להתחבר ל־Google.');});
     $('#gcConnect').onclick=()=>action(async()=>{const d=await api('/api/calendar/google/connect',{method:'POST'});const link=$('#gcContinueLink');link.href=d.url;link.hidden=false;message('מעבירים אותך ל־Google. אם הדף לא נפתח, לחצו על הקישור שמתחת לכפתורים.');window.location.assign(d.url);});
+    $('#gcReconnect').onclick=()=>$('#gcConnect').onclick();
+    $('#gcMigrate').onclick=()=>action(async()=>{status=await api('/api/calendar/google/redirect',{method:'POST',body:JSON.stringify({redirect_uri:status.suggested_redirect})});renderStatus();guide();message('כתובת החזרה עודכנה. היומן הקיים נשמר. אפשר לאמת את החיבור מחדש.');});
     $('#gcVisible').onchange=e=>{prefs[selected].enabled=e.target.checked;renderPrefs();};$('#gcBusy').onchange=e=>{prefs[selected].busy=e.target.checked;renderPrefs();};$('#gcColor').onchange=e=>{prefs[selected].color=e.target.value;renderPrefs();};
     $('#gcReminderUnit').onchange=()=>{const max={minutes:40320,hours:672,days:28}[$('#gcReminderUnit').value];$('#gcMinutes').max=String(max);};
     $('#gcAddReminder').onclick=()=>{const n=reminderMinutes($('#gcMinutes').value,$('#gcReminderUnit').value),p=prefs[selected];if(n===null)return message('בחרו מספר שלם ולא שלילי. אפשר להגדיר תזכורת עד 28 ימים לפני האימון.',true);if(p.reminders.includes(n))return message('התזכורת הזאת כבר נוספה');if(p.reminders.length>=5)return message('אפשר עד חמש תזכורות',true);p.reminders=[...p.reminders,n].sort((a,b)=>b-a);message('');renderPrefs();};

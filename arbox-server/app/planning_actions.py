@@ -43,6 +43,9 @@ class PlanningActions:
         return f"{fmt_when(session)}\n{session.get('category_name') or 'שיעור'} · {session.get('coach_name') or ''}".strip(' ·')
 
     async def notice_buttons(self, problems, *, force_list=False):
+        problems = [p for p in problems if p[1].get('state') != 'sync_pending']
+        if not problems:
+            return []
         tag = 'arbox-plan-' + secrets.token_urlsafe(12)
         context = {'studio': self.e.store.active_box_id,
                    'account': self.e.membership_policy.key(0),

@@ -85,3 +85,11 @@
  .gc-reminder-add select{flex:1}
  .gc-reminder-add button{flex-basis:100%;min-height:44px}
 }
+
+/* A single expanded setup step keeps the existing calendar card compact. */
+#gcGuide>.gc-setup-help,#gcGuide .gc-setup-help{margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:8px}
+#gcGuide .gc-setup-help summary{font-weight:400;line-height:1.5}
+#gcGuide .gc-actions{align-items:center;justify-content:space-between}
+#gcGuide .gc-actions a{margin:0;min-height:44px;display:flex;align-items:center}
+#gcGuideProgress{font-size:.8rem}
+@media(max-width:700px){#gcGuide .gc-actions a{flex-basis:100%}#gcGuide .gc-actions button{width:100%}}

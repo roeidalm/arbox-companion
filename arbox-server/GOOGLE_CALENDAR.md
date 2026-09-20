@@ -26,8 +26,10 @@ access to unrelated calendars. The email identifies the connected Google account
 
 An External app in Testing has refresh tokens valid for seven days for this
 scope. For ongoing use, select Audience → Publish app and confirm In production.
-If publishing is disabled, complete Branding using real homepage, privacy policy
-and terms URLs for your deployment. Reconnect here after changing to Production;
+If publishing is disabled, follow the actual Branding requirements displayed by
+Google. Do not invent policy URLs or automatically submit a verification request.
+The wizard links to Google's personal-use verification exceptions and provides
+an explicitly temporary Testing fallback (add your account under Test users). Reconnect here after changing to Production;
 reuse the same client JSON and calendar. Personal-use verification exceptions may
 apply, but Production removes the test-user allowlist: restrict access to your
 server separately. The wizard cannot read the project publishing status and does
@@ -75,3 +77,15 @@ or upload a different OAuth client just to change the server address. Reverse
 proxies must preserve the original Host header. Cloudflare Access must allow the
 signed-in browser through the start and callback routes; background Google sync
 uses outbound API calls and does not need a public authentication bypass.
+
+### Personal setup wizard
+
+Each installation owns its Cloud project and credentials. No central OAuth service
+or maintainer account is involved. The guide pre-fills the project from saved
+credentials or uploaded JSON, scopes all Console links to it, and copies the exact
+configured HTTPS callback. Six compact steps open one at a time. Only the project
+ID and current step are remembered in browser local storage; no secrets are stored
+there. Progress is user-reported, not proof of the Google publishing status.
+Missing/invalid project IDs and non-HTTPS callbacks block the relevant step, while
+existing users can go directly to JSON upload. Storage being unavailable does not
+prevent setup. Google consent and publishing remain explicit actions in Google.

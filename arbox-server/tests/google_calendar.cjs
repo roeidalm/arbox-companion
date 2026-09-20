@@ -52,3 +52,26 @@ test('sync saves the current draft first and stops if saving fails',async()=>{
  await assert.rejects(saveAndSync(async()=>{attempts++;throw Error('save failed');},prefs),/save failed/);
  assert.equal(attempts,1);
 });
+
+test('personal setup links use the imported project and exact server callback',()=>{
+ const {setupGuide}=require('../frontend/google-calendar.js');
+ const callback='https://my-server.example:8446/api/calendar/google/callback';
+ const steps=setupGuide('https://console.cloud.google.com/home/dashboard?project=my-calendar-123',callback);
+ assert.equal(steps.length,6);
+ for(const step of steps.slice(1)){
+  assert.equal(new URL(step.url).searchParams.get('project'),'my-calendar-123');
+  assert.equal(step.blocked,false);
+ }
+ assert.equal(steps.find(x=>x.key==='client').copy,callback);
+ assert.equal(steps.find(x=>x.key==='scope').copy,'https://www.googleapis.com/auth/calendar.app.created');
+});
+
+test('setup cannot send users to an unrelated project or copy an invalid callback',()=>{
+ const {setupGuide}=require('../frontend/google-calendar.js');
+ assert.ok(setupGuide('', '').slice(1).every(x=>x.blocked));
+ for(const uri of ['http://private:8177/api/calendar/google/callback','https://example.com/wrong','https://example.com/api/calendar/google/callback?x=1','https://user:password@example.com/api/calendar/google/callback']){
+  const client=setupGuide('my-calendar-123',uri).find(x=>x.key==='client');
+  assert.equal(client.blocked,true);
+  assert.equal(client.copy,'');
+ }
+});

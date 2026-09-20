@@ -29,6 +29,19 @@
     try { if (id.startsWith('https://')) id = new URL(id).searchParams.get('project') || ''; } catch (_) { return ''; }
     return /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id) ? id : '';
   }
+  function setupGuide(project, callback) {
+    const id=projectId(project), q=id?'?project='+encodeURIComponent(id):'';
+    let validCallback=false;
+    try { const u=new URL(callback);validCallback=u.protocol==='https:'&&u.pathname==='/api/calendar/google/callback'&&!u.search&&!u.hash&&!u.username&&!u.password; } catch (_) {}
+    return [
+      {key:'project',title:'הפרויקט האישי שלכם',url:'https://console.cloud.google.com/projectcreate',text:'צרו פרויקט בשם Arbox Calendar. אם כבר יש לכם פרויקט לחיבור הזה, השתמשו בו. הדביקו בשדה למעלה את הקישור מלוח הבקרה או את Project ID.',copy:'Arbox Calendar',copyLabel:'שם הפרויקט'},
+      {key:'api',title:'הפעלת היומן',url:'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com'+q,text:'לחצו Enable. אם מופיע Manage, השירות כבר פעיל ואין צורך בשינוי.'},
+      {key:'branding',title:'פרטי החיבור האישי',url:'https://console.cloud.google.com/auth/branding'+q,text:'לחצו Get started אם זו ההגדרה הראשונה. שם האפליקציה: Arbox Calendar. בחרו את המייל שלכם לתמיכה ולפרטי קשר ואת הקהל External לחשבון Gmail אישי. השלימו ושמרו. כל משתמש מגדיר פרויקט בחשבון שלו.'},
+      {key:'scope',title:'הרשאה ליומן הייעודי',url:'https://console.cloud.google.com/auth/scopes'+q,text:'לחצו Add or remove scopes, הוסיפו את ההרשאה הבאה ושמרו. היא מאפשרת לנהל יומנים שהאפליקציה יוצרת, בלי גישה ליומנים האחרים שלכם.',copy:'https://www.googleapis.com/auth/calendar.app.created',copyLabel:'הרשאת היומן'},
+      {key:'client',title:'קובץ החיבור לשרת שלכם',url:'https://console.cloud.google.com/auth/clients'+q,text:'Create client → Web application. שם: Arbox Calendar Connection. השאירו JavaScript origins ריק. תחת Authorized redirect URIs הדביקו את הכתובת הבאה, צרו את החיבור והורידו את קובץ ה־JSON.',copy:validCallback?callback:'',copyLabel:'כתובת החזרה',blocked:!validCallback},
+      {key:'production',title:'חיבור קבוע',url:'https://console.cloud.google.com/auth/audience'+q,text:'ב־Audience לחצו Publish app. ודאו שכתוב In production. כך מוסרת מגבלת 7 הימים של Testing. אם כבר התחברתם במצב Testing, חברו מחדש אחרי המעבר; אותו קובץ ואותו יומן נשארים.'}
+    ].map((item,i)=>({...item,blocked:!!item.blocked||(i>0&&!id)}));
+  }
   function readUpload(data, host) {
     if (!data || !data.web || !data.web.client_id || !data.web.client_secret) throw Error('בחרו קובץ JSON של Web application שהורד מ־Google.');
     const options = (data.web.redirect_uris || []).filter(uri => {
@@ -60,9 +73,9 @@
     host.innerHTML = `<details class="gc-disclosure" id="gcDisclosure"><summary class="gc-heading"><span><strong>סנכרון עם Google Calendar</strong><span class="gc-subtitle">צבעים ותזכורות לכל מצב · חיבור אופציונלי</span></span><span class="gc-badge" id="gcBadge">הגדרת חיבור</span></summary><div class="gc-content">
       <ol class="gc-steps" aria-label="שלבי חיבור"><li><button type="button" data-step="1">1 · הכנה</button></li><li><button type="button" data-step="2">2 · קובץ</button></li><li><button type="button" data-step="3">3 · העדפות</button></li></ol>
       <p id="gcMessage" role="status" aria-live="polite" hidden></p>
-      <section data-gc-step="1"><h3>נכין את החיבור ל־Google</h3><p>הגדרה חד־פעמית בחשבון שלך. בכל שלב נפתח את המסך המתאים ונציג בדיוק מה למלא.</p>
+      <section data-gc-step="1"><h3>נכין את החיבור ל־Google</h3><p>הגדרה חד־פעמית בחשבון Google שלכם, עבור השרת שלכם. הקובץ וההרשאות נשמרים אצלכם. נדריך אתכם שלב־שלב; את האישור בחשבון Google מבצעים בעצמכם.</p>
       <label for="gcProject">קישור לפרויקט Google או Project ID</label><input id="gcProject" dir="ltr" placeholder="הדביקו קישור מהדפדפן של Google Cloud">
-      <div id="gcGuide"></div><button type="button" class="primary" id="gcPrepared">כבר יש לי קובץ JSON — להעלאה</button></section>
+      <p id="gcProjectHint" class="hint" role="status"></p><p id="gcGuideProgress" class="hint"></p><div id="gcGuide"></div><button type="button" class="primary" id="gcPrepared">כבר יש לי קובץ JSON — להעלאה</button></section>
       <section data-gc-step="2" hidden><h3>מעלים את הקובץ ש־Google נתן לך</h3><p>אין צורך לפתוח אותו או להעתיק מתוכו פרטים. הקובץ נשמר בשרת שלך בלבד.</p>
       <label class="gc-upload" for="gcFile"><strong>בחירת קובץ JSON</strong><span>אפשר גם לגרור את הקובץ לכאן</span><input id="gcFile" type="file" accept=".json,application/json"></label>
       <p id="gcFileInfo" role="status"></p><label id="gcRedirectLabel" hidden>כתובת החזרה מתוך הקובץ<select id="gcRedirect" dir="ltr"></select></label>
@@ -85,21 +98,39 @@
     function message(text, error=false) { const n=$('#gcMessage');n.hidden=!text;n.textContent=text;n.className=error?'gc-error':'gc-success'; }
     function show(n) { step=n;if(n===3)$('#gcFeedback').append($('#gcMessage'));else $('.gc-steps').after($('#gcMessage'));host.querySelectorAll('[data-gc-step]').forEach(x=>x.hidden=Number(x.dataset.gcStep)!==n);host.querySelectorAll('[data-step]').forEach(b=>{b.classList.toggle('active',Number(b.dataset.step)===n);b.setAttribute('aria-current',Number(b.dataset.step)===n?'step':'false');}); }
     async function action(fn, progress='') { if(busy)return;busy=true;host.setAttribute('aria-busy','true');message(progress);try{await fn();}catch(e){message(e.message,true);}finally{busy=false;host.removeAttribute('aria-busy');} }
+    let guideIndex=0, guideContext='';
+    function remembered(key, value) {
+      try { if(value!==undefined){localStorage.setItem(key,value);return value;}return localStorage.getItem(key)||''; } catch(_){return '';}
+    }
     function guide() {
-      const id=projectId($('#gcProject').value), q=id?'?project='+encodeURIComponent(id):'';
+      const raw=$('#gcProject').value.trim(), id=projectId(raw);
       const suggested=status?.suggested_redirect||status?.redirect_uri||'';
-      const steps=[
-        ['יצירת פרויקט','https://console.cloud.google.com/projectcreate','שם הפרויקט: Arbox Calendar. לאחר היצירה הדביקו למעלה את הקישור מלוח הבקרה.'],
-        ['הפעלת Calendar API','https://console.cloud.google.com/apis/library/calendar-json.googleapis.com'+q,'לחצו Enable. אם מופיע Manage, ה־API כבר פעיל.'],
-        ['מסך ההתחברות','https://console.cloud.google.com/auth/branding'+q,'Get started → שם האפליקציה Arbox Calendar, המייל שלכם, קהל External, ופרטי קשר.'],
-        ['בדיקה זמנית (אופציונלי)','https://console.cloud.google.com/auth/audience'+q,'לניסיון במצב Testing הוסיפו את חשבון היומן ב־Test users. החיבור יפוג אחרי 7 ימים. לשימוש קבוע השלימו גם את שלב 7.'],
-        ['הרשאת היומן','https://console.cloud.google.com/auth/scopes'+q,'Add or remove scopes → הוסיפו את ההרשאה הבאה ושמרו:'],
-        ['יצירת קובץ החיבור','https://console.cloud.google.com/auth/clients'+q,'Create client → Web application → שם: Arbox Calendar Connection. השאירו JavaScript origins ריק. ב־Authorized redirect URIs הדביקו את כתובת החזרה. לחצו Create והורידו JSON.'],
-        ['חיבור קבוע — Production','https://console.cloud.google.com/auth/audience'+q,'ב־Audience לחצו Publish app ואשרו שהמצב השתנה ל־In production. אם הכפתור חסום, השלימו את השדות החסרים ב־Branding, כולל קישורים אמיתיים לדף הבית, למדיניות הפרטיות ולתנאי השימוש. לאחר המעבר חברו מחדש את Google כאן, עם אותו קובץ JSON.']
-      ];
+      const items=setupGuide(id,suggested), context=id+'|'+suggested;
+      if(context!==guideContext){guideContext=context;const saved=Number(remembered('arbox-google-guide:'+context));guideIndex=Number.isInteger(saved)&&saved>=0&&saved<items.length?saved:0;}
+      if(id)remembered('arbox-google-project',id);
+      $('#gcProjectHint').textContent=id?'הפרויקט בקישורים: '+id:raw?'לא זוהה Project ID תקין. העתיקו את הקישור מלוח הבקרה של הפרויקט.':'אחרי יצירת הפרויקט, הדביקו כאן את הקישור כדי שכל הכפתורים יפתחו את הפרויקט שלכם.';
+      $('#gcProject').setAttribute('aria-invalid',String(!!raw&&!id));
+      $('#gcGuideProgress').textContent=`שלב ${guideIndex+1} מתוך ${items.length} · ההתקדמות נשמרת בדפדפן, לפי הסימון שלכם`;
       const out=$('#gcGuide');out.replaceChildren();
-      steps.forEach(([title,url,text],i)=>{const d=el('details');if(i===0&&!id)d.open=true;d.append(el('summary',`${i+1}. ${title}`),el('p',text));if(i===4||i===5){const value=i===4?'https://www.googleapis.com/auth/calendar.app.created':suggested;const code=el('code',value||'נדרשת כתובת HTTPS תקינה של השרת עם הנתיב /api/calendar/google/callback');code.dir='ltr';d.append(code);if(value){const b=el('button','העתק');b.type='button';b.onclick=()=>action(async()=>{try{await navigator.clipboard.writeText(value);message('הועתק');}catch(_){message('סמנו את הטקסט המוצג והעתיקו אותו');}});d.append(b);}}const a=el('a','פתיחת המסך ב־Google');a.href=url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);out.append(d);});
-      out.append(el('p','במצב Testing החיבור ליומן פג אחרי 7 ימים והסנכרון נעצר; האירועים הקיימים נשארים. Production מסיר את מגבלת השבוע, אך אינו מגביל את החיבור לחשבון שלכם: הגבילו בנפרד את הגישה לאתר. שימוש אישי יכול להיות פטור מאימות Google; אם נדרש אימות, פעלו לפי ההנחיות ב־Google.','hint'));
+      items.forEach((item,i)=>{
+        const d=el('details');d.open=i===guideIndex;
+        const summary=el('summary',`${i+1}. ${item.title}`);d.append(summary,el('p',item.text));
+        summary.onclick=e=>{e.preventDefault();guideIndex=i;remembered('arbox-google-guide:'+context,String(i));guide();out.querySelectorAll('summary')[i].focus();};
+        if(item.copy){const code=el('code',item.copy);code.dir='ltr';d.append(code);const copy=el('button','העתקת '+item.copyLabel);copy.type='button';copy.onclick=()=>action(async()=>{try{await navigator.clipboard.writeText(item.copy);message(item.copyLabel+' הועתקה');}catch(_){message('סמנו והעתיקו את הטקסט המוצג. הדפדפן לא אפשר העתקה אוטומטית.');}});d.append(copy);}
+        if(item.blocked)d.append(el('p',!id&&i>0?'הדביקו למעלה את קישור הפרויקט כדי להמשיך.':'נדרשת כתובת HTTPS לשרת. הגדירו אותה בהגדרות → מתקדם. כתובת HTTP פנימית אינה מתאימה לחזרה מ־Google.','gc-error'));
+        if(item.key==='production'){
+          const help=el('details',undefined,'gc-setup-help');help.append(el('summary','Publish app חסום, או רוצים לבדוק קודם?'));
+          help.append(el('p','אם Google מפנה ל־Branding, פתחו אותו והשלימו את הפרטים ש־Google דורשת. השתמשו רק בקישורים אמיתיים ששייכים להתקנה שלכם. אל תמציאו כתובות מדיניות ואל תגישו בקשת אימות רק כדי לנסות להסיר את מגבלת השבוע.'));
+          const branding=el('a','פתיחת Branding בפרויקט שלכם');branding.href='https://console.cloud.google.com/auth/branding'+(id?'?project='+encodeURIComponent(id):'');branding.target='_blank';branding.rel='noopener noreferrer';help.append(branding);
+          help.append(el('p','אפשר להתחיל ניסיון: ב־Audience → Test users הוסיפו את חשבון היומן, ואז המשיכו להעלאת הקובץ. במצב Testing החיבור פג אחרי 7 ימים; האירועים נשארים, אבל נדרש חיבור מחדש כדי להמשיך לסנכרן.'));
+          help.append(el('p','Production אינו הופך את היומן לציבורי, אך מבטל את רשימת משתמשי הבדיקה. הגבילו את הגישה לשרת שלכם. שימוש אישי עשוי להיות פטור מאימות; פעלו לפי הדרישות שמוצגות בפרויקט.'));
+          const ref=el('a','הנחיות Google לשימוש אישי');ref.href='https://support.google.com/cloud/answer/13464323?hl=en';ref.target='_blank';ref.rel='noopener noreferrer';help.append(ref);d.append(help);
+        }
+        const actions=el('div',undefined,'gc-actions');
+        if(!item.blocked){const a=el('a','פתיחת השלב ב־Google');a.href=item.url;a.target='_blank';a.rel='noopener noreferrer';actions.append(a);}
+        const next=el('button',i===items.length-1?'להעלאת קובץ החיבור':'השלמתי — הבא');next.type='button';next.disabled=item.blocked||(i===0&&!id);
+        next.onclick=()=>{if(i===items.length-1){show(2);return;}guideIndex=i+1;remembered('arbox-google-guide:'+context,String(guideIndex));guide();out.querySelectorAll(':scope > details > summary')[guideIndex].focus();};actions.append(next);d.append(actions);out.append(d);
+      });
     }
     function currentColor(id) { return palette.find(c=>c.id===id)||{name:colors[id]?.[0]||'צבע שהוסר',color:colors[id]?.[1]||'#616161'}; }
     function renderPrefs() {
@@ -136,8 +167,8 @@
         const input=el('input');input.type='radio';input.name='gcEventColor';input.value=c.id;input.setAttribute('aria-label',c.name);
         const dot=el('span',undefined,'gc-color-dot');dot.style.background=c.color;dot.setAttribute('aria-hidden','true');
         label.append(input,dot);grid.append(label);
-      });guide();renderPrefs();renderStatus();if(!status.available){message('יש להתחבר ל־Arbox ולבחור סטודיו לפני חיבור היומן',true);return;}show(status.connected?3:status.uploaded?2:step);});}
-    async function receive(file){await action(async()=>{uploaded=null;$('#gcUpload').disabled=true;if(!file)return;if(file.size>32768)throw Error('הקובץ גדול מדי. בחרו את קובץ ה־JSON שהורד מ־Google.');let d;try{d=JSON.parse(await file.text());}catch(_){throw Error('הקובץ אינו JSON תקין');}const hostname=new URL(status?.suggested_redirect||window.location.href).hostname;const options=readUpload(d,hostname);uploaded=d;const select=$('#gcRedirect');select.replaceChildren();options.forEach(uri=>{const o=el('option',uri);o.value=uri;select.append(o);});$('#gcRedirectLabel').hidden=options.length===1;$('#gcFileInfo').textContent=`${file.name} · ${d.web.project_id||'פרויקט Google'} · הקובץ תקין`;$('#gcUpload').disabled=false;});}
+      });if(!$('#gcProject').value)$('#gcProject').value=projectId(status.project_id)||projectId(remembered('arbox-google-project'));guide();renderPrefs();renderStatus();if(!status.available){message('יש להתחבר ל־Arbox ולבחור סטודיו לפני חיבור היומן',true);return;}show(status.connected?3:status.uploaded?2:step);});}
+    async function receive(file){await action(async()=>{uploaded=null;$('#gcUpload').disabled=true;if(!file)return;if(file.size>32768)throw Error('הקובץ גדול מדי. בחרו את קובץ ה־JSON שהורד מ־Google.');let d;try{d=JSON.parse(await file.text());}catch(_){throw Error('הקובץ אינו JSON תקין');}const hostname=new URL(status?.suggested_redirect||window.location.href).hostname;const options=readUpload(d,hostname);uploaded=d;if(projectId(d.web.project_id)){$('#gcProject').value=projectId(d.web.project_id);guide();}const select=$('#gcRedirect');select.replaceChildren();options.forEach(uri=>{const o=el('option',uri);o.value=uri;select.append(o);});$('#gcRedirectLabel').hidden=options.length===1;$('#gcFileInfo').textContent=`${file.name} · ${d.web.project_id||'פרויקט Google'} · הקובץ תקין`;$('#gcUpload').disabled=false;});}
     host.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>show(Number(b.dataset.step)));
     $('#gcProject').oninput=guide;$('#gcPrepared').onclick=()=>show(2);
     $('#gcFile').onchange=e=>receive(e.target.files[0]);const drop=$('.gc-upload');drop.ondragover=e=>{e.preventDefault();drop.classList.add('dragover');};drop.ondragleave=()=>drop.classList.remove('dragover');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('dragover');receive(e.dataTransfer.files[0]);};
@@ -157,5 +188,5 @@
     refresh=load;load();
   }
   root.GoogleCalendarUI={mount,refresh:()=>refresh?.(),projectId,readUpload,reminderText};
-  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions,reminderMinutes,saveAndSync};
+  if(typeof module!=='undefined')module.exports={projectId,readUpload,reminderText,paletteOptions,reminderMinutes,saveAndSync,setupGuide};
 })(typeof window!=='undefined'?window:globalThis);

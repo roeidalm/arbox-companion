@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.12
+
+- Simplify personal Google setup into six compact steps with project-aware links,
+  exact callback copying, remembered progress, and automatic project detection
+  from saved credentials or uploaded JSON. Clarify which Google approvals remain
+  manual and distinguish temporary Testing from permanent Production setup.
+
 ## 1.54.11
 
 - Make Google Production setup explicit in the calendar wizard, explain the

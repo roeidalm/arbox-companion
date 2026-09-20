@@ -78,6 +78,7 @@
       <details class="gc-preview"><summary>תצוגה מקדימה · דוגמה</summary><div class="gc-day"><strong>יום רביעי</strong><span>האימונים שלי</span></div><div class="gc-timegrid"><span>08:00</span><article id="gcPreviewEvent"><strong>Movement basics</strong><span>08:00–09:00 · רוני גוזלי</span><b id="gcPreviewStatus"></b><div id="gcPreviewAlarms"></div></article><span>09:00</span></div><p class="hint">כשמצב האימון משתנה, אותו אירוע מתעדכן ביומן.</p></details></div>
       <p id="gcUnsaved" class="hint" hidden>יש שינויים שטרם נשמרו</p><div class="gc-actions"><button type="button" class="primary" id="gcSave">שמירת העדפות</button><button type="button" class="primary" id="gcEnable" hidden>יצירת יומן והפעלת הסנכרון</button><button type="button" id="gcSync" hidden>שמירה וסנכרון עכשיו</button><button type="button" id="gcPause" hidden>השהיית הסנכרון</button><button type="button" id="gcDisconnect" hidden>ניתוק Google</button></div><div id="gcFeedback"></div>
       <details class="gc-explanation"><summary>איך הסנכרון עובד?</summary><p class="hint">הסנכרון מציג את 30 הימים הקרובים ומתעדכן בכל דקה. ביטול או דילוג מסירים אירוע עתידי. השהיה וניתוק משאירים את האירועים שכבר נוצרו. שינויים בהרשמות עושים ב־Arbox Companion. עריכות ידניות באירועים המנוהלים ב־Google נדרסות בבדיקה תקופתית.</p></details>
+      <details class="gc-explanation"><summary>החיבור מתנתק בכל שבוע?</summary><p class="hint">בפרויקט External במצב Testing הרשאת היומן פגה אחרי 7 ימים. לשימוש קבוע עברו ב־Google ל־Production, ואז לחצו על אימות החיבור מחדש. אין צורך ביומן חדש או בקובץ JSON חדש.</p><a id="gcAudienceLink" target="_blank" rel="noopener noreferrer">פתיחת הגדרות הקהל ב־Google</a><p class="hint">Production אינו הגבלת גישה אישית. הגבילו את הכניסה לאתר לחשבונות המורשים בלבד. אין לאשף גישה לבדוק את מצב הפרסום ב־Google.</p></details>
       <details class="gc-explanation"><summary>כתובת החזרה של Google</summary><p id="gcCallback" class="hint" dir="ltr"></p><div id="gcMigration" hidden><p class="hint">לאחר שהוספתם את הכתובת החדשה ל־Authorized redirect URIs ב־Google, ניתן לעדכן כאן. היומן והאירועים הקיימים נשמרים.</p><p id="gcNewCallback" dir="ltr"></p><button id="gcMigrate" type="button">הכתובת נוספה בגוגל — עדכון החיבור</button></div><button id="gcReconnect" type="button">אימות החיבור מחדש עם Google</button></details>
       <div id="gcRecovery" hidden><p>אם היומן כבר נוצר ב־Google, אפשר לחבר אותו בלי ליצור עותק נוסף. בהגדרות היומן ב־Google, תחת ״שילוב היומן״, העתיקו את מזהה היומן.</p><input id="gcRecoverId" aria-label="מזהה היומן שנוצר" dir="ltr"><button id="gcRecover" type="button">חיבור ליומן שנוצר</button></div></section></div></details>`;
     const $ = s => host.querySelector(s);
@@ -91,13 +92,14 @@
         ['יצירת פרויקט','https://console.cloud.google.com/projectcreate','שם הפרויקט: Arbox Calendar. לאחר היצירה הדביקו למעלה את הקישור מלוח הבקרה.'],
         ['הפעלת Calendar API','https://console.cloud.google.com/apis/library/calendar-json.googleapis.com'+q,'לחצו Enable. אם מופיע Manage, ה־API כבר פעיל.'],
         ['מסך ההתחברות','https://console.cloud.google.com/auth/branding'+q,'Get started → שם האפליקציה Arbox Calendar, המייל שלכם, קהל External, ופרטי קשר.'],
-        ['משתמש בדיקה','https://console.cloud.google.com/auth/audience'+q,'ב־Test users הוסיפו את חשבון היומן שלכם. אם הוא כבר ברשימה, אין צורך להוסיף שוב.'],
+        ['בדיקה זמנית (אופציונלי)','https://console.cloud.google.com/auth/audience'+q,'לניסיון במצב Testing הוסיפו את חשבון היומן ב־Test users. החיבור יפוג אחרי 7 ימים. לשימוש קבוע השלימו גם את שלב 7.'],
         ['הרשאת היומן','https://console.cloud.google.com/auth/scopes'+q,'Add or remove scopes → הוסיפו את ההרשאה הבאה ושמרו:'],
-        ['יצירת קובץ החיבור','https://console.cloud.google.com/auth/clients'+q,'Create client → Web application → שם: Arbox Calendar Connection. השאירו JavaScript origins ריק. ב־Authorized redirect URIs הדביקו את כתובת החזרה. לחצו Create והורידו JSON.']
+        ['יצירת קובץ החיבור','https://console.cloud.google.com/auth/clients'+q,'Create client → Web application → שם: Arbox Calendar Connection. השאירו JavaScript origins ריק. ב־Authorized redirect URIs הדביקו את כתובת החזרה. לחצו Create והורידו JSON.'],
+        ['חיבור קבוע — Production','https://console.cloud.google.com/auth/audience'+q,'ב־Audience לחצו Publish app ואשרו שהמצב השתנה ל־In production. אם הכפתור חסום, השלימו את השדות החסרים ב־Branding, כולל קישורים אמיתיים לדף הבית, למדיניות הפרטיות ולתנאי השימוש. לאחר המעבר חברו מחדש את Google כאן, עם אותו קובץ JSON.']
       ];
       const out=$('#gcGuide');out.replaceChildren();
       steps.forEach(([title,url,text],i)=>{const d=el('details');if(i===0&&!id)d.open=true;d.append(el('summary',`${i+1}. ${title}`),el('p',text));if(i===4||i===5){const value=i===4?'https://www.googleapis.com/auth/calendar.app.created':suggested;const code=el('code',value||'נדרשת כתובת HTTPS תקינה של השרת עם הנתיב /api/calendar/google/callback');code.dir='ltr';d.append(code);if(value){const b=el('button','העתק');b.type='button';b.onclick=()=>action(async()=>{try{await navigator.clipboard.writeText(value);message('הועתק');}catch(_){message('סמנו את הטקסט המוצג והעתיקו אותו');}});d.append(b);}}const a=el('a','פתיחת המסך ב־Google');a.href=url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);out.append(d);});
-      out.append(el('p','במצב Testing הרשאת החיבור עשויה לפוג לאחר שבוע. לשימוש קבוע יש להסדיר מעבר ל־Production בהתאם לדרישות Google.','hint'));
+      out.append(el('p','במצב Testing החיבור ליומן פג אחרי 7 ימים והסנכרון נעצר; האירועים הקיימים נשארים. Production מסיר את מגבלת השבוע, אך אינו מגביל את החיבור לחשבון שלכם: הגבילו בנפרד את הגישה לאתר. שימוש אישי יכול להיות פטור מאימות Google; אם נדרש אימות, פעלו לפי ההנחיות ב־Google.','hint'));
     }
     function currentColor(id) { return palette.find(c=>c.id===id)||{name:colors[id]?.[0]||'צבע שהוסר',color:colors[id]?.[1]||'#616161'}; }
     function renderPrefs() {
@@ -114,6 +116,7 @@
     function renderStatus() {
       if(status.connected&&!status.enabled||status.error)$('#gcDisclosure').open=true;
       $('#gcCallback').textContent=status.redirect_uri||'';
+      $('#gcAudienceLink').href='https://console.cloud.google.com/auth/audience'+(projectId(status.project_id)?'?project='+encodeURIComponent(status.project_id):'');
       $('#gcNewCallback').textContent=status.suggested_redirect||'';
       $('#gcMigration').hidden=!status.uploaded||!status.suggested_redirect||status.suggested_redirect===status.redirect_uri;
       $('#gcReconnect').hidden=!status.uploaded;

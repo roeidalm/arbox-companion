@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.11
+
+- Make Google Production setup explicit in the calendar wizard, explain the
+  seven-day Testing expiry, and link existing connections to their project
+  audience settings without replacing credentials or calendars.
+
 ## 1.54.10
 
 - Refresh cached frontend assets so existing browsers load the new address and

@@ -18,15 +18,20 @@ browser-binding cookie there, and returns to the configured UI address.
 ## Google setup
 
 The wizard links to project creation, Calendar API enablement, consent branding,
-External test audience, data access and client creation. Download the Web OAuth
+External test audience, data access, client creation and an explicit Production step. Download the Web OAuth
 client JSON and upload it; do not manually paste secrets. Select the exact HTTPS
 callback from the file. The OAuth request asks for `calendar.app.created` and
 `openid email`. This creates and manages a dedicated secondary calendar, without
 access to unrelated calendars. The email identifies the connected Google account.
 
-An External app in Testing normally has refresh tokens valid for seven days for
-this scope. For ongoing use, move to Production as appropriate for the Google
-project; Google's verification requirements still apply. An expired/revoked token
+An External app in Testing has refresh tokens valid for seven days for this
+scope. For ongoing use, select Audience → Publish app and confirm In production.
+If publishing is disabled, complete Branding using real homepage, privacy policy
+and terms URLs for your deployment. Reconnect here after changing to Production;
+reuse the same client JSON and calendar. Personal-use verification exceptions may
+apply, but Production removes the test-user allowlist: restrict access to your
+server separately. The wizard cannot read the project publishing status and does
+not claim to verify it; Google's verification requirements still apply. An expired/revoked token
 shows a reconnect message. Calendar creation is a separate explicit UI action.
 
 ## Behavior

@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.10
+
+- Refresh cached frontend assets so existing browsers load the new address and
+  Google callback settings immediately.
+
 ## 1.54.9
 
 - Preserve membership history after confirmed bookings and immediately reconcile

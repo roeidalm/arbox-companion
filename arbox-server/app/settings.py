@@ -13,6 +13,7 @@ import secrets
 SETTINGS_FILE = "settings.json"
 
 DEFAULTS: dict = {
+    "view_key": None,             # separate, opt-in read-only credential
     "api_key": None,              # generated on first run
     "kinds_migrated": 0,          # see KINDS_MIGRATION
     "calendar_alarms": [60],      # reminder lead times in minutes; [] = none
@@ -204,6 +205,19 @@ class Settings:
     @property
     def api_key(self) -> str:
         return self._data["api_key"]
+
+    @property
+    def view_key(self) -> str:
+        return self._data.get("view_key") or ""
+
+    def rotate_view_key(self) -> str:
+        self._data["view_key"] = secrets.token_urlsafe(32)
+        self.save()
+        return self.view_key
+
+    def revoke_view_key(self) -> None:
+        self._data["view_key"] = None
+        self.save()
 
     @property
     def base_url(self) -> str:

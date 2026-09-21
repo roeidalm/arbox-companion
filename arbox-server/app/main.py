@@ -254,6 +254,9 @@ def _is_ip(host: str) -> bool:
         return False
 
 
+from .view_api import router as view_router, admin as view_admin
+app.include_router(view_router)
+app.include_router(view_admin)
 app.include_router(router)
 app.include_router(google_router)
 logging.getLogger("uvicorn.access").addFilter(HideOAuthQuery())
@@ -301,6 +304,8 @@ SPA_PAGES = ("schedule", "mine", "automations", "journal", "system", "settings")
 
 @app.get("/{page}")
 async def page_route(page: str):
+    if page == "view":
+        return FileResponse(os.path.join(FRONTEND_DIR, "view.html"))
     if page in SPA_PAGES:
         return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
     from fastapi import HTTPException as _HTTPException

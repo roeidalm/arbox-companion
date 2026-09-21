@@ -669,11 +669,7 @@ $("#keyBtn").addEventListener("click", () => {
   try { localStorage.setItem("arbox_api_key", state.apiKey); } catch (e) {}
   boot();
 });
-$("#keySkip").addEventListener("click", async () => {
-  await loadFacets();
-  initScheduleFromURL();
-  showView(viewFromPath(), false);
-});
+$("#keySkip").addEventListener("click", () => { window.location.assign('/view'); });
 
 /* ------------------------------------------------------------- schedule */
 

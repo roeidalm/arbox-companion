@@ -548,9 +548,11 @@ class Store:
             (self.active_box_id or 0,))
         return [dict(row) for row in await cur.fetchall()]
 
-    async def intent_change(self, session: dict) -> dict | None:
+    async def intent_change(self, session: dict, *, read_only: bool = False) -> dict | None:
         record = await self.get_intent(session['schedule_id'])
         result = change(record, session)
+        if read_only:
+            return result
         if result:
             await self._record_planning_event(session, record, 'planning_changed')
         if result and not record['changed']:

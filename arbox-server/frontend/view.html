@@ -1,0 +1,8 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'"><title>Arbox — צפייה בלבד</title><link rel="stylesheet" href="/static/view.css"></head><body><main>
+<header><h1>Arbox · צפייה בלבד</h1><a href="/settings">לאפליקציה</a></header>
+<p>נתוני השרת לצפייה ולשילוב בלוחות בקרה. אין במסך הזה הרשמה, ביטול או רענון מול Arbox.</p>
+<section><label for="credential">מפתח צפייה (או מפתח מנהל להגדרת הגישה)</label><div class="actions"><input id="credential" type="password" autocomplete="off"><button id="connect">הצגת הנתונים</button><button id="forget">יציאה מצפייה</button></div>
+<details id="access" hidden><summary>ניהול מפתח צפייה לשילובים</summary><p>המפתח מיועד ל־Homepage, Grafana וכל לקוח API. הוא חושף נתוני אימונים ודירוגים, אך אינו מאפשר פעולות. יצירת מפתח חדש מבטלת את הקודם.</p><button id="rotate">יצירת מפתח צפייה חדש</button><button id="revoke">ביטול מפתח הצפייה</button><p id="keyState"></p><input id="issued" type="password" readonly hidden aria-label="מפתח הצפייה החדש"><button id="copy" hidden>העתקת המפתח</button></details></section>
+<p id="message" role="status" aria-live="polite"></p><nav id="tabs" aria-label="תצוגות"></nav><p id="freshness"></p><section id="content"></section><button id="more" hidden>לעמוד הבא</button>
+<p><a href="/static/VIEW_API.md">תיעוד API והוראות חיבור</a> · התצוגה נקראת מחדש מדי דקה כשהחלון פתוח.</p>
+</main><script src="/static/view.js"></script></body></html>

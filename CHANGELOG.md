@@ -3,6 +3,14 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.14
+
+- Add a generic read-only API and viewer for dashboards: sessions, memberships,
+  planning, calendar, history, feedback ratings and sanitized event metadata.
+- Provide a separate revocable read credential, pagination and freshness metadata.
+  Read projections do not refresh upstream services or write planning state.
+- Include integration documentation and a Homepage example.
+
 ## 1.54.13
 
 - Add a local Google Calendar privacy information page and link it from setup,

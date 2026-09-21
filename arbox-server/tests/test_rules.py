@@ -502,7 +502,7 @@ class DigestStore:
     async def get_intent(self, sid): return self.intents.get(sid)
     async def remember_intent(self, session, source, signature=None):
         self.intents[session['schedule_id']] = {'source':source, 'rule_signature':signature, 'snapshot':json.dumps(session)}
-    async def intent_change(self, session): return None
+    async def intent_change(self, session, *, read_only=False): return None
     async def my_sessions(self, **kwargs): return await self.get_sessions(mine=True)
 
     async def get_sessions(self, date_from=None, date_to=None, mine=False, **kwargs):

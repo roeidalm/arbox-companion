@@ -406,7 +406,7 @@ class RulesEngine:
 
     async def _planned_sessions(
         self, start: str, end: str, extra_plans: list[dict] | None = None,
-        *, include_skipped: bool = False,
+        *, include_skipped: bool = False, read_only: bool = False,
     ) -> list[dict]:
         """All future booking intents, ordered by registration opening.
 
@@ -485,7 +485,7 @@ class RulesEngine:
                     or self._blocked(session) or await self.store.autobook_attempted(sid)
                     or await self.store.vacation_blocks(session['date'], 'autobook')):
                 continue
-            if await self.store.intent_change(session):
+            if await self.store.intent_change(session, read_only=read_only):
                 plans.append({**session, 'planning_source':'autobook', 'membership_user_id':None})
                 seen.add(sid)
 
@@ -501,9 +501,9 @@ class RulesEngine:
                     self._intent_rule_signature(rules, json.loads(existing['snapshot'])) == existing['rule_signature']):
                 signature = existing['rule_signature']
             # Preserve the original rule for an occurrence that stopped matching.
-            if signature or not existing:
+            if not read_only and (signature or not existing):
                 await self.store.remember_intent(session, plan['planning_source'], signature)
-            plan['intent_change'] = await self.store.intent_change(session)
+            plan['intent_change'] = await self.store.intent_change(session, read_only=read_only)
 
         plans.sort(key=lambda p: (
             p.get("registration_opens") or
@@ -590,12 +590,12 @@ class RulesEngine:
     async def quota_status(
         self, force: bool = False, target_date: str | date | None = None,
         extra_plans: list[dict] | None = None,
-        policy_overrides: dict | None = None,
+        policy_overrides: dict | None = None, read_only: bool = False,
     ) -> dict | None:
         """Compute from one evidence-backed ledger. Rendering never calls Arbox."""
         anchor = target_date.isoformat() if isinstance(target_date, date) else target_date or date.today().isoformat()
         members = await self.store.get_meta("memberships") or []
-        plans = await self._planned_sessions(date.today().isoformat(), "9999-12-31", extra_plans)
+        plans = await self._planned_sessions(date.today().isoformat(), "9999-12-31", extra_plans, read_only=read_only)
         pending_rows = await self.uncertain_sessions()
         if not members and not plans and not pending_rows:
             return None

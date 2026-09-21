@@ -108,7 +108,7 @@ class ArboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(base_url)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title="Arbox",
+                    title="Arbox Companion",
                     data={CONF_BASE_URL: base_url, CONF_API_KEY: api_key},
                 )
 

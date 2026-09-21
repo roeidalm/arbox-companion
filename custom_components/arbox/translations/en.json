@@ -61,8 +61,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Arbox panel access",
-        "description": "Administrators always have full access. Action access includes viewing. These permissions apply to the Arbox panel, not existing HA entities or services. Feedback notification links retain their limited access.",
+        "title": "Arbox Companion panel access",
+        "description": "Administrators always have full access. Action access includes viewing. These permissions apply to the Arbox Companion panel, not existing HA entities or services. Feedback notification links retain their limited access.",
         "data": {
           "panel_view_users": "Users allowed to view",
           "panel_action_users": "Users allowed to book and edit"

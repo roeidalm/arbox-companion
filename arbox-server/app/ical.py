@@ -109,7 +109,7 @@ def build_calendar(
     sessions: list[dict],
     *,
     tz: str = "Asia/Jerusalem",
-    name: str = "Arbox — האימונים שלי",
+    name: str = "Arbox Companion — האימונים שלי",
     location: str = "",
     alarms: list[int] | None = None,
     stamp: datetime | None = None,

@@ -281,7 +281,7 @@ class GoogleCalendar:
             self.save()
             try:
                 d = await self.google(p, 'POST', '/calendars', json={
-                    'summary': 'אימוני Arbox · ' + (self.engine.syncer.studio_name or 'הסטודיו שלי'),
+                    'summary': 'אימוני Arbox Companion · ' + (self.engine.syncer.studio_name or 'הסטודיו שלי'),
                     'description': 'Arbox Companion connection ' + p['owner'],
                     'timeZone': self.engine.settings.timezone})
             except CalendarError as err:

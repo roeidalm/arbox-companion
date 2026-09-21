@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.16
+
+- Use the full Arbox Companion name in application headers, browser titles, home-screen metadata, feedback, notifications and Home Assistant/HACS branding. References to the upstream Arbox service remain unchanged.
+
 ## 1.54.15
 
 - Adopt the Arbox summit logo across the web app, feedback, read-only viewer, browser tabs and home-screen icons.

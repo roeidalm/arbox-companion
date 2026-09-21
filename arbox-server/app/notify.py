@@ -418,7 +418,7 @@ class Notifier:
         for i, chunk in enumerate(chunks):
             payload: dict = {
                 "message": text if i == 0 else f"(המשך {i + 1}/{len(chunks)})",
-                "title": "Arbox",
+                "title": "Arbox Companion",
                 "actions": [_ha_action(b) for b in (chunk or [])],
             }
             if tag:

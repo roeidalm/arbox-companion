@@ -205,7 +205,7 @@ async def lifespan(app: FastAPI):
     await store.close()
 
 
-app = FastAPI(title="Arbox server", lifespan=lifespan)
+app = FastAPI(title="Arbox Companion", lifespan=lifespan)
 
 
 @app.middleware("http")

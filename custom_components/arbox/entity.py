@@ -27,8 +27,8 @@ class ArboxEntity(CoordinatorEntity[ArboxCoordinator]):
         # a Docker-internal name no browser outside that network can resolve.
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
-            name="Arbox",
-            manufacturer="Arbox",
+            name="Arbox Companion",
+            manufacturer="Arbox Companion",
             model="Booking server",
             configuration_url=coordinator.base_url,
         )

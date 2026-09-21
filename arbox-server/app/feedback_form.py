@@ -83,7 +83,7 @@ class FeedbackForm:
         return token, f"/arbox-feedback#{token}" if in_ha else f"{base}/feedback#{token}"
 
     async def start_preview(self, channel, level):
-        if channel not in ("telegram", "ha") or level not in ("quick", "feedback", "full"):
+        if channel not in ("telegram", "ha", "discord") or level not in ("quick", "feedback", "full"):
             raise ValueError("בחר/י ערוץ ורמת מעקב פעילה לבדיקה")
         token, url = await self.create({"category_name": "Movement & Strength", "coach_name": "מאמן/ת לדוגמה",
                                         "date": date.today().isoformat(), "start_time": "18:00", "end_time": "19:15"}, level, demo=True, channel=channel)

@@ -76,7 +76,7 @@ DEFAULTS: dict = {
         # channel priority; with escalation_minutes > 0 an actionable message
         # goes to the first channel only, and to the rest if unanswered after
         # that many minutes. 0 = all eligible channels at once.
-        "order": ["telegram", "ha"],
+        "order": ["telegram", "ha", "discord"],
         "escalation_minutes": 0,
     },
     # Post-class journal is opt-in.  No migration enables its notification
@@ -92,6 +92,11 @@ DEFAULTS: dict = {
     # lists only control the small shortcut shelf shown while logging.
     "exercise_shortcuts_by_studio": {},
     "hidden_exercises_by_studio": {},
+    "discord": {
+        "enabled": False, "webhook_url": "",
+        "kinds": ["digest", "autobook", "standby", "studio", "latecancel", "log", "vacation", "attendance", "membership"],
+        "log_level": "error",
+    },
     "telegram": {
         "enabled": False,
         "bot_token": "",
@@ -467,6 +472,19 @@ class Settings:
         return int(self._data.get("digest_hour", 20))
 
     @property
+    def discord(self) -> dict:
+        return self._data["discord"]
+
+    @property
+    def discord_webhook(self) -> str:
+        path = os.environ.get("ARBOX_DISCORD_WEBHOOK_URL_FILE")
+        if path:
+            try:
+                with open(path) as source: return source.read().strip()
+            except OSError: return ""
+        return os.environ.get("ARBOX_DISCORD_WEBHOOK_URL", "").strip() or self.discord.get("webhook_url", "")
+
+    @property
     def telegram(self) -> dict:
         return self._data["telegram"]
 
@@ -544,7 +562,11 @@ class Settings:
         # user's HA automation with any payload they like
         ha = dict(self._data["ha"])
         ha["webhook_url"] = "***" if ha.get("webhook_url") else ""
-        return {"timezone": self.timezone,
+        discord = dict(self.discord)
+        discord["webhook_url"] = "***" if self.discord_webhook else ""
+        discord["managed_secret"] = bool(os.environ.get("ARBOX_DISCORD_WEBHOOK_URL_FILE") or os.environ.get("ARBOX_DISCORD_WEBHOOK_URL"))
+        discord["configured"] = bool(self.discord_webhook)
+        return {"discord": discord, "timezone": self.timezone,
                 "retention": self.retention,
                 "blocked_categories": self.blocked_categories,
                 "late_cancel_warning_minutes": self.late_cancel_warning_minutes,
@@ -565,6 +587,23 @@ class Settings:
 
     def update(self, patch: dict) -> None:
         """Apply a settings patch from the UI. '***' means keep the stored secret."""
+        discord_patch = patch.get("discord") or {}
+        url = discord_patch.get("webhook_url")
+        if url and url != "***":
+            from .discord_notify import webhook_url
+            try: webhook_url(url)
+            except (ValueError, TypeError): raise ValueError("כתובת Discord Webhook אינה תקינה") from None
+        if "notify" in patch:
+            config = patch["notify"]
+            if "order" in config:
+                order = config["order"]
+                if not isinstance(order, list) or any(not isinstance(c, str) or c not in ("telegram", "ha", "discord") for c in order) or len(set(order)) != len(order):
+                    raise ValueError("סדר ערוצי ההתראה אינו תקין")
+                config["order"] = order + [c for c in ("telegram", "ha", "discord") if c not in order]
+            if "escalation_minutes" in config:
+                value = config["escalation_minutes"]
+                if not isinstance(value, int) or not 0 <= value <= 180:
+                    raise ValueError("זמן התזכורת חייב להיות בין 0 ל־180 דקות")
         if "blocked_categories" in patch:
             values = [
                 str(c).strip() for c in (patch["blocked_categories"] or [])
@@ -665,7 +704,7 @@ class Settings:
                     if str(x) in allowed
                 ]
                 self._data["exercise_packs_by_studio"] = scoped
-        for section in ("telegram", "ha", "notify", "retention", "journal"):
+        for section in ("telegram", "ha", "discord", "notify", "retention", "journal"):
             if section in patch and isinstance(patch[section], dict):
                 for k, v in patch[section].items():
                     if v == "***":

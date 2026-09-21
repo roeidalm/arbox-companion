@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.55.0
+
+- Add optional Discord webhook notifications with per-event selection, secret-file support, persistent delivery records and bounded retries.
+- Allow reordering Telegram, Home Assistant and Discord with drag-and-drop or accessible move buttons. Preserve existing broadcast/escalation preferences and try the next channel immediately if the first fails.
+- Discord notifications link to the application; Telegram/HA action callbacks remain unchanged.
+
 ## 1.54.17
 
 - Use the full Arbox Companion name in application headers, browser titles, home-screen metadata, feedback, notifications and Home Assistant/HACS branding. References to the upstream Arbox service remain unchanged.

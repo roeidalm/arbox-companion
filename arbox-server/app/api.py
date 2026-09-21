@@ -1127,8 +1127,8 @@ async def events(request: Request, level: str | None = None,
             pass
 
     channels = {}
-    for name in ("telegram", "ha"):
-        ch = s.settings.telegram if name == "telegram" else s.settings.ha
+    for name in ("telegram", "ha", "discord"):
+        ch = getattr(s.settings, name)
         if not ch.get("enabled"):
             channels[name] = {"state": "off"}
             continue
@@ -1136,6 +1136,10 @@ async def events(request: Request, level: str | None = None,
             e for e in await s.store.list_events(source="notify", tag=name, limit=50)
             if e["level"] in ("warn", "error")
         ]
+        if name == "discord":
+            delivery = await s.notifier.discord_delivery.status()
+            channels[name] = {"state": "unconfigured" if not s.settings.discord_webhook else "failing" if delivery['failed'] or delivery['unknown'] else "queued" if delivery['queued'] else "ok", **delivery, "failures": delivery['failed'] + delivery['unknown']}
+            continue
         channels[name] = {"state": "failing" if fails else "ok",
                           "failures": len(fails),
                           "last": fails[0]["ts"] if fails else None}
@@ -1573,7 +1577,7 @@ class JournalPreviewBody(BaseModel):
 async def test_journal(request: Request, channel: str, body: JournalPreviewBody,
                        x_api_key: str | None = Header(None)):
     require_key(request, x_api_key)
-    if channel not in ("telegram", "ha") or body.level not in ("quick", "feedback", "full"):
+    if channel not in ("telegram", "ha", "discord") or body.level not in ("quick", "feedback", "full"):
         raise HTTPException(422, "בחר/י ערוץ ורמת מעקב פעילה לבדיקה")
     try:
         url = await ctx(request).rules_engine.feedback_form.start_preview(channel, body.level)
@@ -1601,7 +1605,7 @@ async def test_channel(request: Request, channel: str,
         await ctx(request).notifier.send_test(channel)
     except Exception as err:  # noqa: BLE001
         raise HTTPException(502, str(err))
-    return {"ok": True}
+    return {"ok": True, "discord_delivery": await ctx(request).notifier.discord_delivery.status() if channel == "discord" else None}
 
 
 # ------------------------------------------------------------ HA callback

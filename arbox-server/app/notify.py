@@ -29,6 +29,7 @@ from typing import Awaitable, Callable
 import aiohttp
 
 from .settings import Settings
+from .discord_notify import DiscordDelivery, CHANNELS
 from .notification_reply import NotificationReply
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ MessageHandler = Callable[..., Awaitable[str | None]]
 EventLogger = Callable[..., Awaitable[None]]
 
 
-_CHANNEL_HE = {"telegram": "טלגרם", "ha": "Home Assistant"}
+_CHANNEL_HE = {"telegram": "טלגרם", "ha": "Home Assistant", "discord": "Discord"}
 
 
 def _ha_action(b: dict) -> dict:
@@ -79,6 +80,7 @@ def _telegram_button(b: dict) -> dict:
 class Notifier:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.discord_delivery = DiscordDelivery(settings, self._log)
         self._session: aiohttp.ClientSession | None = None
         self._tg_task: asyncio.Task | None = None
         self._tg_offset = 0
@@ -123,6 +125,7 @@ class Notifier:
         return self._session
 
     async def close(self) -> None:
+        await self.discord_delivery.close()
         if self._tg_task:
             self._tg_task.cancel()
         for t in (*self._esc_tasks, *self._cb_tasks):
@@ -136,17 +139,18 @@ class Notifier:
         if name == "telegram":
             tg = self.settings.telegram
             return bool(tg.get("bot_token") and tg.get("chat_id"))
+        if name == "discord": return bool(self.settings.discord_webhook)
         return bool(self.settings.ha.get("webhook_url"))
 
     def _eligible(self, kind: str) -> list[str]:
         order = [c for c in (self.settings.notify.get("order") or [])
-                 if c in ("telegram", "ha")]
-        for c in ("telegram", "ha"):
+                 if c in CHANNELS]
+        for c in CHANNELS:
             if c not in order:
                 order.append(c)
         out = []
         for name in order:
-            ch = self.settings.telegram if name == "telegram" else self.settings.ha
+            ch = getattr(self.settings, name)
             if not ch.get("enabled") or not self._configured(name):
                 continue
             if kind != "system" and kind not in (ch.get("kinds") or []):
@@ -180,12 +184,17 @@ class Notifier:
             esc = 0
         if not buttons or esc <= 0 or len(eligible) < 2 or is_answered is None:
             return await self._send_to(eligible, text, buttons, telegram_bold=telegram_bold)
-        delivered = await self._send_to(eligible[:1], text, buttons, telegram_bold=telegram_bold)
-        task = asyncio.create_task(
-            self._escalate(eligible[1:], text, buttons, esc, is_answered, telegram_bold)
-        )
-        self._esc_tasks.add(task)
-        task.add_done_callback(self._esc_tasks.discard)
+        delivered = False
+        rest = []
+        for i, channel in enumerate(eligible):
+            delivered = await self._send_to([channel], text, buttons, telegram_bold=telegram_bold)
+            if delivered:
+                rest = eligible[i + 1:]
+                break
+        if delivered and rest:
+            task = asyncio.create_task(self._escalate(rest, text, buttons, esc, is_answered, telegram_bold))
+            self._esc_tasks.add(task)
+            task.add_done_callback(self._esc_tasks.discard)
         return delivered
 
     LEVEL_ICON = {"warn": "⚠️", "error": "❌"}
@@ -229,6 +238,8 @@ class Notifier:
                 if name == "telegram":
                     await self._tg_document(filename, content, caption, mime,
                                             buttons)
+                elif name == "discord":
+                    await self.discord_delivery.deliver(caption or filename, [[{"text": link_title or filename, "uri": link}]] if link else buttons)
                 elif link:
                     await self._send_ha(
                         caption or filename, [[{
@@ -284,6 +295,7 @@ class Notifier:
         """
         coros = [
             self._send_telegram(text, buttons, **({'bold_lines': telegram_bold} if telegram_bold else {})) if n == "telegram"
+            else self.discord_delivery.deliver(text, buttons) if n == "discord"
             else self._send_ha(text, buttons)
             for n in names
         ]
@@ -317,8 +329,10 @@ class Notifier:
         await self._send_to(rest, f"⏰ תזכורת — טרם נענה:\n{text}", buttons, telegram_bold=telegram_bold)
 
     async def send_test(self, channel: str) -> str:
-        text = "🏋️ Arbox server — הודעת בדיקה"
-        if channel == "telegram":
+        text = "🧪 Arbox Companion — הודעת בדיקה בלבד. לא בוצעה פעולה באימון."
+        if channel == "discord":
+            await self.discord_delivery.deliver(text, force=True)
+        elif channel == "telegram":
             await self._send_telegram(text, None, force=True)
         elif channel == "ha":
             await self._send_ha(text, None, force=True)
@@ -337,7 +351,9 @@ class Notifier:
 
     async def send_preview(self, channel: str, text: str, buttons: list[list[dict]]) -> None:
         """Explicit rehearsal: one configured channel, independent of routing."""
-        if channel == "telegram":
+        if channel == "discord":
+            await self.discord_delivery.deliver(text, buttons, force=True)
+        elif channel == "telegram":
             await self._send_telegram(text, buttons, force=True)
             self._preview_telegram_until = time.monotonic() + 1800
             self._tg_wakeup.set()

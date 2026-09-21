@@ -103,6 +103,7 @@ async def lifespan(app: FastAPI):
     client = ArboxClient(DATA_DIR, whitelabel=os.environ.get("WHITELABEL", "Arbox"))
     notifier = Notifier(settings)
     notifier.log_event = store.log_event
+    await notifier.discord_delivery.start()
     store.on_event = notifier.push_event
     syncer = Syncer(client, store, settings=settings)
     notifier.studio_context = lambda: (syncer.studio_name, syncer.studio_count)

@@ -2556,10 +2556,10 @@ function renderStatusStrip(st) {
        : age < 60 ? `לפני ${age} דק׳`
        : `לפני ${Math.round(age / 60)} שע׳`,
        age != null && age < 120 ? "ok" : "bad");
-  for (const [name, label] of [["telegram", "טלגרם"], ["ha", "Home Assistant"]]) {
+  for (const [name, label] of [["telegram", "טלגרם"], ["ha", "Home Assistant"], ["discord", "Discord"]]) {
     const c = st.channels[name] || {};
     cell(label,
-         c.state === "off" ? "כבוי" : c.state === "ok" ? "תקין" : `נכשל ×${c.failures}`,
+         c.state === "off" ? "כבוי" : c.state === "unconfigured" ? "חסרה הגדרה" : c.state === "queued" ? `ממתינות לשליחה: ${c.queued}` : c.state === "ok" ? "תקין" : `נכשל ×${c.failures}`,
          c.state === "off" ? "off" : c.state === "ok" ? "ok" : "bad");
   }
   cell("תזמונים ממתינים", String(st.pending_pins ?? 0));
@@ -3302,6 +3302,24 @@ function renderExerciseSettings(settings) {
   }
 }
 
+let notificationOrder = ['telegram', 'ha', 'discord'];
+function renderNotificationOrder(order) {
+  const labels = {telegram:'טלגרם',ha:'Home Assistant',discord:'Discord'};
+  notificationOrder = [...new Set([...order, ...Object.keys(labels)])].filter(x=>labels[x]);
+  const list = $('#notifyOrder'); list.replaceChildren();
+  let dragged = null;
+  const move = (from,to) => { const next=[...notificationOrder]; next.splice(to,0,next.splice(from,1)[0]); renderNotificationOrder(next); };
+  notificationOrder.forEach((name,index)=>{
+    const li=document.createElement('li'); li.draggable=true;
+    const title=document.createElement('span'); title.textContent=`${index+1}. ${labels[name]}`;li.append(title);
+    for (const [delta,text,label] of [[-1,'↑','העבר למעלה'],[1,'↓','העבר למטה']]) {
+      const b=document.createElement('button');b.type='button';b.textContent=text;b.setAttribute('aria-label',`${label}: ${labels[name]}`);b.disabled=index+delta<0||index+delta>=notificationOrder.length;b.onclick=()=>move(index,index+delta);li.append(b);
+    }
+    li.ondragstart=e=>{dragged=index;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',name);};
+    li.ondragover=e=>e.preventDefault();li.ondrop=e=>{e.preventDefault();if(dragged!==null)move(dragged,index);};list.append(li);
+  });
+}
+
 async function loadSettings() {
   api("/api/health").then((h) => {
     $("#versionLine").textContent =
@@ -3319,6 +3337,12 @@ async function loadSettings() {
   $("#tgEnabled").checked = s.telegram.enabled;
   $("#tgToken").value = s.telegram.bot_token;
   $("#tgChat").value = s.telegram.chat_id;
+  $("#discordEnabled").checked = s.discord.enabled;
+  $("#discordWebhook").value = s.discord.webhook_url;
+  $("#discordWebhook").disabled = s.discord.managed_secret;
+  $("#discordSecretHint").textContent = s.discord.managed_secret ? (s.discord.configured ? "הכתובת מנוהלת בקובץ סודי בשרת" : "הקובץ הסודי בשרת חסר או ריק") : "צרו Webhook בהגדרות הערוץ ב־Discord והדביקו את הכתובת כאן";
+  $("#discordLogLevel").value = s.discord.log_level || 'error';
+  $("#journalDiscord").checked = (s.discord.kinds || []).includes('journal');
   $("#haEnabled").checked = s.ha.enabled;
   $("#haWebhook").value = s.ha.webhook_url;
   $("#haFeedbackInHa").checked = s.ha.feedback_in_ha === true;
@@ -3388,10 +3412,10 @@ async function loadSettings() {
     $("#baseUrl").dataset.autofilled = "1";
     $("#baseUrlHint").textContent = "מולא אוטומטית מהכתובת שדרכה נכנסת. שמור/י כדי לאשר.";
   }
-  $("#notifyOrder").value = (s.notify.order || ["telegram"])[0];
+  renderNotificationOrder(s.notify.order || ["telegram", "ha", "discord"]);
   $("#escMinutes").value = s.notify.escalation_minutes ?? 0;
-  for (const ch of ["tg", "ha"]) {
-    const kinds = (ch === "tg" ? s.telegram : s.ha).kinds || [];
+  for (const ch of ["tg", "ha", "discord"]) {
+    const kinds = (ch === "tg" ? s.telegram : s[ch]).kinds || [];
     $$(`.kind-${ch}`).forEach((c) => { c.checked = kinds.includes(c.dataset.kind); });
   }
 }
@@ -3481,8 +3505,13 @@ async function saveSettings() {
           feedback_in_ha: $("#haFeedbackInHa").checked,
           kinds: haKinds.filter((k) => k !== "journal" || $("#journalHa").checked),
         },
+        discord: {
+          enabled: $('#discordEnabled').checked, webhook_url: $('#discordWebhook').value.trim(),
+          log_level: $('#discordLogLevel').value,
+          kinds: [...$$('.kind-discord').filter(c=>c.checked).map(c=>c.dataset.kind), ...($('#journalDiscord').checked ? ['journal'] : [])],
+        },
         notify: {
-          order: $("#notifyOrder").value === "ha" ? ["ha", "telegram"] : ["telegram", "ha"],
+          order: notificationOrder,
           escalation_minutes: Number($("#escMinutes").value) || 0,
         },
       }),
@@ -3557,8 +3586,8 @@ $$(".testBtn").forEach((b) => b.addEventListener("click", async () => {
   // save the form first — testing what's on screen, not what was stored
   if (await saveSettings()) {
     try {
-      await api(`/api/settings/test/${b.dataset.test}`, { method: "POST" });
-      toast("נשלח ✓");
+      const result = await api(`/api/settings/test/${b.dataset.test}`, { method: "POST" });
+      toast(result.discord_delivery?.queued ? "נשמר בתור — Discord ביקש להמתין לפני השליחה" : "נשלח ✓");
     } catch (e) { toast("נכשל: " + e.message, 6000); }
   }
   b.disabled = false;

@@ -71,7 +71,7 @@ async def status(s):
             'state':'error' if p.get('error') else 'active' if p.get('enabled') else 'paused' if p.get('refresh_token') else 'disconnected',
             'last_sync':p.get('last_sync'),'event_count':len(p.get('events',{}))},
             'event_counts_7_days':await s.store.event_counts(days=7),
-            'notifications':{k:{'enabled':bool(getattr(s.settings,k).get('enabled'))} for k in ('telegram','ha')}}
+            'notifications':{k:{'enabled':bool(getattr(s.settings,k).get('enabled'))} for k in ('telegram','ha','discord')}}
 
 
 @router.get('')

@@ -799,3 +799,5 @@ legend input { width: auto; }
 .mine-item.mine-autobook,.session.schedule-autobook{border-inline-start:4px solid #ae82d5!important}
 
 .mg-item.status-review{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--card))}
+
+.notify-order{list-style:none;padding:0;display:grid;gap:8px;max-width:520px}.notify-order li{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px;cursor:grab}.notify-order li span{flex:1}.notify-order button{min-width:44px;min-height:44px}.notify-order button:disabled{opacity:.35}

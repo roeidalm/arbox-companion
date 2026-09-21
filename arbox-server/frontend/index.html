@@ -14,7 +14,7 @@
        style attributes, and blocking them breaks the date and quota rows. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Arbox Companion — לוח שיעורים</title>
-<link rel="stylesheet" href="/static/style.css?v=2.63.0">
+<link rel="stylesheet" href="/static/style.css?v=2.65.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
 <link rel="stylesheet" href="/static/google-calendar.css?v=9">
@@ -395,18 +395,35 @@
       </div>
 
       <div class="card">
+        <h2>Discord</h2>
+        <label><input id="discordEnabled" type="checkbox"> הפעלת התראות Discord</label>
+        <p class="hint">הודעות בערוץ שלך עם קישור לאתר לביצוע הפעולה. אין כפתורי הרשמה ישירים ב־Discord.</p>
+        <div class="field-row">
+          <label>כתובת Webhook <input id="discordWebhook" type="password" autocomplete="off" placeholder="https://discord.com/api/webhooks/…"></label>
+          <span id="discordSecretHint" class="hint"></span>
+        </div>
+        <div class="kinds">
+<label><input type="checkbox" class="kind-discord" data-kind="digest"> הודעה לילית</label>
+<label><input type="checkbox" class="kind-discord" data-kind="autobook"> הזמנות אוטומטיות</label>
+<label><input type="checkbox" class="kind-discord" data-kind="standby"> רשימת המתנה</label>
+<label><input type="checkbox" class="kind-discord" data-kind="studio"> הודעות מהסטודיו</label>
+<label><input type="checkbox" class="kind-discord" data-kind="latecancel"> לפני שאי אפשר לבטל</label>
+<label><input type="checkbox" class="kind-discord" data-kind="log"> אירועי מערכת</label>
+<label><input type="checkbox" class="kind-discord" data-kind="vacation"> חופשות</label>
+<label><input type="checkbox" class="kind-discord" data-kind="attendance"> אישור הגעה</label>
+<label><input type="checkbox" class="kind-discord" data-kind="membership"> עדכוני מנויים</label>
+        </div>
+        <div class="field-row"><label>אירועי מערכת <select id="discordLogLevel"><option value="error">שגיאות בלבד</option><option value="warn">אזהרות ושגיאות</option></select></label><button data-test="discord" class="testBtn">שלח בדיקה</button></div>
+      </div>
+      <div class="card">
         <h2>תזמון וסדר</h2>
+        <p class="hint">גררו לשינוי סדר העדיפות, או השתמשו בחצים. ערוצים כבויים או שאינם נבחרים לסוג ההודעה ידולגו.</p>
+        <ol id="notifyOrder" class="notify-order" aria-label="סדר ערוצי ההתראות"></ol>
         <div class="field-row">
           <label>שעת ההודעה הלילית
             <input id="digestHour" type="number" min="0" max="23">
           </label>
-          <label>ערוץ ראשון
-            <select id="notifyOrder">
-              <option value="telegram">טלגרם</option>
-              <option value="ha">Home Assistant</option>
-            </select>
-          </label>
-          <label>אסקלציה (דקות)
+          <label>תזכורת בערוצים הבאים אחרי (דקות)
             <input id="escMinutes" type="number" min="0" max="180">
           </label>
           <label>התראה לפני נעילת הביטול
@@ -417,9 +434,7 @@
           </label>
         </div>
         <p class="hint">
-          <strong>אסקלציה:</strong> הודעה עם כפתורים נשלחת קודם לערוץ הראשון, ואם לא
-          נלחץ כפתור תוך מספר הדקות שהוגדר היא נשלחת גם לשני עם ⏰ תזכורת.
-          ‏0 = שני הערוצים מקבלים מיד.<br>
+          <strong>שליחה ותזכורת:</strong> ‏0 = שליחה מיידית לכל הערוצים שנבחרו. זמן גדול מאפס: הודעה שממתינה לתשובה תישלח תחילה לערוץ המועדף, ולאחר הזמן שהוגדר גם לבאים אם לא נענתה. הודעות רגילות נשלחות לכולם. פתיחת הקישור ב־Discord אינה נחשבת למענה על כפתור בטלגרם או ב־HA.<br>
           <strong>תזכורת לפני שיעור:</strong> ‏0 = כבוי. אירוע היומן כבר נושא תזכורות
           משלו, אז זה נחוץ רק אם בא לך גם התראה בערוצים.
         </p>
@@ -483,6 +498,7 @@
           <div class="kinds">
             <label><input id="journalTelegram" type="checkbox"> בטלגרם</label>
             <label><input id="journalHa" type="checkbox"> ב‑Home Assistant</label>
+<label><input id="journalDiscord" type="checkbox"> ב־Discord</label>
           </div>
           <p class="hint">רוצים להרגיש איך זה עובד? בחרו רמת מעקב ונסו אותה לפני השמירה.
             הבדיקה נשלחת רק לערוץ שבחרתם, משתמשת בחיבור השמור ונשארת זמינה ל־30 דקות.
@@ -490,6 +506,7 @@
           <div class="kinds">
             <button type="button" class="journal-test" data-channel="telegram">🧪 נסה בטלגרם</button>
             <button type="button" class="journal-test" data-channel="ha">🧪 נסה ב־HA</button>
+<button type="button" class="journal-test" data-channel="discord">🧪 נסה ב־Discord</button>
           </div>
           <p id="journalTestMsg" class="hint" role="status" aria-live="polite"></p>
         </div>
@@ -792,6 +809,6 @@
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=10"></script>
-<script src="/static/app.js?v=2.64.3"></script>
+<script src="/static/app.js?v=2.65.0"></script>
 </body>
 </html>

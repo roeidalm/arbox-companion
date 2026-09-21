@@ -182,7 +182,7 @@ class Notifier:
             esc = int(self.settings.notify.get("escalation_minutes") or 0)
         except (TypeError, ValueError):
             esc = 0
-        if not buttons or esc <= 0 or len(eligible) < 2 or is_answered is None:
+        if self.settings.notify.get("delivery_spacing_minutes", 0) > 0 or not buttons or esc <= 0 or len(eligible) < 2 or is_answered is None:
             return await self._send_to(eligible, text, buttons, telegram_bold=telegram_bold)
         delivered = False
         rest = []
@@ -233,7 +233,25 @@ class Notifier:
         """Deliver a file. Telegram uploads it; HA (no file channel) gets a
         notification with a URI action pointing at `link`, when one is given."""
         caption = self._with_studio(caption) if caption else caption
-        for name in self._eligible(kind):
+        names = self._eligible(kind)
+        spacing = self.settings.notify.get("delivery_spacing_minutes", 0)
+        if spacing and len(names) > 1:
+            await self._send_document_channels(names[:1], filename, content, caption, mime, link, link_title, buttons, 0)
+            async def later():
+                await asyncio.sleep(spacing * 60)
+                await self._send_document_channels(names[1:], filename, content, caption, mime, link, link_title, buttons, spacing)
+            task = asyncio.create_task(later())
+            self._esc_tasks.add(task)
+            task.add_done_callback(self._esc_tasks.discard)
+        else:
+            await self._send_document_channels(names, filename, content, caption, mime, link, link_title, buttons, 0)
+
+    async def _send_document_channels(self, names, filename, content, caption, mime, link, link_title, buttons, spacing):
+        for index, name in enumerate(names):
+            if index and spacing:
+                await asyncio.sleep(spacing * 60)
+            if not getattr(self.settings, name).get("enabled"):
+                continue
             try:
                 if name == "telegram":
                     await self._tg_document(filename, content, caption, mime,
@@ -293,6 +311,13 @@ class Notifier:
         consumed: a flow that hands the user a button and then fails to send
         the message carrying it is dead with no way back.
         """
+        spacing = self.settings.notify.get("delivery_spacing_minutes", 0)
+        if spacing > 0 and len(names) > 1:
+            await self._send_to(names[:1], text, buttons, telegram_bold=telegram_bold)
+            task = asyncio.create_task(self._send_spaced(names[1:], text, buttons, spacing, telegram_bold))
+            self._esc_tasks.add(task)
+            task.add_done_callback(self._esc_tasks.discard)
+            return True  # Later channels have accepted scheduled delivery.
         coros = [
             self._send_telegram(text, buttons, **({'bold_lines': telegram_bold} if telegram_bold else {})) if n == "telegram"
             else self.discord_delivery.deliver(text, buttons) if n == "discord"
@@ -315,6 +340,15 @@ class Notifier:
                 )
         return len(failed) < len(names)
 
+    async def _send_spaced(self, names, text, buttons, minutes, telegram_bold=None):
+        """Broadcast in priority order; answering does not cancel later copies."""
+        for name in names:
+            await asyncio.sleep(minutes * 60)
+            if not getattr(self.settings, name).get("enabled"):
+                continue
+            if await self._send_to([name], text, buttons, telegram_bold=telegram_bold):
+                await self._log("info", "התראה נשלחה לפי סדר הערוצים", channel=name)
+
     async def _escalate(
         self, rest: list[str], text: str, buttons, minutes: int, is_answered, telegram_bold=None
     ) -> None:
@@ -330,7 +364,10 @@ class Notifier:
 
     async def send_test(self, channel: str) -> str:
         text = "🧪 Arbox Companion — הודעת בדיקה בלבד. לא בוצעה פעולה באימון."
-        if channel == "discord":
+        if channel == "routing":
+            if not await self.send(text):
+                raise RuntimeError("שליחת הבדיקה לערוץ הראשון נכשלה")
+        elif channel == "discord":
             await self.discord_delivery.deliver(text, force=True)
         elif channel == "telegram":
             await self._send_telegram(text, None, force=True)

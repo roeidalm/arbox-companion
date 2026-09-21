@@ -152,3 +152,38 @@ async def test_disabled_channel_pauses_pending_delivery(settings):
         await d.db.execute('UPDATE delivery SET next_attempt=0');await d.db.commit();await d.drain()
         assert len(d.http.calls)==1 and (await d.status())['queued']==1
     finally:await d.close()
+
+
+@pytest.mark.asyncio
+async def test_spaced_broadcast_reaches_both_even_when_answered(settings, monkeypatch):
+    settings.update({'telegram': {'enabled': True, 'bot_token': 'x', 'chat_id': '1'},
+                     'notify': {'order': ['discord', 'telegram', 'ha'],
+                                'delivery_spacing_minutes': 1, 'escalation_minutes': 2}})
+    n = Notifier(settings)
+    calls = []
+    n.discord_delivery.deliver = AsyncMock(side_effect=lambda *a: calls.append('discord'))
+    n._send_telegram = AsyncMock(side_effect=lambda *a: calls.append('telegram'))
+    gate = asyncio.Event()
+    started = asyncio.Event()
+    async def sleep(seconds):
+        assert seconds == 60
+        started.set()
+        await gate.wait()
+    monkeypatch.setattr('app.notify.asyncio.sleep', sleep)
+    answered = AsyncMock(return_value=True)
+    try:
+        assert await n.send('test', [[{'text': 'reply', 'data': 'book:1'}]], is_answered=answered)
+        await started.wait()
+        assert calls == ['discord']
+        tasks = list(n._esc_tasks)
+        gate.set()
+        await asyncio.gather(*tasks)
+        assert calls == ['discord', 'telegram']
+        answered.assert_not_awaited()
+    finally:
+        await n.close()
+
+@pytest.mark.parametrize('value', [-1, 181, True, '1', 1.5])
+def test_spacing_validation(settings, value):
+    with pytest.raises(ValueError):
+        settings.update({'notify': {'delivery_spacing_minutes': value}})

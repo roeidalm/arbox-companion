@@ -78,6 +78,7 @@ DEFAULTS: dict = {
         # that many minutes. 0 = all eligible channels at once.
         "order": ["telegram", "ha", "discord"],
         "escalation_minutes": 0,
+        "delivery_spacing_minutes": 0,
     },
     # Post-class journal is opt-in.  No migration enables its notification
     # kind for existing users: choosing a level and channels is deliberate.
@@ -600,9 +601,13 @@ class Settings:
                 if not isinstance(order, list) or any(not isinstance(c, str) or c not in ("telegram", "ha", "discord") for c in order) or len(set(order)) != len(order):
                     raise ValueError("סדר ערוצי ההתראה אינו תקין")
                 config["order"] = order + [c for c in ("telegram", "ha", "discord") if c not in order]
+            if "delivery_spacing_minutes" in config:
+                value = config["delivery_spacing_minutes"]
+                if type(value) is not int or not 0 <= value <= 180:
+                    raise ValueError("פער השליחה חייב להיות בין 0 ל־180 דקות")
             if "escalation_minutes" in config:
                 value = config["escalation_minutes"]
-                if not isinstance(value, int) or not 0 <= value <= 180:
+                if type(value) is not int or not 0 <= value <= 180:
                     raise ValueError("זמן התזכורת חייב להיות בין 0 ל־180 דקות")
         if "blocked_categories" in patch:
             values = [

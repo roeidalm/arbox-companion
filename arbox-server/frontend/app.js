@@ -3414,6 +3414,7 @@ async function loadSettings() {
   }
   renderNotificationOrder(s.notify.order || ["telegram", "ha", "discord"]);
   $("#escMinutes").value = s.notify.escalation_minutes ?? 0;
+  $("#deliverySpacing").value = s.notify.delivery_spacing_minutes ?? 0;
   for (const ch of ["tg", "ha", "discord"]) {
     const kinds = (ch === "tg" ? s.telegram : s[ch]).kinds || [];
     $$(`.kind-${ch}`).forEach((c) => { c.checked = kinds.includes(c.dataset.kind); });
@@ -3513,6 +3514,7 @@ async function saveSettings() {
         notify: {
           order: notificationOrder,
           escalation_minutes: Number($("#escMinutes").value) || 0,
+          delivery_spacing_minutes: Number($("#deliverySpacing").value) || 0,
         },
       }),
     });

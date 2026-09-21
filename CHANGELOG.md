@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.55.1
+
+- Add ordered broadcast spacing: deliver to every selected channel at a configurable interval, independently of whether a previous copy was answered. Preserve unanswered-only escalation as a separate option.
+
 ## 1.55.0
 
 - Add optional Discord webhook notifications with per-event selection, secret-file support, persistent delivery records and bounded retries.

@@ -45,3 +45,13 @@ metadata for 30 days (pruned at startup); their message bodies are removed.
 
 System status shows queued, failed and uncertain counts; the event log explains
 sanitized failures. No raw HTTP exception or response body is logged for Discord.
+
+## Ordered broadcast
+
+`notify.delivery_spacing_minutes` (0–180, default 0) sends normal notifications,
+log alerts and calendar-file links to all eligible channels in order, with the
+configured interval. It takes precedence over unanswered-only escalation; answering
+does not cancel later copies. The personal workout journal form stays on its single
+preferred channel. Delayed cross-channel copies use the existing in-memory scheduler:
+a server restart cancels those timers. Discord's own queued transport retries remain
+durable. `/api/settings/test/routing` tests this route without booking anything.

@@ -1,4 +1,4 @@
-import {feedbackTemplate, mountFeedback} from './feedback-form.js?v=2.9.0';
+import {feedbackTemplate, mountFeedback} from './feedback-form.js?v=3.5.2';
 
 /** HA provides the authenticated websocket; no Arbox URL or API key enters the browser. */
 class ArboxFeedbackPanel extends HTMLElement {

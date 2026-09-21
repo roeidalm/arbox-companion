@@ -1,3 +1,5 @@
+<img src="arbox-server/frontend/brand/icon.svg" width="88" height="88" alt="Arbox Companion">
+
 # Arbox Companion — self-hosted booking server + Home Assistant integration
 
 Replaces the Arbox mobile app for day-to-day use: see the weekly schedule,

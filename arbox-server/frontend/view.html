@@ -1,5 +1,11 @@
-<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'"><title>Arbox — צפייה בלבד</title><link rel="stylesheet" href="/static/view.css"></head><body><main>
-<header><h1>Arbox · צפייה בלבד</h1><a href="/settings">לאפליקציה</a></header>
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'"><title>Arbox — צפייה בלבד</title><link rel="stylesheet" href="/static/view.css"><link rel="icon" href="/static/brand/icon.svg?v=1" type="image/svg+xml">
+<link rel="icon" href="/static/brand/favicon.ico?v=1" sizes="any">
+<link rel="apple-touch-icon" href="/static/brand/icon-180.png?v=1">
+<link rel="manifest" href="/static/brand/manifest.webmanifest">
+<meta name="theme-color" content="#2860EB">
+<link rel="stylesheet" href="/static/brand/brand.css?v=1">
+</head><body><main>
+<header><h1 class="arbox-brand"><img src="/static/brand/icon.svg" width="36" height="36" alt="">Arbox · צפייה בלבד</h1><a href="/settings">לאפליקציה</a></header>
 <p>נתוני השרת לצפייה ולשילוב בלוחות בקרה. אין במסך הזה הרשמה, ביטול או רענון מול Arbox.</p>
 <section><label for="credential">מפתח צפייה (או מפתח מנהל להגדרת הגישה)</label><div class="actions"><input id="credential" type="password" autocomplete="off"><button id="connect">הצגת הנתונים</button><button id="forget">יציאה מצפייה</button></div>
 <details id="access" hidden><summary>ניהול מפתח צפייה לשילובים</summary><p>המפתח מיועד ל־Homepage, Grafana וכל לקוח API. הוא חושף נתוני אימונים ודירוגים, אך אינו מאפשר פעולות. יצירת מפתח חדש מבטלת את הקודם.</p><button id="rotate">יצירת מפתח צפייה חדש</button><button id="revoke">ביטול מפתח הצפייה</button><p id="keyState"></p><input id="issued" type="password" readonly hidden aria-label="מפתח הצפייה החדש"><button id="copy" hidden>העתקת המפתח</button></details></section>

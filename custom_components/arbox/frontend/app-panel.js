@@ -1,4 +1,4 @@
-import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.1.0";
+import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.5.2";
 import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.4.0';
 import {renderJournal, journalSignature} from './panel-journal.js?v=3.4.0';
 import {policySummary, policyEditor} from './membership-policy.js?v=3';
@@ -185,6 +185,7 @@ export class ArboxAppPanel extends HTMLElement {
     this._menu.narrow = this._narrow;
     header.append(
       this._menu,
+      Object.assign(document.createElement("img"), {src: new URL("./brand/icon.svg", import.meta.url).href, alt: "", width: 36, height: 36}),
       node("b", "Arbox", "brand"),
       node("span", "התנועה שלך, במקום אחד", "tagline"),
     );

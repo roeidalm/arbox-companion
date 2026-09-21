@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.54.15
+
+- Adopt the Arbox summit logo across the web app, feedback, read-only viewer, browser tabs and home-screen icons.
+- Bundle local Home Assistant brand assets and update the Arbox panel header (integration 3.5.2).
+
 ## 1.54.14
 
 - Add a generic read-only API and viewer for dashboards: sessions, memberships,

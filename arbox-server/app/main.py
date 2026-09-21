@@ -304,6 +304,8 @@ SPA_PAGES = ("schedule", "mine", "automations", "journal", "system", "settings")
 
 @app.get("/{page}")
 async def page_route(page: str):
+    if page == "favicon.ico":
+        return FileResponse(os.path.join(FRONTEND_DIR, "brand", "favicon.ico"))
     if page == "view":
         return FileResponse(os.path.join(FRONTEND_DIR, "view.html"))
     if page in SPA_PAGES:

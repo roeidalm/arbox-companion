@@ -116,7 +116,7 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(command.call_count, 5)
             self.assertEqual(panel.await_count, 2)
             self.assertIsNone(panel.call_args_list[0].kwargs["sidebar_title"])
-            self.assertEqual(panel.call_args_list[1].kwargs["sidebar_title"], "Arbox")
+            self.assertEqual(panel.call_args_list[1].kwargs["sidebar_title"], "Arbox Companion")
             self.assertFalse(panel.call_args.kwargs["require_admin"])
             api.async_unload_feedback(hass)
             self.assertEqual([c.args[1] for c in remove.call_args_list], ["arbox-feedback", "arbox"])

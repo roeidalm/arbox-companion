@@ -493,7 +493,9 @@
       <div class="card">
         <h2>למידת קצב ההרשמה</h2>
         <label><input type="checkbox" id="registrationLearning"> למידה לכל השיעורים בסטודיו הפעיל</label>
-        <p class="hint">דגימה כל 30 שניות בעשר הדקות הראשונות מפתיחת ההרשמה. הלמידה אינה משנה את ההרשמה. כשהלמידה כבויה, נדגמים רק שיעורים עם תזמון או אוטומציה פעילים. שיעורים ללא מועד פתיחה ידוע אינם נמדדים.</p>
+        <p class="hint">דגימה במרווח אקראי של 20–40 שניות במשך החלון שנבחר מפתיחת ההרשמה, ועוד דגימת סיום לאחריו. כל דגימה נשמרת בנפרד ללא מחיקה אוטומטית. הלמידה אינה משנה את ההרשמה. כשהלמידה כבויה, נדגמים רק שיעורים עם תזמון או אוטומציה פעילים. שיעורים ללא מועד פתיחה ידוע אינם נמדדים.</p>
+        <label>חלון למידה מפתיחת ההרשמה (דקות) <input id="registrationWindow" type="number" min="1" max="120" value="30"></label>
+        <p class="hint">חלון הלמידה עצמאי מזמן ההמתנה: ממשיכים ללמוד גם אחרי שהושג הסף או שבוצעה הרשמה. שינוי החלון יחול על פתיחות חדשות.</p>
         <p id="registrationWarning" class="hint"></p>
         <p id="registrationHealth" class="hint"></p>
       </div>
@@ -503,7 +505,7 @@
         <p class="hint">כבוי = הרשמה מיידית כמו היום, גם אם הוגדרו חריגות. פעיל = המתנה עד הסף או עד תום הזמן, המוקדם מביניהם. מידע חסר או ישן מחזיר להרשמה מיידית. ההמתנה עלולה לגרום לפספוס מקום.</p>
         <div class="field-row">
           <label>אחוז תפוסה להרשמה <input id="registrationPercent" type="number" min="1" max="50" value="30"></label>
-          <label>זמן המתנה מרבי מפתיחת ההרשמה (דקות) <input id="registrationTimeout" type="number" min="1" max="10" value="5"></label>
+          <label>זמן המתנה מרבי מפתיחת ההרשמה (דקות) <input id="registrationTimeout" type="number" min="1" max="10" value="10"></label>
         </div>
         <button id="registrationSave" class="primary" type="button">שמור למידה וברירת מחדל</button>
       </div>
@@ -514,7 +516,7 @@
         <div class="field-row">
           <label>מצב <select id="registrationMode"><option value="inherit">לפי ברירת המחדל</option><option value="immediate">מיידי</option><option value="wait">המתנה מותאמת</option></select></label>
           <label>אחוז <input id="registrationOverridePercent" type="number" min="1" max="50" value="30"></label>
-          <label>דקות <input id="registrationOverrideTimeout" type="number" min="1" max="10" value="5"></label>
+          <label>דקות <input id="registrationOverrideTimeout" type="number" min="1" max="10" value="10"></label>
         </div>
         <button id="registrationOverrideSave" type="button">שמור חריגה</button>
       </div>
@@ -852,6 +854,6 @@
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=10"></script>
 <script src="/static/app.js?v=2.67.0"></script>
-<script src="/static/registration-learning.js?v=1"></script>
+<script src="/static/registration-learning.js?v=2"></script>
 </body>
 </html>

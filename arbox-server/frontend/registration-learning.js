@@ -9,6 +9,7 @@ async function loadRegistrationLearning() {
     $('#registrationWaiting').checked=c.enabled;
     $('#registrationPercent').value=c.threshold_percent;
     $('#registrationTimeout').value=c.timeout_minutes;
+    $('#registrationWindow').value=c.learning_window_minutes;
     $('#registrationWarning').textContent=registrationReport.warning;
     const last=registrationReport.recent_runs[0];
     $('#registrationHealth').textContent=last ? `דגימה אחרונה: ${last.observed_at.replace('T',' ').slice(0,19)} · ${last.found}/${last.expected} שיעורים · ${last.status==='ok'?'הושלמה':last.status==='partial'?'חסרים נתונים':'נכשלה'}` : 'עדיין לא בוצעה דגימה. האיסוף מתחיל בפתיחות ההרשמה הבאות, ואינו משחזר היסטוריה.';
@@ -26,13 +27,19 @@ async function loadRegistrationLearning() {
     for(const course of registrationReport.courses) {
       const details=document.createElement('details');details.append(timingNode('summary',`${course.label} — ${course.openings} פתיחות נמדדו, ${course.complete_openings} בכיסוי מלא`));
       details.append(timingNode('p','דגימות מעטות אינן תחזית. פתיחות חלקיות, שינוי בקיבולת ושינויים בשיעור עשויים להשפיע.'));
-      for(const w of course.observations.slice(-12).reverse()) {
+      for(const w of course.observations.slice().reverse()) {
         const entry=document.createElement('details');
         entry.append(timingNode('summary',`${w.opens_at.replace('T',' ')} · ${w.samples} דגימות · ${w.complete?'כיסוי מלא':'כיסוי חלקי'}`));
         const f=x=>x==null?'לא נצפה':`${Math.floor(x/60)}:${String(x%60).padStart(2,'0')} דק׳`;
         entry.append(timingNode('p',`זיהוי ראשון: 30% — ${f(w.first_observed_threshold_seconds['30'])}; 70% — ${f(w.first_observed_threshold_seconds['70'])}; מלא — ${f(w.first_observed_threshold_seconds['100'])}. הפער הגדול בין דגימות: ${w.max_gap_seconds} שניות.`));
+        const outcome=w.outcome;
+        const reasons={threshold:'סף התפוסה הושג',timeout:'זמן ההמתנה הסתיים',insufficient_data:'אין מספיק מידע לקבוע מה היה מפעיל הרשמה',pending:'עדיין אוספים נתונים',unknown_policy:'ההגדרות בעת הדגימה לא נשמרו בגרסה הקודמת'};
+        entry.append(timingNode('p',`הדמיה לפי ההגדרות שנשמרו בפתיחה: ${reasons[outcome.reason]||outcome.reason}${outcome.seconds!=null?' לאחר '+f(outcome.seconds):''}${outcome.occupancy_percent!=null?' · תפוסה שנמדדה '+outcome.occupancy_percent+'%':''}. זו אינה סיבת ההרשמה המיידית שבוצעה.`));
+        if(outcome.observed_seconds!=null) entry.append(timingNode('p',`דגימת הסיום נמדדה לאחר ${f(outcome.observed_seconds)}; אין להסיק זמן חצייה מדויק בין דגימות.`));
+        if(w.policy) entry.append(timingNode('p',`סף: ${w.policy.threshold_percent}% · המתנה מרבית: ${w.policy.timeout_minutes} דקות · חלון למידה: ${w.policy.learning_window_minutes??10} דקות.`));
+        for(const decision of w.decisions||[]) entry.append(timingNode('p',`שחרור המתנה בפועל: ${decision.decided_at.replace('T',' ').slice(0,19)} · ${reasons[decision.reason]||'מידע חסר — חזרה להרשמה מיידית'}. אין בכך אישור שההרשמה הצליחה.`));
         entry.append(timingNode('p',`ההרשמה שלנו זוהתה: ${f(w.own_booking_first_observed_seconds)}. התפוסה כוללת אותנו.`));
-        for(const point of w.points) entry.append(timingNode('div',`${f(point.seconds)}: ${point.registered}/${point.capacity}${point.own_booking?' · כולל אותנו':''}`));
+        for(const point of w.points) entry.append(timingNode('div',`לאחר ${f(point.seconds)} · ${point.occupancy_percent}% תפוסה · ${point.registered}/${point.capacity}${point.own_booking?' · כולל אותנו':''}`));
         details.append(entry);
       }
       host.append(details);
@@ -53,7 +60,7 @@ $('#registrationRefresh').addEventListener('click',loadRegistrationLearning);
 $('#registrationSave').addEventListener('click',async()=>{
   try { await api('/api/settings',{method:'POST',body:JSON.stringify({registration_timing:{
     learning_enabled:$('#registrationLearning').checked,enabled:$('#registrationWaiting').checked,
-    threshold_percent:Number($('#registrationPercent').value),timeout_minutes:Number($('#registrationTimeout').value)}})});
+    threshold_percent:Number($('#registrationPercent').value),timeout_minutes:Number($('#registrationTimeout').value),learning_window_minutes:Number($('#registrationWindow').value)}})});
     toast('נשמר ✓');await loadRegistrationLearning();
   } catch(e){toast(e.message);}
 });

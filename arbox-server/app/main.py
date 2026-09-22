@@ -162,7 +162,7 @@ async def lifespan(app: FastAPI):
     )
     scheduler.add_job(rules_engine.refresh_pending_evidence, IntervalTrigger(minutes=5))
     await rules_engine.registration_learning.open()
-    scheduler.add_job(rules_engine.registration_learning.tick, IntervalTrigger(seconds=30), id="registration_learning", max_instances=1, coalesce=True)
+    scheduler.add_job(rules_engine.registration_learning.tick, IntervalTrigger(seconds=20, jitter=20), id="registration_learning", max_instances=1, coalesce=True)
     scheduler.add_job(rules_engine.autobook_tick, IntervalTrigger(minutes=5))
     # pinned classes: same 5-min safety net, plus exact-moment jobs below
     scheduler.add_job(rules_engine.watchlist_tick, IntervalTrigger(minutes=5))

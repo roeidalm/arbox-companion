@@ -22,7 +22,7 @@ def test_defaults_master_switch_and_scoped_overrides():
     assert effective(c,{**s,'schedule_id':2},[{'id':5}])['mode']=='immediate'
     assert effective(c,s,[{'id':5}])['mode']=='wait'
 
-@pytest.mark.parametrize('registered,seconds,wait',[(0,20,True),(3,20,True),(4,20,False),(9,20,False),(0,300,False)])
+@pytest.mark.parametrize('registered,seconds,wait',[(0,20,True),(3,20,True),(4,20,False),(9,20,False),(0,600,False)])
 def test_threshold_and_timeout(registered,seconds,wait):
     now=datetime(2026,9,22,18,0)+timedelta(seconds=seconds)
     s=session(datetime(2026,9,22,18,0));c=effective({**DEFAULTS,'enabled':True},s)
@@ -44,7 +44,7 @@ async def prepared(tmp_path):
     raw={'id':1,'date':start.date().isoformat(),'time':start.strftime('%H:%M'),'enable_registration_time':168,
          'max_users':12,'registered':3,'user_booked':777,'box_categories':{'id':8,'name':'Movement'},'series':{'id':9}}
     await store.upsert_sessions([raw],box_id=73)
-    settings=Settings(str(tmp_path));settings.update({'registration_timing':{'learning_enabled':True}})
+    settings=Settings(str(tmp_path));settings.update({'registration_timing':{'learning_enabled':True,'learning_window_minutes':10}})
     client=SimpleNamespace(schedule_between=AsyncMock(return_value=[raw]))
     sync=SimpleNamespace(box_id=73,location_id=1,client=client)
     engine=SimpleNamespace(store=store,settings=settings,syncer=sync,watchlist_tick=AsyncMock(),autobook_tick=AsyncMock())
@@ -124,3 +124,67 @@ def test_learning_settings_survive_reload_without_enabling_waiting(tmp_path):
     assert reloaded._data['registration_timing']['learning_enabled']
     assert reloaded._data['registration_timing']['threshold_percent']==40
     assert not reloaded._data['registration_timing']['enabled']
+
+@pytest.mark.parametrize('counts,reason,seconds',[
+    ([0,1,4,5], 'threshold',40),
+    ([0,1,2,2], 'timeout',60),
+    ([0,1,2,4], 'insufficient_data',60),
+])
+def test_saved_policy_outcome_distinguishes_deadline_and_threshold(counts,reason,seconds):
+    from app.registration_learning import observation_outcome
+    opens=datetime(2026,9,22,8)
+    points=[{'elapsed':t,'capacity':10,'registered':n} for t,n in zip([0,20,40,65],counts)]
+    result=observation_outcome(points,{'threshold_percent':30,'timeout_minutes':1},opens+timedelta(minutes=2),opens)
+    assert result['reason']==reason and result['seconds']==seconds
+    assert result['simulation']
+
+async def test_policy_snapshot_and_all_sample_rows_survive_settings_changes(prepared):
+    learning,e,raw=prepared
+    await learning.tick()
+    first=(await learning.report())['courses'][0]['observations'][0]
+    assert first['policy']['learning_window_minutes']==10
+    e.settings.update({'registration_timing':{'learning_window_minutes':30,'timeout_minutes':2,'threshold_percent':40}})
+    await learning.tick()
+    report=await learning.report();window=report['courses'][0]['observations'][0]
+    assert window['samples']==2
+    assert window['policy']==first['policy']
+    assert all(p['occupancy_percent']==25 for p in window['points'])
+    assert len({p['observed_at'] for p in window['points']})==2
+
+async def test_actual_wait_release_is_recorded_separately(prepared):
+    learning,e,raw=prepared
+    e.settings.update({'registration_timing':{'enabled':True}})
+    e.syncer.client.schedule_between.return_value=[{**raw,'registered':8}]
+    await learning.sample(await e.store.get_sessions())
+    assert not await learning.defer(await e.store.get_session(1))
+    window=(await learning.report())['courses'][0]['observations'][0]
+    assert window['decisions'][0]['reason']=='threshold'
+
+def test_jittered_sampling_intervals_stay_between_twenty_and_forty_seconds():
+    from apscheduler.triggers.interval import IntervalTrigger
+    from datetime import timezone
+    trigger=IntervalTrigger(seconds=20,jitter=20,timezone=timezone.utc)
+    previous=datetime.now(timezone.utc)
+    gaps=[]
+    for _ in range(30):
+        next_time=trigger.get_next_fire_time(previous,previous)
+        gaps.append((next_time-previous).total_seconds());previous=next_time
+    assert all(20<=gap<=40 for gap in gaps)
+    assert len(set(gaps))>1
+
+async def test_half_hour_learning_continues_after_ten_minutes_and_uses_saved_window(prepared):
+    learning,e,raw=prepared
+    start=datetime.now().replace(second=0,microsecond=0)+timedelta(days=7,minutes=-20)
+    raw={**raw,'date':start.date().isoformat(),'time':start.strftime('%H:%M')}
+    await e.store.upsert_sessions([raw],box_id=73)
+    e.syncer.client.schedule_between.return_value=[raw]
+    e.settings.update({'registration_timing':{'learning_window_minutes':30}})
+    await learning.tick()
+    window=(await learning.report())['courses'][0]['observations'][0]
+    assert window['points'][0]['seconds']>=1200
+    assert window['policy']['learning_window_minutes']==30
+    e.settings.update({'registration_timing':{'learning_window_minutes':1}})
+    await learning.tick()
+    assert (await learning.report())['courses'][0]['observations'][0]['samples']==2
+    e.autobook_tick.assert_not_awaited()
+    e.watchlist_tick.assert_not_awaited()

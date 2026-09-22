@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.57.1
+
+- Give learning its own configurable 1–120 minute window, defaulting to 30 minutes, independently of the ten-minute waiting timeout.
+- Randomize observation scheduling between 20 and 40 seconds and collect a closing observation after the window.
+- Preserve every observation without automatic age deletion, snapshot each opening's policy, and show occupancy percentages and threshold/timeout simulations separately from actual waiting releases. Incomplete history is labeled explicitly.
+
 ## 1.57.0
 
 - Add optional registration learning: observe occupancy every 30 seconds during the first ten minutes after opening, with persisted history and explicit coverage gaps. Broad learning observes the active studio; otherwise only planned targets are sampled.

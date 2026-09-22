@@ -2559,7 +2559,7 @@ function renderStatusStrip(st) {
   for (const [name, label] of [["telegram", "טלגרם"], ["ha", "Home Assistant"], ["discord", "Discord"]]) {
     const c = st.channels[name] || {};
     cell(label,
-         c.state === "off" ? "כבוי" : c.state === "unconfigured" ? "חסרה הגדרה" : c.state === "queued" ? `ממתינות לשליחה: ${c.queued}` : c.state === "ok" ? "תקין" : `נכשל ×${c.failures}`,
+         c.state === "off" ? "כבוי" : c.state === "unconfigured" ? "חסרה הגדרה" : c.state === "disconnected" ? "הבוט מתחבר / מנותק" : c.state === "queued" ? `ממתינות לשליחה: ${c.queued}` : c.state === "ok" ? "תקין" : `נכשל ×${c.failures}`,
          c.state === "off" ? "off" : c.state === "ok" ? "ok" : "bad");
   }
   cell("תזמונים ממתינים", String(st.pending_pins ?? 0));
@@ -3341,6 +3341,12 @@ async function loadSettings() {
   $("#discordWebhook").value = s.discord.webhook_url;
   $("#discordWebhook").disabled = s.discord.managed_secret;
   $("#discordSecretHint").textContent = s.discord.managed_secret ? (s.discord.configured ? "הכתובת מנוהלת בקובץ סודי בשרת" : "הקובץ הסודי בשרת חסר או ריק") : "צרו Webhook בהגדרות הערוץ ב־Discord והדביקו את הכתובת כאן";
+  $('#discordBotToken').value = s.discord.bot_token || '';
+  $('#discordBotToken').disabled = !!s.discord.managed_bot_secret;
+  $('#discordBotHint').textContent = s.discord.bot_configured ? 'פרטי הבוט מוגדרים. רק המשתמש המורשה יכול לבצע פעולות.' : 'להפעלת כפתורים מלאו טוקן, שרת, ערוץ ומשתמש מורשה. את המזהים מעתיקים ב־Discord במצב מפתחים.';
+  $('#discordGuild').value = s.discord.guild_id || '';
+  $('#discordChannel').value = s.discord.channel_id || '';
+  $('#discordUser').value = s.discord.allowed_user_id || '';
   $("#discordLogLevel").value = s.discord.log_level || 'error';
   $("#journalDiscord").checked = (s.discord.kinds || []).includes('journal');
   $("#haEnabled").checked = s.ha.enabled;
@@ -3507,6 +3513,7 @@ async function saveSettings() {
           kinds: haKinds.filter((k) => k !== "journal" || $("#journalHa").checked),
         },
         discord: {
+          bot_token: $('#discordBotToken').value.trim(), guild_id: $('#discordGuild').value.trim(), channel_id: $('#discordChannel').value.trim(), allowed_user_id: $('#discordUser').value.trim(),
           enabled: $('#discordEnabled').checked, webhook_url: $('#discordWebhook').value.trim(),
           log_level: $('#discordLogLevel').value,
           kinds: [...$$('.kind-discord').filter(c=>c.checked).map(c=>c.dataset.kind), ...($('#journalDiscord').checked ? ['journal'] : [])],

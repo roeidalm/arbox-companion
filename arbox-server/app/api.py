@@ -1138,7 +1138,7 @@ async def events(request: Request, level: str | None = None,
         ]
         if name == "discord":
             delivery = await s.notifier.discord_delivery.status()
-            channels[name] = {"state": "unconfigured" if not s.settings.discord_webhook else "failing" if delivery['failed'] or delivery['unknown'] else "queued" if delivery['queued'] else "ok", **delivery, "failures": delivery['failed'] + delivery['unknown']}
+            channels[name] = {"state": "unconfigured" if not (s.settings.discord_bot_configured or s.settings.discord_webhook) else "disconnected" if s.settings.discord_bot_configured and not s.notifier.discord_bot.connected else "failing" if delivery['failed'] or delivery['unknown'] else "queued" if delivery['queued'] else "ok", **delivery, "failures": delivery['failed'] + delivery['unknown']}
             continue
         channels[name] = {"state": "failing" if fails else "ok",
                           "failures": len(fails),

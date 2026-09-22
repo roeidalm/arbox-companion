@@ -185,6 +185,7 @@ async def lifespan(app: FastAPI):
     rules_engine.scheduler = scheduler
 
     notifier.start_telegram_poller()
+    notifier.discord_bot.start()
 
     if client.configured:
         # in the background: the HTTP server (health, UI, HA) must not wait

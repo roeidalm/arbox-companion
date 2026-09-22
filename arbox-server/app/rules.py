@@ -1576,6 +1576,13 @@ class RulesEngine:
             code = action.removeprefix("reason_")
             if code not in self.REASON_LABELS:
                 return "סיבה לא מוכרת"
+            if code == "other" and reply_text and reply_text.strip():
+                existing = await self.store.get_training_outcome(schedule_id)
+                if existing and ((existing.get("status") or "").startswith("cancelled") or existing.get("status") == "standby_cancelled"):
+                    return "האימון כבר בוטל; לא נשמרה סיבת אי-הגעה"
+                await self.store.set_training_outcome(schedule_id, "missed", "manual", "other", reply_text.strip()[:500])
+                await self.store.log_event("info", "booking", "סיבת אי-הגעה נשמרה", schedule_id=schedule_id)
+                return "תודה, הסיבה נשמרה ✓"
             if code == "other":
                 await self.store.set_meta("attendance_other_input", {
                     "schedule_id": schedule_id,

@@ -55,3 +55,16 @@ does not cancel later copies. The personal workout journal form stays on its sin
 preferred channel. Delayed cross-channel copies use the existing in-memory scheduler:
 a server restart cancels those timers. Discord's own queued transport retries remain
 durable. `/api/settings/test/routing` tests this route without booking anything.
+
+
+## Interactive bot (1.56.0)
+
+Create a Discord application and bot, install it in your own server, and grant View Channel, Send Messages, Embed Links and Read Message History in the chosen channel. No Administrator permission or privileged intents are needed. For private channels, explicitly allow the bot role to view and send in that channel.
+
+In Arbox notification settings, set the bot token, guild ID, channel ID and the one allowed user ID (Discord Developer Mode → Copy ID). Alternatively mount the token using `ARBOX_DISCORD_BOT_TOKEN_FILE`; it is masked in the API and UI. Keep tokens out of Compose and Git. Each installation uses its own bot.
+
+The existing process maintains an outbound Gateway connection, with automatic reconnect. No extra container, public callback route or Cloudflare bypass is required. Bot delivery takes precedence over the legacy webhook when fully configured. Existing webhook messages cannot gain buttons retroactively; new messages use the bot.
+
+Buttons call the same rules/planning handlers as Telegram. Shared atomic prompt consumption prevents duplicate booking across channels. The original Discord message shows the result or the next choices. Info buttons respond privately without consuming the booking action. Notes and other absence reasons use a modal. Feedback web forms remain links, as on the other channels.
+
+Use Send test in settings to post a harmless native button. Clicking it edits the message and never calls booking APIs. Read-only system status exposes disconnected/queued/error state without secrets. Do not remove the legacy webhook until rollout is verified.

@@ -30,6 +30,7 @@ import aiohttp
 
 from .settings import Settings
 from .discord_notify import DiscordDelivery, CHANNELS
+from .discord_bot import DiscordBot
 from .notification_reply import NotificationReply
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class Notifier:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.discord_delivery = DiscordDelivery(settings, self._log)
+        self.discord_bot = DiscordBot(self)
         self._session: aiohttp.ClientSession | None = None
         self._tg_task: asyncio.Task | None = None
         self._tg_offset = 0
@@ -125,6 +127,7 @@ class Notifier:
         return self._session
 
     async def close(self) -> None:
+        await self.discord_bot.close()
         await self.discord_delivery.close()
         if self._tg_task:
             self._tg_task.cancel()
@@ -139,7 +142,7 @@ class Notifier:
         if name == "telegram":
             tg = self.settings.telegram
             return bool(tg.get("bot_token") and tg.get("chat_id"))
-        if name == "discord": return bool(self.settings.discord_webhook)
+        if name == "discord": return self.settings.discord_bot_configured or bool(self.settings.discord_webhook)
         return bool(self.settings.ha.get("webhook_url"))
 
     def _eligible(self, kind: str) -> list[str]:
@@ -368,7 +371,7 @@ class Notifier:
             if not await self.send(text):
                 raise RuntimeError("שליחת הבדיקה לערוץ הראשון נכשלה")
         elif channel == "discord":
-            await self.discord_delivery.deliver(text, force=True)
+            await self.discord_delivery.deliver(text, [[{"text": "בדיקת כפתור ✓", "data": "discord_test:ping"}]] if self.settings.discord_bot_configured else None, force=True)
         elif channel == "telegram":
             await self._send_telegram(text, None, force=True)
         elif channel == "ha":

@@ -94,7 +94,7 @@ DEFAULTS: dict = {
     "exercise_shortcuts_by_studio": {},
     "hidden_exercises_by_studio": {},
     "discord": {
-        "enabled": False, "webhook_url": "",
+        "enabled": False, "webhook_url": "", "bot_token": "", "channel_id": "", "guild_id": "", "allowed_user_id": "",
         "kinds": ["digest", "autobook", "standby", "studio", "latecancel", "log", "vacation", "attendance", "membership"],
         "log_level": "error",
     },
@@ -477,6 +477,20 @@ class Settings:
         return self._data["discord"]
 
     @property
+    def discord_bot_token(self) -> str:
+        path = os.environ.get("ARBOX_DISCORD_BOT_TOKEN_FILE")
+        if path:
+            try:
+                with open(path) as source: return source.read().strip()
+            except OSError: return ""
+        return os.environ.get("ARBOX_DISCORD_BOT_TOKEN", "").strip() or self.discord.get("bot_token", "")
+
+    @property
+    def discord_bot_configured(self) -> bool:
+        return bool(self.discord_bot_token and all(self.discord.get(k) for k in
+                    ("channel_id", "guild_id", "allowed_user_id")))
+
+    @property
     def discord_webhook(self) -> str:
         path = os.environ.get("ARBOX_DISCORD_WEBHOOK_URL_FILE")
         if path:
@@ -566,7 +580,10 @@ class Settings:
         discord = dict(self.discord)
         discord["webhook_url"] = "***" if self.discord_webhook else ""
         discord["managed_secret"] = bool(os.environ.get("ARBOX_DISCORD_WEBHOOK_URL_FILE") or os.environ.get("ARBOX_DISCORD_WEBHOOK_URL"))
-        discord["configured"] = bool(self.discord_webhook)
+        discord["bot_token"] = "***" if self.discord_bot_token else ""
+        discord["managed_bot_secret"] = bool(os.environ.get("ARBOX_DISCORD_BOT_TOKEN_FILE") or os.environ.get("ARBOX_DISCORD_BOT_TOKEN"))
+        discord["bot_configured"] = self.discord_bot_configured
+        discord["configured"] = self.discord_bot_configured or bool(self.discord_webhook)
         return {"discord": discord, "timezone": self.timezone,
                 "retention": self.retention,
                 "blocked_categories": self.blocked_categories,
@@ -589,6 +606,11 @@ class Settings:
     def update(self, patch: dict) -> None:
         """Apply a settings patch from the UI. '***' means keep the stored secret."""
         discord_patch = patch.get("discord") or {}
+        for field in ("channel_id", "guild_id", "allowed_user_id"):
+            if field in discord_patch and (not isinstance(discord_patch[field], str) or (discord_patch[field] and not discord_patch[field].isdigit())):
+                raise ValueError("מזהי Discord חייבים להיות מספרים בשדה טקסט")
+        if "bot_token" in discord_patch and not isinstance(discord_patch["bot_token"], str):
+            raise ValueError("טוקן Discord אינו תקין")
         url = discord_patch.get("webhook_url")
         if url and url != "***":
             from .discord_notify import webhook_url

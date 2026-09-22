@@ -397,8 +397,13 @@
       <div class="card">
         <h2>Discord</h2>
         <label><input id="discordEnabled" type="checkbox"> הפעלת התראות Discord</label>
-        <p class="hint">הודעות בערוץ שלך עם קישור לאתר לביצוע הפעולה. אין כפתורי הרשמה ישירים ב־Discord.</p>
+        <p class="hint">חיבור בוט מאפשר כפתורים ופעולות בתוך Discord. החיבור פועל מתוך השרת הקיים. Webhook בלבד שולח הודעות וקישורים.</p>
         <div class="field-row">
+          <label>טוקן הבוט <input id="discordBotToken" type="password" autocomplete="off"></label>
+          <span id="discordBotHint" class="hint"></span>
+          <label>מזהה השרת <input id="discordGuild" type="text" inputmode="numeric"></label>
+          <label>מזהה הערוץ <input id="discordChannel" type="text" inputmode="numeric"></label>
+          <label>מזהה המשתמש המורשה ללחוץ <input id="discordUser" type="text" inputmode="numeric"></label>
           <label>כתובת Webhook <input id="discordWebhook" type="password" autocomplete="off" placeholder="https://discord.com/api/webhooks/…"></label>
           <span id="discordSecretHint" class="hint"></span>
         </div>
@@ -438,7 +443,7 @@
         </div>
         <p class="hint">
           <strong>פער שליחה:</strong> ערך גדול מאפס שולח לכל הערוצים לפי הסדר ובפער שנבחר, גם אם כבר עניתם. הוא גובר על הגדרת התזכורת. טופס המשוב האישי נשלח לערוץ המועדף בלבד.<br>
-          <strong>שליחה ותזכורת:</strong> ‏0 = שליחה מיידית לכל הערוצים שנבחרו. זמן גדול מאפס: הודעה שממתינה לתשובה תישלח תחילה לערוץ המועדף, ולאחר הזמן שהוגדר גם לבאים אם לא נענתה. הודעות רגילות נשלחות לכולם. פתיחת הקישור ב־Discord אינה נחשבת למענה על כפתור בטלגרם או ב־HA.<br>
+          <strong>שליחה ותזכורת:</strong> ‏0 = שליחה מיידית לכל הערוצים שנבחרו. זמן גדול מאפס: הודעה שממתינה לתשובה תישלח תחילה לערוץ המועדף, ולאחר הזמן שהוגדר גם לבאים אם לא נענתה. הודעות רגילות נשלחות לכולם. פעולה דרך הבוט ב־Discord מטפלת באותה בקשה כמו בטלגרם וב־HA.<br>
           <strong>תזכורת לפני שיעור:</strong> ‏0 = כבוי. אירוע היומן כבר נושא תזכורות
           משלו, אז זה נחוץ רק אם בא לך גם התראה בערוצים.
         </p>
@@ -813,6 +818,6 @@
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=10"></script>
-<script src="/static/app.js?v=2.65.1"></script>
+<script src="/static/app.js?v=2.66.0"></script>
 </body>
 </html>

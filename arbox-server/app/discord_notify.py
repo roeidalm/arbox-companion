@@ -10,6 +10,7 @@ import re
 import time
 import uuid
 from pathlib import Path
+from .discord_bot import render_bot
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import aiohttp
 import aiosqlite
@@ -87,15 +88,26 @@ class DiscordDelivery:
         if self.http:await self.http.close()
         if self.db:await self.db.close()
 
+    def destination(self):
+        if self.settings.discord_bot_configured:
+            token = self.settings.discord_bot_token
+            channel = self.settings.discord['channel_id']
+            return (f'https://discord.com/api/v10/channels/{channel}/messages',
+                    hashlib.sha256(('bot:' + channel + ':' + token).encode()).hexdigest(),
+                    {'Authorization': 'Bot ' + token})
+        raw = self.settings.discord_webhook
+        if not raw: raise RuntimeError('Discord אינו מוגדר')
+        url = webhook_url(raw)
+        return url, hashlib.sha256(url.encode()).hexdigest(), {}
+
     async def deliver(self,text,buttons=None,*,event_id=None,force=False):
-        raw=self.settings.discord_webhook
-        if not raw:raise RuntimeError('Discord אינו מוגדר: חסרה כתובת Webhook')
         if not self.settings.discord.get('enabled') and not force:raise RuntimeError('Discord כבוי')
-        url=webhook_url(raw); dest=hashlib.sha256(url.encode()).hexdigest()
+        url, dest, headers = self.destination()
         await self.start()
         event_id=event_id or str(uuid.uuid4())
         async with self.lock:
-            for i,payload in enumerate(render(text,buttons,self.settings.browser_url)):
+            payloads = render_bot(text,buttons,self.settings.discord_bot_token) if self.settings.discord_bot_configured else render(text,buttons,self.settings.browser_url)
+            for i,payload in enumerate(payloads):
                 await self.db.execute('INSERT OR IGNORE INTO delivery(event_id,destination,part,payload,created,state,next_attempt) VALUES(?,?,?,?,?,?,?)',
                     (event_id,dest,i,json.dumps(payload,ensure_ascii=False),time.time(),'pending',time.time()))
             await self.db.commit()
@@ -108,9 +120,8 @@ class DiscordDelivery:
     async def drain(self,event_id=None,force=False):
         async with self.lock:
             if not force and not self.settings.discord.get('enabled'):return
-            raw=self.settings.discord_webhook
-            if not raw:return
-            url=webhook_url(raw); dest=hashlib.sha256(url.encode()).hexdigest()
+            if not self.settings.discord_bot_configured and not self.settings.discord_webhook:return
+            url, dest, headers = self.destination()
             sql="SELECT * FROM delivery WHERE state='pending' AND next_attempt<=?"
             params=[time.time()]
             if event_id:sql+=' AND event_id=?';params.append(event_id)
@@ -127,7 +138,7 @@ class DiscordDelivery:
                 await self.db.commit()
                 if not self.http:self.http=aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20,connect=5))
                 try:
-                    async with self.http.post(url,json=json.loads(row['payload']),allow_redirects=False) as response:
+                    async with self.http.post(url,json=json.loads(row['payload']),headers=headers,allow_redirects=False) as response:
                         status=response.status
                         if status==200:
                             data=await response.json(); mid=data.get('id')

@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.56.0
+
+- Add a Discord bot connection inside the existing server, with native action buttons, text-entry dialogs and message updates using the shared booking/planning handlers.
+- Restrict interactions to the configured user, server and channel, validate signed buttons, and show bot connection status. Keep webhook-only notifications available.
+
 ## 1.55.1
 
 - Add ordered broadcast spacing: deliver to every selected channel at a configurable interval, independently of whether a previous copy was answered. Preserve unanswered-only escalation as a separate option.

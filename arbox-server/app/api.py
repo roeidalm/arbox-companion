@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+from typing import Literal
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -108,6 +109,7 @@ def _clean_reason(code: str | None, text: str | None) -> tuple[str, str | None]:
 
 
 class RuleBody(BaseModel):
+    timing_mode: Literal["inherit", "immediate"] | None = None
     id: int | None = None
     name: str
     enabled: bool = True
@@ -1161,6 +1163,7 @@ async def events(request: Request, level: str | None = None,
 # ------------------------------------------------------------- watchlist
 
 class WatchBody(BaseModel):
+    timing_mode: Literal["inherit", "immediate"] | None = None
     schedule_id: int
     allow_standby: bool = True
     # set only after the user is shown the conflict and confirms — a vacation
@@ -1238,6 +1241,8 @@ async def add_watch(request: Request, body: WatchBody,
             if not any(m.get("id") == body.membership_user_id for m in active):
                 raise HTTPException(
                     422, "selected membership is not valid on the class date")
+        from .registration_guidance import save_override
+        save_override(s.settings, s.store.active_box_id, 'session', body.schedule_id, body.timing_mode)
         await s.store.watch(body.schedule_id, body.allow_standby,
                             body.ignore_vacation, body.membership_user_id)
         await s.rules_engine.review_plans()
@@ -1377,7 +1382,11 @@ async def save_rule(request: Request, body: RuleBody,
     if body.mode not in ("notify", "autobook"):
         raise HTTPException(422, "mode must be notify|autobook")
     s = ctx(request)
+    if body.id and body.timing_mode is not None and not any(r['id']==body.id for r in await s.store.list_rules()):
+        raise HTTPException(404, 'האוטומציה אינה בסטודיו הפעיל')
     rid = await s.store.save_rule(body.model_dump())
+    from .registration_guidance import save_override
+    save_override(s.settings, s.store.active_box_id, 'rule', rid, body.timing_mode)
     await s.rules_engine.schedule_openings()
     await s.rules_engine.review_plans()
     return {"ok": True, "id": rid}
@@ -1767,3 +1776,32 @@ async def registration_learning(request: Request, x_api_key: str | None = Header
     report['sessions'] = [{'id':x['schedule_id'],'label':f"{x['date']} {x['start_time']} · {x.get('category_name') or ''}"} for x in await s.store.get_sessions(date_from=date.today().isoformat())]
     report['box_id'] = s.store.active_box_id
     return report
+
+
+@router.get("/registration-guidance")
+async def registration_guidance(request: Request, as_pin: bool = False,
+                                x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    from .registration_guidance import guidance
+    return await guidance(ctx(request).rules_engine, as_pin=as_pin)
+
+
+class RegistrationOverrideBody(BaseModel):
+    mode: Literal['inherit', 'immediate']
+
+
+@router.put("/registration-policy/{kind}/{target_id}")
+async def registration_override(request: Request, kind: Literal['session','rule'], target_id: int,
+                                body: RegistrationOverrideBody, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    async with s.syncer.exclusive():
+        if kind == 'session':
+            exists = await s.store.get_session(target_id)
+        else:
+            exists = next((r for r in await s.store.list_rules() if r['id']==target_id),None)
+        if not exists:
+            raise HTTPException(404, 'השיעור או האוטומציה אינם בסטודיו הפעיל')
+        from .registration_guidance import save_override
+        save_override(s.settings,s.store.active_box_id,kind,target_id,body.mode)
+    return {'ok':True}

@@ -46,8 +46,10 @@ async function loadRegistrationLearning() {
         for(const point of w.points) entry.append(timingNode('div',`לאחר ${f(point.seconds)} · ${point.occupancy_percent}% תפוסה · ${point.registered}/${point.capacity}${point.own_booking?' · כולל אותנו':''}`));
         details.append(entry);
       }
+      if(registrationFocusCohorts?.includes(course.cohort)){details.open=true;details.dataset.focused='true';}
       host.append(details);
     }
+    if(registrationFocusCohorts!==null){(host.querySelector('[data-focused]')||host).scrollIntoView({block:'center'});registrationFocusCohorts=null;}
   } catch(e) { $('#registrationStats').textContent='לא ניתן לטעון: '+e.message; }
 }
 function loadTimingOverride() {

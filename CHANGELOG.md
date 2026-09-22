@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.58.0
+
+- Show registration mode, occupancy-learning evidence and fast-fill recommendations directly in My Classes, automation cards and the automation editor.
+- Preview guidance before pinning a class and save an optional immediate-registration preference with the pin. Allow scoped immediate/default choices inline, without enabling global waiting.
+- Link directly to relevant learning histories, distinguish unavailable data from missing history, and show actual planning/booking status ahead of recommendations.
+
 ## 1.57.2
 
 - Stop observing an opening once the class is seen full; persist that stop across restarts while continuing to observe other classes.

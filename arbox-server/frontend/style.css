@@ -801,3 +801,12 @@ legend input { width: auto; }
 .mg-item.status-review{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--card))}
 
 .notify-order{list-style:none;padding:0;display:grid;gap:8px;max-width:520px}.notify-order li{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px;cursor:grab}.notify-order li span{flex:1}.notify-order button{min-width:44px;min-height:44px}.notify-order button:disabled{opacity:.35}
+
+/* Inline registration guidance follows each workout/rule on narrow screens. */
+.registration-context { margin-top: 10px; padding: 10px 12px; border-inline-start: 3px solid var(--line); border-radius: 8px; background: var(--bg); font-size: .9rem; overflow-wrap: anywhere; }
+.registration-context p { margin: 6px 0; }
+.registration-context-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.registration-context-actions button { font-size: .85rem; padding: 5px 9px; white-space: normal; }
+.mine-item .grow, .rule-item .grow { min-width: 0; }
+#timingScheduleDialog { max-width: min(540px, 94vw); }
+@media(max-width:620px){.rule-item{flex-wrap:wrap}.rule-item .grow{flex:1 1 100%}.registration-context-actions button{min-height:40px}}

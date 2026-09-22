@@ -236,14 +236,17 @@ async function toggleWatch(s, btn) {
       state.watchlist.delete(s.schedule_id);
       toast("הסימון בוטל");
     } else {
+      const studio = state.selectedStudioId;
+      const timingMode = await chooseTimingForSchedule(s, studio);
+      if(timingMode===null){btn.disabled=false;return;}
       const membershipId = state.membershipOverrides.get(s.schedule_id) || null;
       const request = { schedule_id: s.schedule_id, allow_standby: true,
-                        membership_user_id: membershipId };
+                        membership_user_id: membershipId, timing_mode:timingMode==='keep'?null:timingMode };
       let r;
       // Vacation and quota are independent gates. A class can need both
       // confirmations, and neither preflight is allowed to store the pin.
       for (let attempts = 0; attempts < 3; attempts++) {
-        r = await api("/api/watchlist", { method: "POST",
+        r = await api("/api/watchlist", { method: "POST", headers:{'X-Arbox-Studio-Id':String(studio)},
           body: JSON.stringify(request) });
         if (!r.needs_confirm) break;
         if (!await confirmSchedule(r.conflict)) { btn.disabled = false; return; }
@@ -1410,6 +1413,8 @@ async function loadMine() {
   if (data.memberships) state.memberships = data.memberships;
   if (state.memberships.length > 1) await loadWatchlist();
   if (studio !== state.selectedStudioId) return;
+  data.timing = await fetchTimingContext(studio);
+  if(studio!==state.selectedStudioId)return;
   loadMessages(); // non-blocking; fills its own card
 
   if(state.mineFilterStudio!==studio){state.mineFilters={};state.mineFilterStudio=studio;state.mineSummaryOpen=false;}
@@ -1487,6 +1492,7 @@ async function renderMineData(data, studio, quotaLoad) {
       t2.append(label);
     }
     grow.append(t1, t2);
+    grow.append(timingCard(data.timing?.sessions[String(s.schedule_id)],{kind:'session',id:s.schedule_id,session:s,studio,refresh:loadMine}));
     if (s.planning && s.planning.state !== 'ready') {
       const note = document.createElement('p');
       note.textContent = [s.planning.reason, s.planning.state === 'session_changed' ? '' : membershipName(s.planning.membership_user_id)].filter(Boolean).join(' · ');
@@ -2614,11 +2620,13 @@ function currentRuleDraft() {
 }
 
 function refreshSuggestedName() {
+  refreshTimingRuleDraft();
   if (!nameIsAuto) return;
   $("#ruleName").value = suggestRuleName(currentRuleDraft());
 }
 
 function resetRuleForm() {
+  $('#ruleTimingMode').value='inherit';
   editingRuleId = null;
   editingEnabled = true;
   nameIsAuto = true;
@@ -2654,6 +2662,7 @@ async function startAutomationFromSession(s) {
 }
 
 function startEditRule(r) {
+  $('#ruleTimingMode').value='keep';
   editingRuleId = r.id;
   editingEnabled = r.enabled;
   // a hand-written name is the user's; a generated one keeps tracking edits
@@ -2671,6 +2680,7 @@ function startEditRule(r) {
   $("#ruleCancelEdit").hidden = false;
   $("#ruleMsg").textContent = "";
   renderRuleChips();
+  refreshTimingRuleDraft();
   $("#ruleName").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -2802,6 +2812,7 @@ $("#vacAdd").addEventListener("click", async () => {
 });
 
 async function loadRules() {
+  const studio=state.selectedStudioId;
   loadVacations();          // independent card; fills itself
   await loadFacets();
   renderRuleChips();
@@ -2809,6 +2820,9 @@ async function loadRules() {
 
   let data;
   try { data = await api("/api/rules"); } catch (e) { return; }
+  ruleTimingContext=await fetchTimingContext(studio);
+  if(studio!==state.selectedStudioId)return;
+  refreshTimingRuleDraft();
   const list = $("#rulesList");
   list.innerHTML = "";
   for (const r of data.rules) {
@@ -2828,6 +2842,7 @@ async function loadRules() {
     if (r.time_from || r.time_to) parts.push(`${r.time_from || ""}–${r.time_to || ""}`);
     desc.textContent = parts.join(" · ") || "כל השיעורים";
     grow.append(name, desc);
+    if(r.mode==='autobook')grow.append(timingCard(ruleTimingContext?.rules[String(r.id)],{kind:'rule',id:r.id,studio,refresh:loadRules}));
     const tag = document.createElement("span");
     tag.className = "mode-tag" + (r.mode === "autobook" ? " autobook" : "");
     tag.textContent = r.mode === "autobook" ? "🤖 אוטומטי" : "🔔 התראה";
@@ -2887,13 +2902,14 @@ $("#ruleSave").onclick = async () => {
       time_from: $("#ruleFrom").value || null,
       time_to: $("#ruleTo").value || null,
       mode: $("#ruleMode").value,
+      timing_mode: $("#ruleTimingMode").value==='keep'?null:$("#ruleTimingMode").value,
     };
     // an id turns the same endpoint into an update instead of an insert
     if (editingRuleId) {
       payload.id = editingRuleId;
       payload.enabled = editingEnabled;
     }
-    await api("/api/rules", { method: "POST", body: JSON.stringify(payload) });
+    await api("/api/rules", { method: "POST", headers:{'X-Arbox-Studio-Id':String(state.selectedStudioId)}, body: JSON.stringify(payload) });
     const wasEditing = editingRuleId !== null;
     resetRuleForm();
     $("#ruleMsg").textContent = wasEditing ? "עודכן ✓" : "נשמר ✓";

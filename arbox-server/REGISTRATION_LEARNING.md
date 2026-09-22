@@ -51,3 +51,20 @@ This includes sampling (up to 40s) plus request time (up to 15s). Warnings recom
 immediate booking but never change settings or promise a forecast. A late first full
 observation alone is labeled insufficient evidence of speed. Reports count coverage
 until the first full observation or the configured window, whichever comes first.
+
+
+## Contextual guidance
+
+GET /api/registration-guidance provides a read-only, authenticated summary for future
+sessions and current rules, reusing matching studio/category/coach/series/weekday/time
+cohorts. Rule summaries deduplicate history across future occurrences. Inline warnings
+re-evaluate stored observation points against the current threshold; original reports
+and policy snapshots stay unchanged. No guidance request performs a booking or changes
+settings. Missing history and failed loads are shown distinctly.
+
+My Classes, automation cards/editor and the scheduling dialog show the effective mode,
+evidence and a link to matching histories. Inline choices use authenticated, studio-scoped
+PUT /api/registration-policy/{session|rule}/{id} with immediate or inherit mode. They do
+not enable global waiting or trigger a booking. Pin creation accepts optional timing_mode
+and applies it after preflight checks, before any immediate watchlist execution. Cancelling
+the dialog writes nothing. Existing API clients omit the new field and retain behavior.

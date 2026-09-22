@@ -14,7 +14,7 @@
        style attributes, and blocking them breaks the date and quota rows. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Arbox Companion — לוח שיעורים</title>
-<link rel="stylesheet" href="/static/style.css?v=2.65.0">
+<link rel="stylesheet" href="/static/style.css?v=2.68.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
 <link rel="stylesheet" href="/static/google-calendar.css?v=9">
@@ -245,6 +245,10 @@
             <option value="autobook">הזמנה אוטומטית</option>
           </select>
         </div>
+      </div>
+      <div id="ruleTimingFields" hidden>
+        <div id="ruleTimingPreview"></div>
+        <label>הרשמה עבור אוטומציה זו <select id="ruleTimingMode"><option value="keep">השאר את ההעדפה הקיימת</option><option value="inherit">לפי ברירת המחדל</option><option value="immediate">מיידי לאוטומציה הזו</option></select></label>
       </div>
       <button id="ruleSave" class="primary">שמור אוטומציה</button>
       <button id="ruleCancelEdit" hidden>בטל עריכה</button>
@@ -850,10 +854,19 @@
   </form>
 </dialog>
 
+<dialog id="timingScheduleDialog" aria-labelledby="timingScheduleTitle">
+  <form method="dialog">
+    <h2 id="timingScheduleTitle">תזמון שיעור</h2>
+    <div id="timingScheduleContent"></div>
+    <label>העדפת הרשמה לשיעור הזה <select id="timingScheduleMode"><option value="keep">השאר את ההעדפה המוצגת</option><option value="immediate">מיידי לשיעור הזה</option><option value="inherit">לפי ברירת המחדל</option></select></label>
+    <div class="dialog-actions"><button value="cancel">ביטול</button><button value="confirm" class="primary">תזמן שיעור</button></div>
+  </form>
+</dialog>
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=10"></script>
-<script src="/static/app.js?v=2.67.0"></script>
-<script src="/static/registration-learning.js?v=3"></script>
+<script src="/static/app.js?v=2.68.0"></script>
+<script src="/static/registration-learning.js?v=4"></script>
+<script src="/static/registration-guidance.js?v=1"></script>
 </body>
 </html>

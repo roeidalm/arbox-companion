@@ -113,3 +113,15 @@ async def test_bot_delivery_uses_bot_endpoint_and_native_components(notifier):
         assert opts['json']['components'][0]['components'][0]['label']=='בדיקה'
         assert (await d.status())['queued']==0
     finally: await d.close()
+
+
+async def test_one_workout_reply_preserves_other_workouts(notifier):
+    i=interaction('book:one');notifier.on_callback.return_value='נרשם ✓'
+    i.message.content='שני אימונים לבחירה'
+    i.message.components=[SimpleNamespace(children=[
+        SimpleNamespace(label='ראשון',custom_id=custom_id('book:one','test-secret'),url=None),
+        SimpleNamespace(label='שני',custom_id=custom_id('book:two','test-secret'),url=None)])]
+    await notifier.discord_bot.interaction(i)
+    kwargs=i.message.edit.call_args.kwargs
+    assert [b.label for b in kwargs['view'].children]==['שני']
+    assert 'שני אימונים' in kwargs['content'] and 'נרשם' in kwargs['content']

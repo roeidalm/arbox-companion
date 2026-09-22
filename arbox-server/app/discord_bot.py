@@ -182,6 +182,21 @@ class DiscordBot:
                 text, buttons = answer.text, answer.buttons
             else:
                 text, buttons = str(answer), []
+                # A digest can offer several workouts. Consume only the buttons
+                # for this prompt; keep the other workouts usable.
+                cid = data.partition(':')[2]
+                for row in getattr(source, 'components', []):
+                    remaining = []
+                    for button in row.children:
+                        decoded = decode_id(getattr(button, 'custom_id', None), self.settings.discord_bot_token)
+                        if decoded and decoded[0].partition(':')[2] != cid:
+                            remaining.append({'text': button.label, 'data': decoded[0], 'text_input': decoded[1]})
+                        elif getattr(button, 'url', None):
+                            remaining.append({'text': button.label, 'url': button.url})
+                    if remaining:
+                        buttons.append(remaining)
+                if buttons:
+                    text = (getattr(source, 'content', '') + '\n\n' + text).strip()
             payloads = render_bot(text, buttons, self.settings.discord_bot_token)
             first = payloads[0]
             def make_view(payload):

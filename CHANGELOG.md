@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.56.1
+
+- Keep the other workout buttons available after acting on one workout in a Discord digest.
+
 ## 1.56.0
 
 - Add a Discord bot connection inside the existing server, with native action buttons, text-entry dialogs and message updates using the shared booking/planning handlers.

@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.56.2
+
+- Render calendar notification captions using Discord formatting instead of showing Telegram HTML tags.
+
 ## 1.56.1
 
 - Keep the other workout buttons available after acting on one workout in a Discord digest.

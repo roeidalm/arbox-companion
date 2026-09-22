@@ -21,6 +21,8 @@ first channel only, then the rest if nothing was answered in time.
 from __future__ import annotations
 
 import asyncio
+import html
+import re
 import json
 import logging
 import time
@@ -260,7 +262,7 @@ class Notifier:
                     await self._tg_document(filename, content, caption, mime,
                                             buttons)
                 elif name == "discord":
-                    await self.discord_delivery.deliver(caption or filename, [[{"text": link_title or filename, "uri": link}]] if link else buttons)
+                    await self.discord_delivery.deliver(html.unescape(re.sub(r"</?b>", "**", caption)) if caption else filename, [[{"text": link_title or filename, "uri": link}]] if link else buttons)
                 elif link:
                     await self._send_ha(
                         caption or filename, [[{

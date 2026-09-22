@@ -125,3 +125,11 @@ async def test_one_workout_reply_preserves_other_workouts(notifier):
     kwargs=i.message.edit.call_args.kwargs
     assert [b.label for b in kwargs['view'].children]==['שני']
     assert 'שני אימונים' in kwargs['content'] and 'נרשם' in kwargs['content']
+
+
+async def test_calendar_caption_converts_telegram_html(notifier):
+    notifier.discord_delivery.deliver=AsyncMock()
+    await notifier.send_document('event.ics',b'test',caption='<b>Movement &amp; Flex</b>',link='https://example.com/event.ics')
+    text, buttons=notifier.discord_delivery.deliver.call_args.args
+    assert text=='**Movement & Flex**'
+    assert buttons[0][0]['uri']=='https://example.com/event.ics'

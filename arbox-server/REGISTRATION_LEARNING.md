@@ -14,7 +14,9 @@ Samples store only class identifiers, timing, aggregate occupancy/capacity and w
 our own booking was present. They do not update the booking cache or eligibility.
 SQLite appends observations and sampling outcomes without automatic age deletion.
 Each opening snapshots its settings; future changes do not reinterpret old observations.
-Learning continues after an occupancy threshold or our own booking is observed.
+Learning continues after an occupancy threshold or our own booking is observed,
+but stops permanently for that opening at the first observation of full capacity.
+Later cancellations do not restart learning; existing booking/waitlist monitoring is unaffected.
 A closing observation can occur up to 55 seconds after the chosen window.
 The authenticated GET /api/registration-learning endpoint returns history and controls.
 Incomplete or failed reads are recorded as such; missing data is never treated as zero.
@@ -42,3 +44,10 @@ are explicitly simulations, not reasons for an actual immediate booking. A thres
 first seen after the deadline is ambiguous and cannot prove a timeout. Actual waiting
 releases are recorded separately and do not claim booking success. Legacy samples
 without policy snapshots remain available and are labeled unknown-policy.
+
+Fast-fill warnings use observed evidence: full in the first observation within 55 seconds,
+or an observed threshold-to-full margin of at most 55 seconds without gaps over 75 seconds.
+This includes sampling (up to 40s) plus request time (up to 15s). Warnings recommend
+immediate booking but never change settings or promise a forecast. A late first full
+observation alone is labeled insufficient evidence of speed. Reports count coverage
+until the first full observation or the configured window, whichever comes first.

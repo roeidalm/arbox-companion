@@ -188,3 +188,38 @@ async def test_half_hour_learning_continues_after_ten_minutes_and_uses_saved_win
     assert (await learning.report())['courses'][0]['observations'][0]['samples']==2
     e.autobook_tick.assert_not_awaited()
     e.watchlist_tick.assert_not_awaited()
+
+async def test_full_class_stops_sampling_even_after_restart_or_cancellation(prepared):
+    learning,e,raw=prepared
+    e.syncer.client.schedule_between.return_value=[{**raw,'registered':12}]
+    await learning.tick()
+    assert e.syncer.client.schedule_between.await_count==1
+    # A later cancellation does not restart this completed learning window.
+    e.syncer.client.schedule_between.return_value=[{**raw,'registered':10}]
+    await RegistrationLearning(e).tick()
+    assert e.syncer.client.schedule_between.await_count==1
+    report=await learning.report();window=report['courses'][0]['observations'][0]
+    assert window['stop_reason']=='full' and window['samples']==1
+    e.autobook_tick.assert_not_awaited();e.watchlist_tick.assert_not_awaited()
+
+async def test_full_class_does_not_stop_observing_other_classes(prepared):
+    learning,e,raw=prepared
+    other={**raw,'id':2,'registered':1}
+    await e.store.upsert_sessions([other],box_id=73)
+    e.syncer.client.schedule_between.return_value=[{**raw,'registered':12},other]
+    await learning.tick();await learning.tick()
+    rows=await (await e.store.db.execute('SELECT schedule_id,COUNT(*) n FROM registration_samples GROUP BY schedule_id')).fetchall()
+    assert {r['schedule_id']:r['n'] for r in rows}=={1:1,2:2}
+
+@pytest.mark.parametrize('times,counts,risky,reason',[
+    ([25],[12],True,'full_first_sample'),
+    ([400],[12],False,'late_first_sample'),
+    ([10,40,70],[0,4,12],True,'short_observed_margin'),
+    ([10,40],[0,12],True,'short_observed_margin'),
+    ([10,400],[0,12],False,'no_fast_fill_evidence'),
+    ([10,40,70,100,130],[0,4,6,9,12],False,'no_fast_fill_evidence'),
+])
+def test_fast_fill_warning_requires_observed_evidence(times,counts,risky,reason):
+    from app.registration_learning import fill_risk
+    result=fill_risk([{'elapsed':t,'capacity':12,'registered':n} for t,n in zip(times,counts)],{'threshold_percent':30})
+    assert result['recommend_immediate']==risky and result['reason']==reason

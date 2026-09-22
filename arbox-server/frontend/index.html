@@ -493,9 +493,9 @@
       <div class="card">
         <h2>למידת קצב ההרשמה</h2>
         <label><input type="checkbox" id="registrationLearning"> למידה לכל השיעורים בסטודיו הפעיל</label>
-        <p class="hint">דגימה במרווח אקראי של 20–40 שניות במשך החלון שנבחר מפתיחת ההרשמה, ועוד דגימת סיום לאחריו. כל דגימה נשמרת בנפרד ללא מחיקה אוטומטית. הלמידה אינה משנה את ההרשמה. כשהלמידה כבויה, נדגמים רק שיעורים עם תזמון או אוטומציה פעילים. שיעורים ללא מועד פתיחה ידוע אינם נמדדים.</p>
+        <p class="hint">דגימה במרווח אקראי של 20–40 שניות במשך החלון שנבחר מפתיחת ההרשמה, ועוד דגימת סיום לאחריו. אם השיעור התמלא, האיסוף עבורו נעצר מיד. כל דגימה נשמרת בנפרד ללא מחיקה אוטומטית. הלמידה אינה משנה את ההרשמה. כשהלמידה כבויה, נדגמים רק שיעורים עם תזמון או אוטומציה פעילים. שיעורים ללא מועד פתיחה ידוע אינם נמדדים.</p>
         <label>חלון למידה מפתיחת ההרשמה (דקות) <input id="registrationWindow" type="number" min="1" max="120" value="30"></label>
-        <p class="hint">חלון הלמידה עצמאי מזמן ההמתנה: ממשיכים ללמוד גם אחרי שהושג הסף או שבוצעה הרשמה. שינוי החלון יחול על פתיחות חדשות.</p>
+        <p class="hint">חלון הלמידה עצמאי מזמן ההמתנה: ממשיכים ללמוד גם אחרי שהושג הסף או שבוצעה הרשמה, עד שהשיעור מלא או שהחלון מסתיים. שינוי החלון יחול על פתיחות חדשות.</p>
         <p id="registrationWarning" class="hint"></p>
         <p id="registrationHealth" class="hint"></p>
       </div>
@@ -854,6 +854,6 @@
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=10"></script>
 <script src="/static/app.js?v=2.67.0"></script>
-<script src="/static/registration-learning.js?v=2"></script>
+<script src="/static/registration-learning.js?v=3"></script>
 </body>
 </html>

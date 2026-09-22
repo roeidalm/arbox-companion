@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.57.2
+
+- Stop observing an opening once the class is seen full; persist that stop across restarts while continuing to observe other classes.
+- Show the stop reason and evidence-based fast-fill warnings, comparing the observed occupancy-threshold-to-full margin with the sampling/response interval. Recommend immediate booking without changing policies automatically.
+
 ## 1.57.1
 
 - Give learning its own configurable 1–120 minute window, defaulting to 30 minutes, independently of the ten-minute waiting timeout.

@@ -25,13 +25,17 @@ async function loadRegistrationLearning() {
     const host=$('#registrationStats');host.replaceChildren();
     if(!registrationReport.courses.length) host.append(timingNode('p','אין היסטוריה עדיין. מומלץ להפעיל למידה למשך שבועיים ולהשאיר הרשמה מיידית.'));
     for(const course of registrationReport.courses) {
-      const details=document.createElement('details');details.append(timingNode('summary',`${course.label} — ${course.openings} פתיחות נמדדו, ${course.complete_openings} בכיסוי מלא`));
+      const details=document.createElement('details');details.append(timingNode('summary',`${course.label} — ${course.openings} פתיחות נמדדו, ${course.complete_openings} בכיסוי מלא${course.risky_openings?' · ⚠️ התמלאות מהירה':''}`));
+      if(course.risky_openings) details.append(timingNode('p',`⚠️ ב־${course.risky_openings} מתוך ${course.openings} פתיחות נצפתה התמלאות מהירה ביחס לקצב הבדיקה. מומלץ לבחור הרשמה מיידית לשיעור או לאוטומציה הזו. זו אינדיקציה מהעבר, לא תחזית; לא שינינו את ההגדרות.`));
       details.append(timingNode('p','דגימות מעטות אינן תחזית. פתיחות חלקיות, שינוי בקיבולת ושינויים בשיעור עשויים להשפיע.'));
       for(const w of course.observations.slice().reverse()) {
         const entry=document.createElement('details');
-        entry.append(timingNode('summary',`${w.opens_at.replace('T',' ')} · ${w.samples} דגימות · ${w.complete?'כיסוי מלא':'כיסוי חלקי'}`));
+        entry.append(timingNode('summary',`${w.opens_at.replace('T',' ')} · ${w.samples} דגימות · ${w.stop_reason==='full'?'האיסוף הסתיים — השיעור מלא · ':''}${w.complete?'כיסוי מלא עד סיום האיסוף':'כיסוי חלקי'}`));
         const f=x=>x==null?'לא נצפה':`${Math.floor(x/60)}:${String(x%60).padStart(2,'0')} דק׳`;
         entry.append(timingNode('p',`זיהוי ראשון: 30% — ${f(w.first_observed_threshold_seconds['30'])}; 70% — ${f(w.first_observed_threshold_seconds['70'])}; מלא — ${f(w.first_observed_threshold_seconds['100'])}. הפער הגדול בין דגימות: ${w.max_gap_seconds} שניות.`));
+        const risk=w.fill_risk;
+        if(risk?.recommend_immediate) entry.append(timingNode('p',risk.reason==='full_first_sample'?`⚠️ השיעור כבר היה מלא בדגימה הראשונה, לאחר ${f(risk.full_seconds)}. מומלץ להירשם מיידית.`:`⚠️ מהזיהוי הראשון של ${risk.threshold_percent}% תפוסה ועד לזיהוי שיעור מלא עברו ${f(risk.observed_margin_seconds)} בלבד. מרווח זה קצר או קרוב לזמן הבדיקה והתגובה; מומלץ להירשם מיידית.`));
+        if(risk?.reason==='late_first_sample') entry.append(timingNode('p','הדגימה הראשונה הייתה מאוחרת והשיעור כבר היה מלא. אין מספיק מידע לדעת כמה מהר התמלא.'));
         const outcome=w.outcome;
         const reasons={threshold:'סף התפוסה הושג',timeout:'זמן ההמתנה הסתיים',insufficient_data:'אין מספיק מידע לקבוע מה היה מפעיל הרשמה',pending:'עדיין אוספים נתונים',unknown_policy:'ההגדרות בעת הדגימה לא נשמרו בגרסה הקודמת'};
         entry.append(timingNode('p',`הדמיה לפי ההגדרות שנשמרו בפתיחה: ${reasons[outcome.reason]||outcome.reason}${outcome.seconds!=null?' לאחר '+f(outcome.seconds):''}${outcome.occupancy_percent!=null?' · תפוסה שנמדדה '+outcome.occupancy_percent+'%':''}. זו אינה סיבת ההרשמה המיידית שבוצעה.`));

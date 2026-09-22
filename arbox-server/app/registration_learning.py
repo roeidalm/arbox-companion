@@ -98,6 +98,29 @@ def observation_outcome(points, policy, now, opens):
             'seconds': None}
 
 
+def fill_risk(points, policy):
+    """Describe observed sampling risk, not a prediction or a booking decision."""
+    full_index = next((i for i,p in enumerate(points) if p['registered'] >= p['capacity']), None)
+    if full_index is None:
+        return None
+    full = points[full_index]
+    if full_index == 0:
+        return {'reason': 'full_first_sample' if full['elapsed'] <= 55 else 'late_first_sample',
+                'recommend_immediate': full['elapsed'] <= 55, 'full_seconds': round(full['elapsed'])}
+    if policy is None:
+        return None
+    threshold = policy['threshold_percent']
+    start_index = next(i for i,p in enumerate(points[:full_index+1])
+                       if p['registered']/p['capacity']*100 >= threshold)
+    margin = full['elapsed']-points[start_index]['elapsed']
+    nearby = points[max(0,start_index-1):full_index+1]
+    gaps = [b['elapsed']-a['elapsed'] for a,b in zip(nearby,nearby[1:])]
+    risky = margin <= 55 and max(gaps,default=0) <= 75
+    return {'reason': 'short_observed_margin' if risky else 'no_fast_fill_evidence',
+            'recommend_immediate': risky, 'full_seconds': round(full['elapsed']),
+            'observed_margin_seconds': round(margin), 'threshold_percent': threshold}
+
+
 class RegistrationLearning:
     def __init__(self, engine):
         self.engine = engine
@@ -157,10 +180,15 @@ class RegistrationLearning:
                       await (await self.store.db.execute(
                           'SELECT schedule_id,opens_at,MAX(elapsed) AS elapsed FROM registration_samples WHERE box_id=? GROUP BY schedule_id,opens_at',
                           (self.store.active_box_id,))).fetchall()}
+            filled = {(r['schedule_id'],r['opens_at']) for r in await (await self.store.db.execute(
+                'SELECT DISTINCT schedule_id,opens_at FROM registration_samples WHERE box_id=? AND registered>=capacity',
+                (self.store.active_box_id,))).fetchall()}
             candidates = []
             for session in sessions:
                 opens = opening(session)
                 if opens is None:
+                    continue
+                if (session['schedule_id'],opens.isoformat()) in filled:
                     continue
                 policy = saved.get((session['schedule_id'],opens.isoformat()), self.config)
                 if not (self.config['learning_enabled'] or session['schedule_id'] in wanted or policy.get('targeted')):
@@ -311,16 +339,20 @@ class RegistrationLearning:
                 gaps = [b['elapsed']-a['elapsed'] for a,b in zip(points,points[1:])]
                 policy = policies.get((sid,opens))
                 window_seconds = (policy or {}).get('learning_window_minutes', 10)*60
-                complete = points[0]['elapsed']<=55 and points[-1]['elapsed']>=window_seconds and max(gaps,default=0)<=75
+                full = next((p for p in points if p['registered']>=p['capacity']),None)
+                covered_points = points[:points.index(full)+1] if full else points
+                coverage_gaps = [b['elapsed']-a['elapsed'] for a,b in zip(covered_points,covered_points[1:])]
+                complete = points[0]['elapsed']<=55 and (full is not None or points[-1]['elapsed']>=window_seconds) and max(coverage_gaps,default=0)<=75
+                stop_reason = 'full' if full else ('window_elapsed' if points[-1]['elapsed']>=window_seconds else 'pending_or_incomplete')
                 crossings = {str(p):next((round(x['elapsed']) for x in points if x['registered']/x['capacity']*100>=p),None) for p in (30,70,100)}
                 policy = policies.get((sid,opens))
                 outcome = observation_outcome(points, policy, datetime.now(), datetime.fromisoformat(opens))
-                observations.append({'policy':policy,'outcome':outcome,'decisions':decisions[(sid,opens)],'schedule_id':sid,'opens_at':opens,'samples':len(points),'complete':complete,
+                observations.append({'stop_reason':stop_reason,'fill_risk':fill_risk(points,policy),'policy':policy,'outcome':outcome,'decisions':decisions[(sid,opens)],'schedule_id':sid,'opens_at':opens,'samples':len(points),'complete':complete,
                     'first_seconds':round(points[0]['elapsed']),'last_seconds':round(points[-1]['elapsed']),
                     'max_gap_seconds':round(max(gaps,default=0)),'first_observed_threshold_seconds':crossings,
                     'own_booking_first_observed_seconds':next((round(p['elapsed']) for p in points if p['own_booking']),None),
                     'points':[{'observed_at':p['observed_at'],'occupancy_percent':round(100*p['registered']/p['capacity'],1),'seconds':round(p['elapsed']),'registered':p['registered'],'capacity':p['capacity'],'own_booking':bool(p['own_booking'])} for p in points]})
-            courses.append({'cohort':cohort,'label':points[0]['label'],'openings':len(windows),'complete_openings':sum(w['complete'] for w in observations),'observations':observations})
+            courses.append({'cohort':cohort,'label':points[0]['label'],'openings':len(windows),'complete_openings':sum(w['complete'] for w in observations),'risky_openings':sum(bool(w['fill_risk'] and w['fill_risk']['recommend_immediate']) for w in observations),'observations':observations})
         runs = [dict(r) for r in await (await self.store.db.execute('SELECT * FROM registration_sample_runs WHERE box_id=? ORDER BY observed_at DESC LIMIT 20',(box,))).fetchall()]
         return {'config':self.config,'sample_seconds_min':20,'sample_seconds_max':40,'window_minutes':self.config['learning_window_minutes'],'courses':courses,'recent_runs':runs,
                 'warning':'מומלץ ללמוד שבועיים עם הרשמה מיידית. זמני הספים הם זמן הזיהוי הראשון, לא זמן ההרשמה המדויק. אין תחזית כשאין מספיק פתיחות שנמדדו.'}

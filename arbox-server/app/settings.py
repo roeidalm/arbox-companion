@@ -12,7 +12,10 @@ import secrets
 
 SETTINGS_FILE = "settings.json"
 
+from .registration_learning import DEFAULTS as TIMING_DEFAULTS, validate as validate_timing
+
 DEFAULTS: dict = {
+    "registration_timing": TIMING_DEFAULTS,
     "view_key": None,             # separate, opt-in read-only credential
     "api_key": None,              # generated on first run
     "kinds_migrated": 0,          # see KINDS_MIGRATION
@@ -584,7 +587,7 @@ class Settings:
         discord["managed_bot_secret"] = bool(os.environ.get("ARBOX_DISCORD_BOT_TOKEN_FILE") or os.environ.get("ARBOX_DISCORD_BOT_TOKEN"))
         discord["bot_configured"] = self.discord_bot_configured
         discord["configured"] = self.discord_bot_configured or bool(self.discord_webhook)
-        return {"discord": discord, "timezone": self.timezone,
+        return {"registration_timing": self._data["registration_timing"], "discord": discord, "timezone": self.timezone,
                 "retention": self.retention,
                 "blocked_categories": self.blocked_categories,
                 "late_cancel_warning_minutes": self.late_cancel_warning_minutes,
@@ -605,6 +608,10 @@ class Settings:
 
     def update(self, patch: dict) -> None:
         """Apply a settings patch from the UI. '***' means keep the stored secret."""
+        if "registration_timing" in patch:
+            if not isinstance(patch["registration_timing"], dict):
+                raise ValueError("הגדרות הרשמה אינן תקינות")
+            validate_timing(patch["registration_timing"])
         discord_patch = patch.get("discord") or {}
         for field in ("channel_id", "guild_id", "allowed_user_id"):
             if field in discord_patch and (not isinstance(discord_patch[field], str) or (discord_patch[field] and not discord_patch[field].isdigit())):
@@ -731,7 +738,7 @@ class Settings:
                     if str(x) in allowed
                 ]
                 self._data["exercise_packs_by_studio"] = scoped
-        for section in ("telegram", "ha", "discord", "notify", "retention", "journal"):
+        for section in ("telegram", "ha", "discord", "notify", "retention", "journal", "registration_timing"):
             if section in patch and isinstance(patch[section], dict):
                 for k, v in patch[section].items():
                     if v == "***":

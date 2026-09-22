@@ -372,6 +372,8 @@ class RulesEngine:
         exclusive = getattr(syncer, "exclusive", None)
         self._tick_lock = exclusive() if exclusive else ReentrantAsyncLock()
         self._membership_lock = self._tick_lock
+        from .registration_learning import RegistrationLearning
+        self.registration_learning = RegistrationLearning(self)
         self.planning_actions = PlanningActions(self)
         notifier.on_callback = self.handle_callback
         notifier.on_message = self.handle_message
@@ -2235,6 +2237,8 @@ class RulesEngine:
             is_open, _ = registration_open(s, now)
             if not is_open:
                 continue
+            if await self.registration_learning.defer(s):
+                continue
             await self._grab_watched(
                 s, bool(w["allow_standby"]), membership_override)
 
@@ -2489,6 +2493,8 @@ class RulesEngine:
                 await self.notifier.send(
                     f"🏖️ דילגתי על {_fmt_session(s)} — התאריך בחופשה שהגדרת",
                     kind="autobook")
+                continue
+            if await self.registration_learning.defer(s, matched):
                 continue
             await self._try_autobook(s)
 

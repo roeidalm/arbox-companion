@@ -2911,6 +2911,7 @@ function showPane(name) {
   $$(".pane").forEach((p) => { p.hidden = p.dataset.pane !== name; });
   $$(".subtab[data-pane]").forEach(
     (b) => b.classList.toggle("active", b.dataset.pane === name));
+  if (name === "registration" && typeof loadRegistrationLearning === "function") loadRegistrationLearning();
   if (name === "profile" || name === "studio") loadProfile();
   if (name === "calendar") {
     const host = $("#googleCalendarPanel");

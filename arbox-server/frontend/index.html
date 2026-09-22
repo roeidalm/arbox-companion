@@ -323,6 +323,7 @@
       <button class="subtab active" data-pane="profile">👤 פרופיל</button>
       <button class="subtab" data-pane="notify">🔔 התראות</button>
       <button class="subtab" data-pane="calendar">📅 לוח שנה</button>
+      <button class="subtab" data-pane="registration">⏱️ הרשמה ולמידה</button>
       <button class="subtab" data-pane="tracking">🏋️ מעקב</button>
       <button class="subtab" data-pane="studio">🏠 סטודיו</button>
       <button class="subtab" data-pane="cleanup">🧹 ניקוי</button>
@@ -486,6 +487,38 @@
       </div>
       <div id="googleCalendarPanel" class="card gc-panel"></div>
       </div>
+    </div>
+
+    <div class="pane" data-pane="registration" hidden>
+      <div class="card">
+        <h2>למידת קצב ההרשמה</h2>
+        <label><input type="checkbox" id="registrationLearning"> למידה לכל השיעורים בסטודיו הפעיל</label>
+        <p class="hint">דגימה כל 30 שניות בעשר הדקות הראשונות מפתיחת ההרשמה. הלמידה אינה משנה את ההרשמה. כשהלמידה כבויה, נדגמים רק שיעורים עם תזמון או אוטומציה פעילים. שיעורים ללא מועד פתיחה ידוע אינם נמדדים.</p>
+        <p id="registrationWarning" class="hint"></p>
+        <p id="registrationHealth" class="hint"></p>
+      </div>
+      <div class="card">
+        <h2>ברירת המחדל לתזמונים ולאוטומציות</h2>
+        <label><input type="checkbox" id="registrationWaiting"> הפעלת הרשמה בהמתנה לפי תפוסה</label>
+        <p class="hint">כבוי = הרשמה מיידית כמו היום, גם אם הוגדרו חריגות. פעיל = המתנה עד הסף או עד תום הזמן, המוקדם מביניהם. מידע חסר או ישן מחזיר להרשמה מיידית. ההמתנה עלולה לגרום לפספוס מקום.</p>
+        <div class="field-row">
+          <label>אחוז תפוסה להרשמה <input id="registrationPercent" type="number" min="1" max="50" value="30"></label>
+          <label>זמן המתנה מרבי מפתיחת ההרשמה (דקות) <input id="registrationTimeout" type="number" min="1" max="10" value="5"></label>
+        </div>
+        <button id="registrationSave" class="primary" type="button">שמור למידה וברירת מחדל</button>
+      </div>
+      <div class="card">
+        <h2>חריגה לשיעור או לאוטומציה</h2>
+        <p class="hint">אין צורך להגדיר כל שיעור. כולם יורשים את ברירת המחדל; החריגות נשמרות רק אם תבחרו אחרת. חריגה לשיעור קודמת לחריגה לאוטומציה. בחפיפה בין אוטומציות, החריגה בעלת המזהה הנמוך קודמת.</p>
+        <label>שיעור / אוטומציה <select id="registrationTarget"></select></label>
+        <div class="field-row">
+          <label>מצב <select id="registrationMode"><option value="inherit">לפי ברירת המחדל</option><option value="immediate">מיידי</option><option value="wait">המתנה מותאמת</option></select></label>
+          <label>אחוז <input id="registrationOverridePercent" type="number" min="1" max="50" value="30"></label>
+          <label>דקות <input id="registrationOverrideTimeout" type="number" min="1" max="10" value="5"></label>
+        </div>
+        <button id="registrationOverrideSave" type="button">שמור חריגה</button>
+      </div>
+      <div class="card"><h2>מה למדנו על השיעורים</h2><button id="registrationRefresh" type="button">עדכון התצוגה</button><div id="registrationStats"></div></div>
     </div>
 
     <div class="pane" data-pane="tracking" hidden>
@@ -818,6 +851,7 @@
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=10"></script>
-<script src="/static/app.js?v=2.66.0"></script>
+<script src="/static/app.js?v=2.67.0"></script>
+<script src="/static/registration-learning.js?v=1"></script>
 </body>
 </html>

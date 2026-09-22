@@ -1756,3 +1756,14 @@ async def save_membership_policy(request: Request, membership_id: int, body: Mem
         await s.rules_engine.reconcile_planned_quota()
         await s.rules_engine.schedule_openings()
     return {"ok": True, "policy": policy}
+
+
+@router.get("/registration-learning")
+async def registration_learning(request: Request, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    report = await s.rules_engine.registration_learning.report()
+    report['rules'] = [{'id':r['id'],'name':r.get('name') or str(r['id'])} for r in await s.store.list_rules() if r['mode']=='autobook']
+    report['sessions'] = [{'id':x['schedule_id'],'label':f"{x['date']} {x['start_time']} · {x.get('category_name') or ''}"} for x in await s.store.get_sessions(date_from=date.today().isoformat())]
+    report['box_id'] = s.store.active_box_id
+    return report

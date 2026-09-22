@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.57.0
+
+- Add optional registration learning: observe occupancy every 30 seconds during the first ten minutes after opening, with persisted history and explicit coverage gaps. Broad learning observes the active studio; otherwise only planned targets are sampled.
+- Add a separate, disabled-by-default occupancy waiting policy, inherited by scheduled sessions and automations, with configurable threshold, timeout and scoped overrides. Existing immediate booking remains the default.
+- Show learning controls and per-class observations in Settings → Registration and learning. Recommend collecting two weeks of observations before enabling waiting.
+
 ## 1.56.2
 
 - Render calendar notification captions using Discord formatting instead of showing Telegram HTML tags.

@@ -810,3 +810,9 @@ legend input { width: auto; }
 .mine-item .grow, .rule-item .grow { min-width: 0; }
 #timingScheduleDialog { max-width: min(540px, 94vw); }
 @media(max-width:620px){.rule-item{flex-wrap:wrap}.rule-item .grow{flex:1 1 100%}.registration-context-actions button{min-height:40px}}
+
+/* Routine guidance stays compact; native disclosure supports keyboard and touch. */
+.registration-context>summary { cursor:pointer; color:var(--muted); padding:5px 0; }
+.registration-context>summary.planning-warning { color:var(--warn); }
+details.registration-context:not([open]) { padding:2px 0; background:transparent; border:0; margin-top:4px; }
+details.registration-context[open]>summary { margin-bottom:8px; }

@@ -32,7 +32,16 @@ function timingModeText(entry,session) {
   return mode;
 }
 function timingCard(entry,{kind,id,session,refresh,actions=true,studio=state.selectedStudioId}={}) {
-  const card=timingNode('div','');card.className='registration-context';
+  const card=timingNode(actions?'details':'div','');card.className='registration-context';
+  if(actions) {
+    const summary=timingNode('summary','פרטי הרשמה ולמידה');
+    if(entry?.status==='waiting_occupancy')summary.textContent=timingModeText(entry,session);
+    else if(entry?.history?.risky_openings && !['booked','standby','disabled','notify'].includes(entry.status)) {
+      summary.textContent='⚠️ נצפתה התמלאות מהירה — מומלצת הרשמה מיידית';
+      summary.className='planning-warning';
+    } else if(entry?.override)summary.textContent='פרטי הרשמה ולמידה · העדפה אישית';
+    card.append(summary);
+  }
   if(!entry){card.append(timingNode('p','לא ניתן לטעון כרגע את המלצת ההרשמה. ההגדרות הקיימות ממשיכות לחול.'));return card;}
   card.append(timingNode('strong',timingModeText(entry,session)));
   const history=timingNode('p',timingHistoryText(entry.history));

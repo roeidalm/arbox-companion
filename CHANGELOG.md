@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.58.5
+
+- Collapse routine registration and learning explanations on workout and automation cards; keep fast-fill warnings and active waiting visible, with full details available on demand.
+
 ## 1.58.4
 
 - Keep Discord cancellation reason choices in the original message, remove redundant ephemeral acknowledgements, and preserve the workout and chosen reason in the final confirmation.

@@ -16,3 +16,24 @@ test('eligibility and cancellation statuses outrank a waiting policy',()=>{
   assert.match(context.timingModeText(entry,{}),/08:10/);
   assert.match(context.timingModeText({...entry,status:'booked'},{}),/כבר רשום/);
 });
+function renderCard(entry,options={}) {
+  context.state={selectedStudioId:1};
+  context.timingNode=(tag,text)=>({tag,textContent:text,children:[],append(...nodes){this.children.push(...nodes);}});
+  return context.timingCard(entry,options);
+}
+const routine={status:'booked',policy:{mode:'immediate'},history:{openings:0}};
+test('routine guidance is collapsed while intentional previews remain expanded',()=>{
+  const card=renderCard(routine);
+  assert.equal(card.tag,'details');assert.notEqual(card.open,true);
+  assert.equal(card.children[0].tag,'summary');
+  assert.equal(card.children[0].textContent,'פרטי הרשמה ולמידה');
+  assert.equal(renderCard(routine,{actions:false}).tag,'div');
+});
+test('active waiting and relevant fast-fill warnings remain visible in summary',()=>{
+  const waiting={...routine,status:'waiting_occupancy',policy:{mode:'wait',threshold_percent:30},deadline_at:'2026-09-24T10:10:00'};
+  assert.match(renderCard(waiting).children[0].textContent,/10:10/);
+  const risky={...routine,status:'rule',history:{openings:2,risky_openings:1}};
+  assert.match(renderCard(risky).children[0].textContent,/התמלאות מהירה/);
+  assert.equal(renderCard({...risky,status:'booked'}).children[0].textContent,'פרטי הרשמה ולמידה');
+  assert.equal(renderCard(null).children[0].tag,'summary');
+});

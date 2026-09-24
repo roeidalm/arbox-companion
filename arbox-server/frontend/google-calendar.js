@@ -1,7 +1,7 @@
 /* Optional Google connection. Secrets are uploaded once and never rendered. */
 (function (root) {
   'use strict';
-  const kinds = {scheduled:'מתוזמן', automation:'אוטומציה', booked:'רשום', standby:'רשימת המתנה', review:'דורש בדיקה'};
+  const kinds = {scheduled:'מתוזמן', automation:'אוטומציה', booked:'רשום', standby:'רשימת המתנה', review:'דורש בדיקה', cancelled:'בוטל'};
   const colors = {
     1:['לבנדר','#7986cb'],2:['מרווה','#33b679'],3:['סגול','#8e24aa'],4:['ורוד','#e67c73'],
     5:['צהוב','#f6bf26'],6:['כתום','#f4511e'],7:['טורקיז','#039be5'],8:['אפור','#616161'],

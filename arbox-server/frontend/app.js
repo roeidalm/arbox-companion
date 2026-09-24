@@ -1585,6 +1585,7 @@ const OUTCOMES = {
   attended:  { label: "✅ הייתי", cls: "o-attended" },
   pending:   { label: "❔ הגעת?", cls: "o-pending" },
   missed:    { label: "❌ לא הגעתי", cls: "o-failed" },
+  cancelled_unknown: { label: "⚠ שינוי בהרשמה — בבירור", cls: "o-skipped" },
   cancelled_safe: { label: "🟢 בוטל בזמן", cls: "o-cancelled" },
   cancelled_late: { label: "🟠 ביטול מאוחר", cls: "o-skipped" },
   standby_cancelled: { label: "⚪ יצאתי מהמתנה", cls: "o-cancelled" },
@@ -1655,12 +1656,13 @@ const EVENT_LABELS = {
   rebooked: "הוזמן מחדש",
   standby_joined: "נכנס להמתנה",
   standby_rejoined: "נכנס שוב להמתנה",
+  cancelled_unknown: "זוהתה הרשמה שנעלמה",
   cancelled_safe: "בוטל בזמן",
   cancelled_late: "ביטול מאוחר",
   standby_cancelled: "יצא מהמתנה",
   attended: "סומן שהגעת",
   missed: "סומן שלא הגעת",
-  reason_updated: "סיבת אי-הגעה עודכנה",
+  reason_updated: "הסיבה עודכנה",
   planning_changed: 'זוהה שינוי באימון',
   planning_change_accepted: 'השינוי אושר',
   planning_change_cancelled: 'התכנון בוטל בעקבות השינוי',
@@ -1690,6 +1692,7 @@ function eventEntry(e) {
 }
 
 function eventLead(e) {
+  if (e.source === "external_sync" || e.source === "external_confirmed") return " · מועד הביטול אינו ידוע";
   if (!e.date || !e.start_time || !e.occurred_at) return "";
   const start = new Date(`${e.date}T${e.start_time}`);
   const happened = new Date(e.occurred_at.replace(" ", "T"));
@@ -1869,7 +1872,7 @@ function renderHistory() {
         line.className = "hist-event";
         const clock = document.createElement("span");
         clock.className = "hist-event-time";
-        clock.textContent = eventStamp(e.occurred_at);
+        clock.textContent = (e.source === "external_sync" ? "זוהה ב־" : "") + eventStamp(e.occurred_at);
         line.append(clock,
           ` · ${EVENT_LABELS[e.event_type] || e.event_type}`
           + (e.event_type.startsWith("cancelled") ? eventLead(e) : "")
@@ -1891,6 +1894,21 @@ function renderHistory() {
 
     const controls = document.createElement("span");
     controls.className = "hist-actions";
+    if (["cancelled_late", "cancelled_safe", "cancelled_unknown"].includes(x.outcome)) {
+      const edit = document.createElement("button");
+      edit.textContent = x.reason_code ? "שנה סיבת ביטול" : "אני ביטלתי — הוסף סיבה";
+      edit.onclick = async () => {
+        const reason = await chooseReason("מה סיבת הביטול?", "הסיבה תישמר בהיסטוריה; החיוב לא ייספר שוב.");
+        if (!reason) return;
+        try {
+          await api(`/api/history/${x.schedule_id}/cancellation-reason`, {
+            method: "PUT", body: JSON.stringify({status: x.outcome, ...reason})});
+          toast("סיבת הביטול נשמרה"); historyData = await api("/api/history"); renderHistory();
+        } catch (e) { toast(e.message); }
+      };
+      if (!x.reason_code) detail.append("סיבת הביטול טרם נמסרה · ");
+      controls.appendChild(edit);
+    }
     if (["pending", "attended", "missed"].includes(x.outcome)) {
       if (x.outcome !== "attended") {
         const yes = document.createElement("button");
@@ -3637,3 +3655,5 @@ if (new URLSearchParams(location.search).has("google_calendar") || new URLSearch
   state.settingsPane = "calendar";
   history.replaceState(null, "", "/settings");
 }
+
+if (new URLSearchParams(location.search).has("history")) $("#historyDetails").open = true;

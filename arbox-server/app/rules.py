@@ -667,6 +667,8 @@ class RulesEngine:
         async with self._membership_lock:
             await self.migrate_learned_blocks()
             await self.refresh_planning_evidence()
+            from .external_cancellations import notify_pending
+            await notify_pending(self)
             await self.preflight_plans()
             await self.reconcile_planned_quota()
 
@@ -860,6 +862,9 @@ class RulesEngine:
         await self.syncer.refresh_membership()
         await self.refresh_planning_evidence(force_history=True)
         sid = session["schedule_id"]
+        outcome = await self.store.get_training_outcome(sid)
+        if outcome and outcome['status'] == 'cancelled_unknown':
+            raise PlanningBlocked('הרשמה קודמת נעלמה — נדרש בירור לפני הרשמה נוספת')
         fresh = await self._guard_booking_identity(session)
         if not fresh:
             raise PlanningBlocked('האימון אינו נמצא בסטודיו הפעיל. רעננו את התצוגה')
@@ -1406,6 +1411,11 @@ class RulesEngine:
         except ValueError:
             return "כפתור לא מוכר"
 
+        if action.startswith("xc_"):
+            from .external_cancellations import callback
+            async with self._tick_lock:
+                return await callback(self, action, cid, reply_text)
+
         if action.startswith("preview_"):
             return await self.journal_preview.callback(action, cid, source_channel, reply_text)
         if action == 'plan':
@@ -1673,6 +1683,10 @@ class RulesEngine:
         preview = await self.journal_preview.message(text)
         if preview is not None or preview_only:
             return preview
+        from .external_cancellations import message
+        external = await message(self, text)
+        if external is not None:
+            return external
         journal_pending = await self.store.get_meta("journal_text_input")
         if journal_pending and journal_pending.get("kind") == "journal":
             value = (text or "").strip()

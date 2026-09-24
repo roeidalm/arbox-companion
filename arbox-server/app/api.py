@@ -856,6 +856,23 @@ async def history(request: Request, x_api_key: str | None = Header(None)):
     }
 
 
+@router.put("/history/{schedule_id}/cancellation-reason")
+async def cancellation_reason(request: Request, schedule_id: int, body: AttendanceAction,
+                              x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    if not await s.store.get_session(schedule_id):
+        raise HTTPException(404, "unknown schedule_id")
+    code, text = _clean_reason(body.reason_code, body.reason_text)
+    from .external_cancellations import save_reason
+    async with s.syncer.exclusive():
+        try:
+            await save_reason(s.rules_engine, schedule_id, code, text)
+        except ValueError as err:
+            raise HTTPException(409, str(err))
+    return {"ok": True}
+
+
 @router.put("/history/{schedule_id}/attendance")
 async def set_attendance(
     request: Request, schedule_id: int, body: AttendanceAction,

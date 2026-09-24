@@ -2,7 +2,7 @@
 
 Secrets are kept outside SQLite in a mode-0600 atomic file. Google IO never
 performs Arbox writes. Event ids are deterministic so uncertain inserts can be
-retried without duplicate events. Only this connection's future events change.
+retried without duplicate events. Only this connection's events change, including reconciled cancellations.
 """
 from __future__ import annotations
 
@@ -30,9 +30,9 @@ API = 'https://www.googleapis.com/calendar/v3'
 TOKEN = 'https://oauth2.googleapis.com/token'
 AUTH = 'https://accounts.google.com/o/oauth2/v2/auth'
 LABELS = {'scheduled': 'מתוזמן', 'automation': 'אוטומציה', 'booked': 'רשום',
-          'standby': 'רשימת המתנה', 'review': 'דורש בדיקה'}
+          'standby': 'רשימת המתנה', 'review': 'דורש בדיקה', 'cancelled': 'בוטל'}
 DEFAULTS = {k: {'enabled': True, 'color': c, 'reminders': [60, 30] if k == 'booked' else [],
-                'busy': k == 'booked'} for k, c in zip(LABELS, ('9', '6', '10', '5', '11'))}
+                'busy': k == 'booked'} for k, c in zip(LABELS, ('9', '6', '10', '5', '11', '11'))}
 
 
 class CalendarError(Exception):
@@ -67,6 +67,8 @@ LEGACY_COLORS = dict(zip(map(str, range(1, 12)), (
 
 
 def validate_preferences(data, palette=()):
+    if isinstance(data, dict) and set(data) == set(LABELS) - {'cancelled'}:
+        data = {**data, 'cancelled': copy.deepcopy(DEFAULTS['cancelled'])}
     if not isinstance(data, dict) or set(data) != set(LABELS):
         raise ValueError('חסרות הגדרות למצבי האימון')
     out = {}
@@ -132,9 +134,11 @@ class GoogleCalendar:
         return hashlib.sha256(f'{account}:{studio}'.encode()).hexdigest()
 
     def profile(self):
-        return self.data['profiles'].setdefault(self.context(), {
+        profile = self.data['profiles'].setdefault(self.context(), {
             'preferences': copy.deepcopy(DEFAULTS), 'enabled': False, 'events': {},
             'owner': secrets.token_hex(16)})
+        profile['preferences'].setdefault('cancelled', copy.deepcopy(DEFAULTS['cancelled']))
+        return profile
 
     def status(self):
         try:
@@ -325,6 +329,14 @@ class GoogleCalendar:
             if plan.get('intent_change') or states.get(str(sid), {}).get('state') not in (None, 'ready'):
                 kind = 'review'
             indexed[sid] = (row, kind)
+        for outcome in await e.store.training_history():
+            if outcome['status'] not in ('cancelled_late', 'cancelled_safe', 'cancelled_unknown'):
+                continue
+            if outcome['date'] < (today - timedelta(days=30)).isoformat():
+                continue
+            sid = outcome['schedule_id']
+            row = {**(await e.store.get_session(sid) or {}), **outcome}
+            indexed[sid] = (row, 'review' if outcome['status'] == 'cancelled_unknown' else 'cancelled')
         identity = await e.store.get_meta('identity') or {}
         location = ', '.join(v for v in (identity.get('studio_name'), identity.get('address')) if v)
         desired = {}
@@ -340,8 +352,17 @@ class GoogleCalendar:
                     prefs['color'] = matching['id']
             elif prefs['color'] not in {c['id'] for c in p.get('palette', [])}:
                 raise CalendarError('צבע שנבחר הוסר מהיומן. בחרו צבע חדש בהגדרות לוח השנה')
+            cancellation = row.get('status', '').startswith('cancelled')
+            if cancellation:
+                prefs.update(busy=False, reminders=[])
             body = event_body(row, kind, prefs, e.settings.timezone, location, p['owner'])
-            if datetime.fromisoformat(body['end']['dateTime']) <= now:
+            if cancellation:
+                fee = ('ביטול מאוחר · כניסה נוצלה' if row['status'] == 'cancelled_late'
+                       else 'החיוב בבירור' if row['status'] == 'cancelled_unknown' else 'בוטל בזמן')
+                from .rules import RulesEngine
+                reason = row.get('reason_text') if row.get('reason_code') == 'other' else RulesEngine.REASON_LABELS.get(row.get('reason_code'))
+                body['description'] += '\n' + fee + '\nסיבת הביטול: ' + (reason or 'טרם נמסרה')
+            if not cancellation and datetime.fromisoformat(body['end']['dateTime']) <= now:
                 continue
             generation = p.get('generations', {}).get(str(sid), 0)
             eid = 'ab' + hashlib.sha256(f"{p['owner']}:{sid}:{generation}".encode()).hexdigest()[:40]

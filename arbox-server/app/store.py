@@ -717,7 +717,9 @@ class Store:
         for sid in protected:
             await self.db.execute('UPDATE planning_intents SET changed=2 WHERE schedule_id=? AND box_id=?',
                                   (sid, self.active_box_id or 0))
-        keep_ids = [*keep_ids, *protected]
+        cur = await self.db.execute("SELECT schedule_id FROM training_outcomes WHERE (? IS NULL OR box_id=?)",
+                                    (self.active_box_id, self.active_box_id))
+        keep_ids = [*keep_ids, *protected, *(r[0] for r in await cur.fetchall())]
         if keep_ids:
             marks = ",".join("?" for _ in keep_ids)
             cur = await self.db.execute(
@@ -922,7 +924,9 @@ class Store:
         for raw in await cur.fetchall():
             row = dict(raw)
             status = row.get("status") or ""
-            if status == "cancelled_late":
+            if status == "cancelled_unknown":
+                row["commitment"] = "uncertain"
+            elif status == "cancelled_late":
                 row["commitment"] = "used"
             elif status in ("attended", "missed"):
                 row["commitment"] = "used"
@@ -1001,6 +1005,15 @@ class Store:
             for row in groups[group]:
                 existing = await self.get_session(row["id"])
                 booking_id = row.get('user_booked')
+                if group == 'lateCancellation':
+                    if not existing:
+                        await self.upsert_sessions([{**row, "_selected_membership_id": membership_id}],
+                                                   box_id=self.active_box_id)
+                    if not existing or existing.get('user_booked') in (None, booking_id):
+                        await self.db.execute('UPDATE sessions SET membership_user_id=? WHERE schedule_id=?',
+                                              (membership_id, row['id']))
+                    await self.record_external_cancellation(row['id'], booking_id, confirmed_late=True)
+                    continue
                 if group == 'future' and booking_id is not None:
                     # A cancelled cycle must not return through a stale read,
                     # even when the calendar row has since been removed.
@@ -1031,6 +1044,37 @@ class Store:
                             "UPDATE sessions SET membership_user_id=? WHERE schedule_id=?",
                             (membership_id, row["id"]))
         await self.db.commit()
+
+    async def record_external_cancellation(self, sid: int, booking_id: int | None,
+                                           *, confirmed_late: bool = False) -> None:
+        """Detection time is NOT cancellation time. Never infer actor or fee."""
+        session = await self.get_session(sid)
+        if not session:
+            return
+        current = session.get('user_booked')
+        # A historical cancelled cycle must not cancel a subsequent booking.
+        if current is not None and current != booking_id:
+            return
+        prior = await self.get_training_outcome(sid)
+        if prior and prior['status'] in ('cancelled_late', 'cancelled_safe', 'standby_cancelled'):
+            return
+        if not confirmed_late and prior:
+            return
+        if booking_id is None:
+            cur = await self.db.execute(
+                "SELECT booking_id FROM training_events WHERE schedule_id=? "
+                "AND event_type IN ('booked','rebooked') ORDER BY id DESC LIMIT 1", (sid,))
+            receipt = await cur.fetchone()
+            booking_id = receipt['booking_id'] if receipt else None
+        await self.db.execute("UPDATE sessions SET user_booked=NULL WHERE schedule_id=?", (sid,))
+        await self.set_training_outcome(
+            sid, 'cancelled_late' if confirmed_late else 'cancelled_unknown',
+            'external_sync', (prior or {}).get('reason_code'), (prior or {}).get('reason_text'),
+            booking_id=booking_id, counts_entry=True if confirmed_late else None)
+        await self.expire_prompts(sid, ('attendance', 'attendance_reason'))
+        await self.log_event('warn', 'booking',
+            'זוהה ביטול מאוחר ב־Arbox' if confirmed_late else 'הרשמה נעלמה — נדרש בירור',
+            'מועד הגילוי בלבד; מבצע הביטול ומועד הביטול אינם ידועים', sid)
 
     async def training_history(self, now: Any | None = None) -> list[dict]:
         """Completed commitments and cancellations, newest first.

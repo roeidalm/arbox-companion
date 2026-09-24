@@ -327,6 +327,15 @@ class Syncer:
         await self.store.upsert_sessions(
             sessions, extra_advance_hours=extra_advance, box_id=self.box_id
         )
+        # Only a previously booked future occurrence can disappear suspiciously.
+        # Empty multi-day responses are not reliable evidence of cancellation.
+        if sessions or start == end:
+            fresh = {r['id']: r for r in sessions}
+            for sid, old in before.items():
+                if (old.get('user_booked') is not None
+                        and f"{old['date']}T{old['start_time']}" > datetime.now().isoformat()
+                        and not fresh.get(sid, {}).get('user_booked')):
+                    await self.store.record_external_cancellation(sid, old['user_booked'])
         # The resync-delete is clamped to today: with history retained, a
         # range that reaches into the past must never prune it — one empty
         # upstream response would destroy attendance Arbox may not re-serve.

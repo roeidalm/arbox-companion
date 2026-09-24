@@ -24,7 +24,7 @@ def calendar(tmp_path):
         settings=SimpleNamespace(timezone='Asia/Jerusalem', base_url='http://server.example:8177'),
         syncer=SimpleNamespace(exclusive=lambda: lock, studio_name='Studio'),
         store=SimpleNamespace(active_box_id=73, get_sessions=AsyncMock(return_value=[row]),
-            get_session=AsyncMock(return_value=row), get_meta=AsyncMock(return_value={})),
+            get_session=AsyncMock(return_value=row), training_history=AsyncMock(return_value=[]), get_meta=AsyncMock(return_value={})),
         _planned_sessions=AsyncMock(return_value=[{**row, 'planning_source':'scheduled'}]),
         quota_status=AsyncMock(return_value={'plan_states': {'42': {'state':'ready'}}}))
     g=GoogleCalendar(tmp_path,e)

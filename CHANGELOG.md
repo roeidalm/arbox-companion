@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.58.1 — External cancellation reconciliation
+
+- Import Arbox late cancellations into the existing training history and charge ledger without duplicate usage; preserve cancellation reasons across syncs.
+- Detect vanished future bookings as unresolved changes, retain evidence and block automatic rebooking while uncertain.
+- Notify with confirmation/reason and investigation buttons; reuse the existing reason choices and support editing in history.
+- Show cancelled Google events in red, free and without reminders, including corrections for the previous 30 days. Discovery time is never presented as the cancellation time.
+
 ## 1.58.0
 
 - Show registration mode, occupancy-learning evidence and fast-fill recommendations directly in My Classes, automation cards and the automation editor.

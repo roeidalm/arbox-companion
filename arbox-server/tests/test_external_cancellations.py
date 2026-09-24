@@ -112,3 +112,14 @@ async def test_old_notification_cannot_change_new_cancellation_cycle(engine):
     answer=await callback(engine,'xc_reason_none',cid)
     assert 'השתנה' in answer
     assert (await s.get_training_outcome(77))['reason_code'] is None
+
+@pytest.mark.asyncio
+async def test_notification_is_bound_to_original_studio(engine):
+    await engine.store.record_external_cancellation(77,123,confirmed_late=True)
+    await notify_pending(engine)
+    cid=engine.notifier.send.await_args.args[1][0][0]['data'].split(':')[1]
+    engine.store.active_box_id=999
+    assert 'סטודיו' in await callback(engine,'xc_reason_none',cid)
+    with pytest.raises(ValueError):
+        await save_reason(engine,77,'none')
+    assert (await engine.store.get_training_outcome(77))['reason_code'] is None

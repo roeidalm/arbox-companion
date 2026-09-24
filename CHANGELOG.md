@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.58.2
+
+- Bind cancellation explanation callbacks and saves to the active studio as well as the original cancellation cycle.
+
 ## 1.58.1 — External cancellation reconciliation
 
 - Import Arbox late cancellations into the existing training history and charge ledger without duplicate usage; preserve cancellation reasons across syncs.

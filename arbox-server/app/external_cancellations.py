@@ -6,6 +6,8 @@ from .notification_reply import NotificationReply
 
 
 async def save_reason(engine, sid, code, text=None):
+    if not await engine.store.get_session(sid):
+        raise ValueError('האימון אינו שייך לסטודיו הפעיל')
     outcome = await engine.store.get_training_outcome(sid)
     if not outcome or outcome['status'] not in ('cancelled_late', 'cancelled_safe', 'cancelled_unknown'):
         raise ValueError('הביטול כבר אינו המצב הנוכחי של האימון')
@@ -48,6 +50,8 @@ async def callback(engine, action, cid, reply_text=None):
     if not prompt or prompt.get('answered_at') or prompt['action'] not in ('external_cancel','external_cancel_reason'):
         return 'הבקשה כבר טופלה; אפשר לעדכן סיבה בהיסטוריה'
     sid = prompt['schedule_id']
+    if not await engine.store.get_session(sid):
+        return 'האימון אינו שייך לסטודיו הפעיל; לא עודכן דבר'
     row = await engine.store.get_training_outcome(sid)
     if not row or row['status'] not in ('cancelled_late','cancelled_safe','cancelled_unknown'):
         return 'מצב האימון השתנה — לא עודכן דבר'

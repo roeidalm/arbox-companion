@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.58.4
+
+- Keep Discord cancellation reason choices in the original message, remove redundant ephemeral acknowledgements, and preserve the workout and chosen reason in the final confirmation.
+
 ## 1.58.3
 
 - Refresh cached calendar/history interface assets and keep notification history links open across initial navigation.

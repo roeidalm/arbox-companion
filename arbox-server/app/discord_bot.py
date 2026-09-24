@@ -59,6 +59,14 @@ def render_bot(text, buttons, key):
                 rows.append({'type': 1, 'components': current}); current = []
         if current:
             rows.append({'type': 1, 'components': current})
+    # Telegram reason menus use one choice per row. Discord permits only five
+    # action rows per message: compact these menus before splitting messages.
+    # Eight reasons fit in four mobile-friendly rows, with the prompt attached.
+    if len(rows) > 5 and all(len(row['components']) == 1 for row in rows):
+        choices = [row['components'][0] for row in rows]
+        width = 2 if len(choices) <= 10 else 5
+        rows = [{'type': 1, 'components': choices[i:i+width]}
+                for i in range(0, len(choices), width)]
     for i in range(0, len(rows), 5):
         if i:
             parts.append({'content': 'אפשרויות נוספות', 'allowed_mentions': {'parse': []}, 'components': []})
@@ -155,7 +163,7 @@ class DiscordBot:
                         return
                     await owner.execute(submitted, data, source, str(self.answer))
             modal = InputModal(timeout=300)
-            if data.startswith('reason_other:'):
+            if data.startswith(('reason_other:', 'xc_reason_other:')):
                 modal.answer.max_length = 500
             await interaction.response.send_modal(modal)
             return
@@ -211,7 +219,12 @@ class DiscordBot:
                 await source.edit(content=first['content'], view=view, allowed_mentions=discord.AllowedMentions.none())
                 for extra in payloads[1:]:
                     await source.channel.send(extra['content'], view=make_view(extra), allowed_mentions=discord.AllowedMentions.none())
-                await interaction.edit_original_response(content='עודכן ✓')
+                # The edited source is already the acknowledgement. Remove the
+                # temporary thinking reply instead of leaving a detached echo.
+                try:
+                    await interaction.delete_original_response()
+                except Exception:
+                    await interaction.edit_original_response(content='עודכן ✓')
             except Exception:
                 await interaction.edit_original_response(content='הפעולה טופלה, אך עדכון ההודעה נכשל. בדקו את מצב האימון באפליקציה.')
                 await self.notifier._log('warn', 'פעולת Discord טופלה אך עדכון ההודעה נכשל', channel='discord')

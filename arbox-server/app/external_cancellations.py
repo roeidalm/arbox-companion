@@ -80,7 +80,10 @@ async def callback(engine, action, cid, reply_text=None):
             return 'כתוב את סיבת הביטול בהודעה הבאה, או דרך ההיסטוריה באתר'
         await save_reason(engine, sid, code, reply_text.strip()[:500] if code=='other' else None)
         await engine.store.set_meta('external_cancel_input', None)
-        return 'סיבת הביטול נשמרה בהיסטוריה. החיוב לא נספר שוב ✓'
+        reason = reply_text.strip()[:500] if code == 'other' else engine.REASON_LABELS[code]
+        return (f"✅ הביטול עודכן · {row['date']} {row['start_time']}\n"
+                f"{row['category_name']} · {row.get('coach_name') or ''}\nסיבה: {reason}\n"
+                'נשמר בהיסטוריה. החיוב לא נספר שוב.')
     return 'כפתור לא מוכר'
 
 

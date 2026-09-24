@@ -21,7 +21,7 @@ def interaction(data='plan:one',user=3,channel=2,guild=1):
         data={'custom_id':custom_id(data,'test-secret')},
         message=SimpleNamespace(author=SimpleNamespace(id=4),edit=AsyncMock(),channel=SimpleNamespace(send=AsyncMock())),
         response=SimpleNamespace(defer=AsyncMock(),send_message=AsyncMock(),send_modal=AsyncMock()),
-        edit_original_response=AsyncMock())
+        edit_original_response=AsyncMock(),delete_original_response=AsyncMock())
 
 def test_render_readable_buttons_and_limits():
     buttons=[[{'text':f'בחירה {i}','data':f'plan:{i}'}] for i in range(31)]
@@ -133,3 +133,23 @@ async def test_calendar_caption_converts_telegram_html(notifier):
     text, buttons=notifier.discord_delivery.deliver.call_args.args
     assert text=='**Movement & Flex**'
     assert buttons[0][0]['uri']=='https://example.com/event.ics'
+
+
+def test_eight_reasons_stay_with_prompt_in_one_message():
+    buttons=[[{'text':str(i),'data':f'xc_reason_{i}:same'}] for i in range(8)]
+    parts=render_bot('מה סיבת הביטול?',buttons,'key')
+    assert len(parts)==1 and len(parts[0]['components'])==4
+    assert sum(len(r['components']) for r in parts[0]['components'])==8
+    assert parts[0]['content']=='מה סיבת הביטול?'
+
+
+async def test_reason_selection_replaces_whole_menu_without_detached_ack(notifier):
+    i=interaction('xc_yes:one')
+    notifier.on_callback.return_value=NotificationReply('מה סיבת הביטול?',
+        [[{'text':str(n),'data':f'xc_reason_{n}:one'}] for n in range(8)])
+    await notifier.discord_bot.interaction(i)
+    view=i.message.edit.call_args.kwargs['view']
+    assert len(view.children)==8
+    i.message.channel.send.assert_not_awaited()
+    i.delete_original_response.assert_awaited_once()
+    i.edit_original_response.assert_not_awaited()

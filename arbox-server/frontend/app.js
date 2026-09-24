@@ -4,6 +4,8 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
+const initialHistoryRequested = new URLSearchParams(location.search).has("history");
+
 const state = {
   apiKey: null,
   weekStart: startOfWeek(new Date()),   // the calendar anchor (any date)
@@ -3656,4 +3658,4 @@ if (new URLSearchParams(location.search).has("google_calendar") || new URLSearch
   history.replaceState(null, "", "/settings");
 }
 
-if (new URLSearchParams(location.search).has("history")) $("#historyDetails").open = true;
+if (initialHistoryRequested) $("#historyDetails").open = true;

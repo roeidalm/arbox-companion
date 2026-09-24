@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.58.3
+
+- Refresh cached calendar/history interface assets and keep notification history links open across initial navigation.
+
 ## 1.58.2
 
 - Bind cancellation explanation callbacks and saves to the active studio as well as the original cancellation cycle.

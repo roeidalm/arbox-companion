@@ -128,6 +128,9 @@ async def test_event_range_counts_pagination_and_boundaries(system):
     assert [r['ts'] for r in page2]==['2026-09-01 00:00:00']
     assert await store.event_counts(days=None,**filters)=={'info':0,'warn':1,'error':1}
     assert len(await store.list_events())==4
+    assert {r['level'] for r in await store.list_events(level='attention')} == {'warn','error'}
+    assert len(await store.list_events(level='all'))==4
+    assert len(await store.list_events(level='attention', **filters))==2
 
 
 async def test_telegram_callback_returns_to_alternate_source(system):

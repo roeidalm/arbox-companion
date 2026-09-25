@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.59.1
+
+- Simplify system activity on mobile: one current-status summary, optional connection details, and warnings/errors shown first.
+- Browse weeks and months with a compact period selector and arrows; open date selection only to jump to another period or choose a custom range.
+- Collapse event details and source filters, with clear empty states and access to all routine activity.
+
 ## 1.59.0
 
 - Filter system activity by day, week, month, all history, or a custom date range; navigate periods and load older entries without losing filters.

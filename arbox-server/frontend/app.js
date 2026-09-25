@@ -28,7 +28,7 @@ const state = {
   serverTz: undefined,
   lastSchedule: null,
   settingsPane: "profile",
-  logLevel: new URLSearchParams(location.search).get('level'),
+  logLevel: new URLSearchParams(location.search).get('level') || 'attention',
   logSource: new URLSearchParams(location.search).get('source'),
   logPeriod: new URLSearchParams(location.search).get('period') || 'week',
   logAnchor: new URLSearchParams(location.search).get('date_from'),
@@ -2520,13 +2520,19 @@ async function loadLog(append = false) {
   try { range = ActivityPeriod.range(state.logPeriod, state.logAnchor, state.logEnd); }
   catch (e) { toast(e.message); return; }
   const params = new URLSearchParams({period: state.logPeriod, ...range});
-  $('#logPeriod').value = state.logPeriod;
+  $$('#logPeriodControls [data-log-period]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.logPeriod === state.logPeriod)));
   $('#logAnchor').value = state.logAnchor;
   $('#logEnd').value = state.logEnd;
-  $('#logEndLabel').hidden = state.logPeriod !== 'custom';
-  $('#logAnchorLabel').hidden = state.logPeriod === 'all';
-  $('#logPrevious').disabled = $('#logNext').disabled = state.logPeriod === 'all';
-  $('#logRange').textContent = state.logPeriod === 'all' ? 'כל ההיסטוריה' : `${range.date_from} — ${range.date_to} · ${state.serverTz || 'שעון השרת'}`;
+  $('#logCustomRange').hidden = state.logPeriod !== 'custom';
+  const navigable = !['all','custom'].includes(state.logPeriod);
+  $('#logPrevious').hidden = $('#logNext').hidden = !navigable;
+  $('#logJump').disabled = !navigable;
+  const periodLabel = ActivityPeriod.label(state.logPeriod, state.logAnchor, state.logEnd, studioToday());
+  $('#logPeriodTitle').textContent = periodLabel.title;
+  $('#logRange').textContent = periodLabel.detail;
+  $('#logToday').hidden = periodLabel.current || !navigable;
+  $('#logToday').textContent = {day:'חזרה להיום',week:'חזרה לשבוע הנוכחי',month:'חזרה לחודש הנוכחי'}[state.logPeriod] || 'חזרה להיום';
+  $('#logJump').setAttribute('aria-label', periodLabel.title + ': ' + periodLabel.detail + (navigable ? '. לחצו לבחירת תקופה אחרת' : ''));
   if (state.logLevel) params.set("level", state.logLevel);
   if (state.logSource) params.set("source", state.logSource);
   if (state.view === 'system') history.replaceState(history.state, '', '/system?' + params);
@@ -2539,10 +2545,24 @@ async function loadLog(append = false) {
   state.logCursor = d.next_cursor;
   $('#logMore').hidden = !d.next_cursor;
   renderStatusStrip(d.status);
-  renderChips($("#logLevels"), LEVELS.map((l) => ({
-    ...l,
-    label: l.value && d.counts[l.value] ? `${l.label} ${d.counts[l.value]}` : l.label,
-  })), state.logLevel, (v) => { state.logLevel = v; loadLog(); });
+  const warnings = d.counts.warn || 0, errors = d.counts.error || 0;
+  const total = Object.values(d.counts).reduce((a,b) => a+b, 0);
+  $('#logPeriodSummary').textContent = warnings || errors ?
+    [errors ? `${errors} שגיאות` : 'ללא שגיאות', warnings ? `${warnings} אזהרות` : 'ללא אזהרות'].join(' · ') :
+    'אין אזהרות או שגיאות בתקופה הזו';
+  const levels = [{value:'attention',label:`אזהרות ושגיאות${warnings+errors ? ` (${warnings+errors})` : ''}`},
+                  {value:'all',label:`כל האירועים (${total})`}];
+  if (['info','warn','error'].includes(state.logLevel)) levels.push({value:state.logLevel,label:LEVELS.find(l=>l.value===state.logLevel).label});
+  $('#logLevels').replaceChildren();
+  for (const item of levels) {
+    const button = document.createElement('button'); button.textContent = item.label;
+    button.className = state.logLevel === item.value ? 'active' : '';
+    button.setAttribute('aria-pressed',String(state.logLevel === item.value));
+    button.onclick = () => { state.logLevel = item.value; loadLog(); };
+    $('#logLevels').append(button);
+  }
+  $('#logSourceFilter > summary').textContent = state.logSource ?
+    'מקור: ' + (SOURCES.find(s => s.value === state.logSource)?.label || state.logSource) : 'סינון לפי מקור';
   renderChips($("#logSources"), SOURCES,
     state.logSource, (v) => { state.logSource = v; loadLog(); });
 
@@ -2551,7 +2571,12 @@ async function loadLog(append = false) {
   if (!d.events.length) {
     const empty = document.createElement("div");
     empty.className = "ev";
-    empty.textContent = "אין אירועים בסינון הזה";
+    empty.className = 'activity-empty';
+    empty.textContent = state.logLevel === 'attention' ? 'לא נרשמו אזהרות או שגיאות בתקופה הזו.' : 'לא נמצאו אירועים בתקופה ובסינון שבחרת.';
+    if (state.logLevel === 'attention') {
+      const more = document.createElement('button'); more.textContent = 'הצגת הפעילות הרגילה';
+      more.onclick = () => { state.logLevel = 'all'; loadLog(); }; empty.append(more);
+    }
     list.appendChild(empty);
     return;
   }
@@ -2568,10 +2593,10 @@ async function loadLog(append = false) {
     msg.textContent = e.message;
     body.appendChild(msg);
     if (e.detail) {
-      const det = document.createElement("div");
-      det.className = "det";
-      det.textContent = e.detail;
-      body.appendChild(det);
+      const disclosure = document.createElement('details'); disclosure.className = 'event-details';
+      const summary = document.createElement('summary'); summary.textContent = 'פרטים';
+      const det = document.createElement('div'); det.className = 'det'; det.textContent = e.detail;
+      disclosure.append(summary,det); body.appendChild(disclosure);
     }
     const when = document.createElement("div");
     when.className = "when";
@@ -2589,9 +2614,20 @@ async function loadLog(append = false) {
   }
 }
 
-for (const [id, field] of [['logPeriod','logPeriod'],['logAnchor','logAnchor'],['logEnd','logEnd']]) {
-  $('#' + id).addEventListener('change', e => { state[field] = e.target.value; loadLog(); });
-}
+$$('[data-log-period]').forEach(button => button.addEventListener('click', () => {
+  state.logPeriod = button.dataset.logPeriod;
+  if (state.logPeriod === 'custom') {
+    $('#logCustomRange').hidden = false;
+    if (state.logEnd < state.logAnchor) state.logEnd = state.logAnchor;
+  }
+  loadLog();
+}));
+$('#logApplyRange').addEventListener('click', () => {
+  const from = $('#logAnchor').value, to = $('#logEnd').value;
+  try { ActivityPeriod.range('custom', from, to); }
+  catch(e) { toast(e.message); return; }
+  state.logAnchor = from; state.logEnd = to; loadLog();
+});
 for (const [id, direction] of [['logPrevious',-1],['logNext',1]]) {
   $('#' + id).addEventListener('click', () => {
     try {
@@ -2600,42 +2636,53 @@ for (const [id, direction] of [['logPrevious',-1],['logNext',1]]) {
     } catch (e) { toast(e.message); }
   });
 }
-$('#logToday').addEventListener('click', () => { state.logAnchor = state.logEnd = studioToday(); if (['all','custom'].includes(state.logPeriod)) state.logPeriod = 'day'; loadLog(); });
+$('#logJump').addEventListener('click', () => {
+  $('#logJumpDate').value = state.logAnchor;
+  $('#logJumpDialog').returnValue = '';
+  $('#logJumpDialog').showModal();
+});
+$('#logJumpDialog').addEventListener('close', () => {
+  if ($('#logJumpDialog').returnValue !== 'apply') return;
+  state.logAnchor = $('#logJumpDate').value; state.logEnd = state.logAnchor; loadLog();
+});
+$('#logToday').addEventListener('click', () => { state.logAnchor = state.logEnd = studioToday(); loadLog(); });
 $('#logMore').addEventListener('click', () => loadLog(true));
 
 function renderStatusStrip(st) {
-  const el = $("#logStatus");
-  el.innerHTML = "";
-  const cell = (k, v, cls) => {
-    const c = document.createElement("div");
-    c.className = "status-cell";
-    const kk = document.createElement("div"); kk.className = "k"; kk.textContent = k;
-    const vv = document.createElement("div"); vv.className = "v " + (cls || "");
-    vv.textContent = v;
-    c.append(kk, vv);
-    el.appendChild(c);
+  const active = Object.entries(st.channels || {}).filter(([,c]) => c.state !== 'off');
+  const problems = active.filter(([,c]) => ['failing','unconfigured'].includes(c.state) || c.gateway === 'disconnected');
+  const queued = active.some(([,c]) => c.state === 'queued');
+  const unknown = active.some(([,c]) => c.state === 'unknown');
+  const stale = st.sync_age_minutes != null && st.sync_age_minutes >= 120;
+  const uncertain = st.sync_age_minutes == null || unknown || !active.length;
+  const names = {telegram:'טלגרם',discord:'Discord',ha:'Home Assistant'};
+  const status = problems.length || stale ? 'bad' : queued || uncertain ? 'pending' : 'ok';
+  const title = problems.length ? 'צריך לבדוק את ההתראות' : stale ? 'הסנכרון מתעכב' : queued ? 'יש התראות שממתינות לשליחה' : uncertain ? 'מצב המערכת טרם אומת' : 'הסנכרון וההתראות תקינים';
+  const subtitle = problems.length ? 'נדרשת בדיקה ב־' + problems.map(([n])=>names[n]).join(' וב־') :
+    stale ? 'לא התקבל עדכון מ־Arbox מעל שעתיים' : !active.length ? 'לא נבחרו ערוצים לקבלת התראות' :
+    unknown ? 'אפשר לבדוק מסירה בלשונית ההתראות בהגדרות' :
+    active.map(([n])=>names[n]).join(' ו־') + (queued ? ' — פרטי התור בפירוט המצב' : ' זמינים לקבלת התראות');
+  const host = $('#logStatus'); host.replaceChildren(); host.dataset.state = status;
+  const mark = document.createElement('span'); mark.className = 'system-state-mark'; mark.textContent = status === 'ok' ? '✓' : status === 'bad' ? '!' : '…'; mark.setAttribute('aria-hidden','true');
+  const copy = document.createElement('div'); const heading = document.createElement('strong'); heading.textContent = title;
+  const sub = document.createElement('p'); sub.textContent = subtitle;
+  const sync = document.createElement('small'); sync.textContent = st.sync_age_minutes == null ? 'טרם התקבל סנכרון' : st.sync_age_minutes < 1 ? 'סונכרן עכשיו' : `סונכרן לפני ${st.sync_age_minutes < 60 ? st.sync_age_minutes + ' דקות' : Math.round(st.sync_age_minutes/60) + ' שעות'}`;
+  copy.append(heading,sub,sync); host.append(mark,copy);
+  const rows = $('#logStatusRows'); rows.replaceChildren();
+  const add = (label,value) => { const row=document.createElement('div'); row.className='system-detail-row'; const name=document.createElement('span'); name.textContent=label; const val=document.createElement('span'); val.textContent=value; row.append(name,val); rows.append(row); };
+  const dateText = value => {
+    const d = new Date(value + (/[Z+]\d*$/.test(value) ? '' : 'Z'));
+    return Number.isFinite(+d) ? new Intl.DateTimeFormat('he-IL',{timeZone:'UTC',day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}).format(d) : 'לא ידוע';
   };
-  const age = st.sync_age_minutes;
-  cell("סנכרון אחרון",
-       age == null ? "לא ידוע"
-       : age < 60 ? `לפני ${age} דק׳`
-       : `לפני ${Math.round(age / 60)} שע׳`,
-       age != null && age < 120 ? "ok" : "bad");
-  for (const [name, label] of [["telegram", "טלגרם"], ["ha", "Home Assistant"], ["discord", "Discord"]]) {
-    const c = st.channels[name] || {};
-    const labels = {off:'כבוי',unconfigured:'חסרה הגדרה',unknown:'אין אישור מסירה עדכני',ok:'מסירה תקינה',failing:'כשל במסירה',queued:'ממתינות לשליחה'};
-    let text = labels[c.state] || c.state;
-    if (name === 'discord' && c.gateway !== 'unused') text += c.gateway === 'connected' ? ' · הבוט מחובר' : ' · הבוט מנותק';
-    if (c.last_success) text += ` · הצלחה: ${c.last_success.replace('T',' ')}`;
-    if (c.last_failure) text += ` · כשל אחרון: ${c.last_failure.replace('T',' ')}`;
-    if (c.failures_24h) text += ` · כשלים ב־24 שעות: ${c.failures_24h}`;
-    if (c.queued) text += ` · בתור: ${c.queued}`;
-    cell(label,text,c.state === 'off' ? 'off' : c.state === 'ok' && c.gateway !== 'disconnected' ? 'ok' : 'bad');
+  const labels={off:'לא מופעל',ok:'המסירה תקינה',unknown:'טרם אומתה מסירה',unconfigured:'ההגדרה חסרה',failing:'השליחה נכשלה',queued:'ממתין לשליחה'};
+  for (const [name,c] of Object.entries(st.channels || {})) {
+    add(names[name] || name,labels[c.state] || 'לא ידוע');
+    if (c.state === 'off') continue;
+    if (c.gateway && c.gateway !== 'unused') add('חיבור הבוט',c.gateway === 'connected' ? 'מחובר' : 'מנותק');
+    if (c.last_success) add('מסירה אחרונה',dateText(c.last_success));
+    if (c.last_failure) add('כשל אחרון',dateText(c.last_failure));
+    if (c.queued) add('ממתינות לשליחה',String(c.queued));
   }
-  const enabled = Object.values(st.channels).filter(c => c.state !== 'off');
-  $('#logAlert').hidden = !enabled.length || !enabled.every(c => ['failing','unconfigured'].includes(c.state));
-  $('#logAlert').textContent = 'לא ניתן לאשר מסירה באף אחד מהערוצים הפעילים. בדקו את הגדרות ההתראות ואת היומן.';
-  cell("תזמונים ממתינים", String(st.pending_pins ?? 0));
 }
 
 /* ---------------------------------------------------------------- rules */

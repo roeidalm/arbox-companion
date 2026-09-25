@@ -14,7 +14,7 @@
        style attributes, and blocking them breaks the date and quota rows. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Arbox Companion — לוח שיעורים</title>
-<link rel="stylesheet" href="/static/style.css?v=2.70.0">
+<link rel="stylesheet" href="/static/style.css?v=2.71.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
 <link rel="stylesheet" href="/static/google-calendar.css?v=9">
@@ -315,20 +315,31 @@
     <div class="journal-head">
       <div><h2>פעילות מערכת</h2><p class="hint">סנכרונים, הרשמות, התראות ושגיאות.</p></div>
     </div>
-    <div id="logStatus" class="status-strip"></div>
-    <p class="hint">מצב הערוצים הוא המצב הנוכחי. האירועים והספירות מתייחסים לתקופה שנבחרה.</p>
-    <div id="logAlert" class="card" role="status" hidden></div>
-    <div class="field-row" id="logPeriodControls">
-      <label>תקופה <select id="logPeriod"><option value="day">יום</option><option value="week" selected>שבוע</option><option value="month">חודש</option><option value="all">הכול</option><option value="custom">טווח מותאם</option></select></label>
-      <button id="logPrevious" aria-label="התקופה הקודמת">→ הקודמת</button>
-      <label id="logAnchorLabel">בחירת תאריך <input id="logAnchor" type="date"></label>
-      <label id="logEndLabel" hidden>עד תאריך <input id="logEnd" type="date"></label>
-      <button id="logNext" aria-label="התקופה הבאה">הבאה ←</button>
-      <button id="logToday">היום</button>
+    <div id="logStatus" class="system-overview" aria-live="polite"></div>
+    <details id="logStatusDetails" class="system-details">
+      <summary>פירוט מצב המערכת</summary>
+      <div id="logStatusRows"></div>
+    </details>
+    <div class="activity-heading"><h3>מה קרה במערכת</h3></div>
+    <div id="logPeriodControls">
+      <div class="activity-periods" role="group" aria-label="תקופת האירועים">
+        <button data-log-period="day">יום</button><button data-log-period="week">שבוע</button><button data-log-period="month">חודש</button><button data-log-period="all">הכול</button><button data-log-period="custom">טווח מותאם</button>
+      </div>
+      <div class="activity-navigation">
+        <button id="logPrevious" aria-label="התקופה הקודמת">→</button>
+        <button id="logJump"><strong id="logPeriodTitle"></strong><span id="logRange"></span></button>
+        <button id="logNext" aria-label="התקופה הבאה">←</button>
+      </div>
+      <div id="logCustomRange" hidden>
+        <label>מתאריך <input id="logAnchor" type="date"></label>
+        <label>עד תאריך <input id="logEnd" type="date"></label>
+        <button id="logApplyRange">הצג</button>
+      </div>
+      <button id="logToday" class="activity-return" hidden>חזרה לשבוע הנוכחי</button>
     </div>
-    <p id="logRange" class="hint" aria-live="polite"></p>
+    <p id="logPeriodSummary" class="activity-period-summary" aria-live="polite"></p>
     <div class="chips" id="logLevels"></div>
-    <div class="chips" id="logSources"></div>
+    <details id="logSourceFilter" class="activity-source-filter"><summary>סינון לפי מקור</summary><div class="chips" id="logSources"></div></details>
     <div class="card" id="logList"></div>
     <button id="logMore" hidden>טעינת אירועים נוספים</button>
   </section>
@@ -885,12 +896,19 @@
     <div class="dialog-actions"><button value="cancel">ביטול</button><button value="confirm" class="primary">תזמן שיעור</button></div>
   </form>
 </dialog>
+<dialog id="logJumpDialog">
+  <form method="dialog">
+    <h3>מעבר לתקופה אחרת</h3>
+    <label>בחרו תאריך בתוך התקופה <input id="logJumpDate" type="date" required></label>
+    <div class="dialog-actions"><button value="cancel" formnovalidate>ביטול</button><button value="apply" class="primary">הצג תקופה</button></div>
+  </form>
+</dialog>
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=11"></script>
-<script src="/static/activity-period.js?v=1"></script>
+<script src="/static/activity-period.js?v=2"></script>
 <script src="/static/notification-routes.js?v=1"></script>
-<script src="/static/app.js?v=2.70.0"></script>
+<script src="/static/app.js?v=2.71.0"></script>
 <script src="/static/registration-learning.js?v=4"></script>
 <script src="/static/registration-guidance.js?v=2"></script>
 </body>

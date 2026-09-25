@@ -31,7 +31,19 @@
     const length = +parse(r.date_to) - +parse(r.date_from);
     return {anchor: iso(d), end: period === 'month' ? range('month', iso(d)).date_to : iso(new Date(+d + length))};
   }
-  const api = {range, move};
+  function label(period, anchor, end, today) {
+    const r = range(period, anchor, end);
+    if (period === 'all') return {title:'כל התקופות', detail:'כל ההיסטוריה', current:true};
+    const currentRange = range(period === 'custom' ? 'day' : period, today, today);
+    const current = r.date_from === currentRange.date_from && r.date_to === currentRange.date_to;
+    const format = (d, options) => new Intl.DateTimeFormat('he-IL', {timeZone:'UTC', ...options}).format(parse(d));
+    const dateFormat = {day:'numeric',month:'long', ...(anchor.slice(0,4) !== today.slice(0,4) ? {year:'numeric'} : {})};
+    const detail = period === 'day' ? format(anchor,{weekday:'long',...dateFormat}) : period === 'month' ? format(anchor,{month:'long',year:'numeric'}) :
+      new Intl.DateTimeFormat('he-IL',{timeZone:'UTC',...dateFormat}).formatRange(parse(r.date_from),parse(r.date_to));
+    return {title:current ? ({day:'היום',week:'השבוע',month:'החודש'}[period] || 'התקופה שנבחרה') :
+      ({day:'היום שנבחר',week:'השבוע שנבחר',month:'החודש שנבחר',custom:'התקופה שנבחרה'}[period]),detail,current};
+  }
+  const api = {range, move, label};
   if (typeof module !== 'undefined') module.exports = api;
   else root.ActivityPeriod = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -2027,6 +2027,11 @@ class Store:
     @staticmethod
     def _event_filter(*, level=None, source=None, tag=None, date_from=None, date_to=None):
         q, args = "", []
+        if level == 'attention':
+            q += " AND level IN ('warn','error')"
+            level = None
+        elif level == 'all':
+            level = None
         for column, value in (("level",level),("source",source),("tag",tag)):
             if value:
                 q += f" AND {column} = ?"; args.append(value)

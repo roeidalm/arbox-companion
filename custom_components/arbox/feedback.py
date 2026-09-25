@@ -148,14 +148,14 @@ async def async_setup_feedback(hass: HomeAssistant):
             await panel_custom.async_register_panel(
                 hass, frontend_url_path=PANEL_PATH,
                 webcomponent_name="arbox-feedback-panel",
-                module_url=f"{STATIC_PATH}/panel.js?v=3.5.3",
+                module_url=f"{STATIC_PATH}/panel.js?v=3.5.4",
                 sidebar_title=None,
                 require_admin=False,
             )
             await panel_custom.async_register_panel(
                 hass, frontend_url_path="arbox",
                 webcomponent_name="arbox-app-panel",
-                module_url=f"{STATIC_PATH}/app-panel.js?v=3.5.3",
+                module_url=f"{STATIC_PATH}/app-panel.js?v=3.5.4",
                 sidebar_title="Arbox Companion", sidebar_icon="mdi:weight-lifter",
                 require_admin=False,
             )

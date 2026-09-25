@@ -125,3 +125,65 @@ async def test_real_ha_link_and_explicit_fallback(form):
     form.settings.update({"ha": {"feedback_in_ha": False}})
     with pytest.raises(ValueError):
         await form.create(session, "full", channel="ha")
+
+
+async def test_absence_records_missed_without_feedback_or_followup(form):
+    session = await form.store.get_session(9123)
+    token, _ = await form.create(session, 'feedback')
+    await form.store.add_prompt('old-attendance', 9123, 'attendance')
+    result = await form.save(token, FeedbackBody(attended=False))
+    assert result['attended'] is False
+    assert (await form.store.get_training_outcome(9123))['status'] == 'missed'
+    saved = await form.store.workout_journal(9123)
+    assert saved['dismissed_at']
+    assert not saved['coach_feedback'] and not saved['class_feedback']
+    assert not await form.store.live_prompt_for(9123, 'attendance')
+    assert not await form.store.journal_candidates()
+    assert (await form.read(token))['attended'] is False
+    await form.save(token, FeedbackBody(class_feedback='positive'))
+    assert (await form.store.get_training_outcome(9123))['status'] == 'missed'
+
+
+async def test_absence_preview_and_conflicting_feedback(form):
+    token = (await form.start_preview('telegram', 'quick')).split('#')[1]
+    with pytest.raises(HTTPException):
+        await form.save(token, FeedbackBody(attended=False, class_feedback='positive'))
+    assert not (await form.read(token))['complete']
+    await form.save(token, FeedbackBody(attended=False))
+    assert not await form.store.get_training_outcome(9123)
+    assert not await form.store.workout_journals()
+
+
+async def test_cancelled_workout_cannot_be_overwritten_from_old_feedback_link(form):
+    token, _ = await form.create(await form.store.get_session(9123), 'full')
+    await form.store.set_training_outcome(9123, 'cancelled_on_time', 'manual')
+    for body in (FeedbackBody(attended=False), FeedbackBody(class_feedback='positive')):
+        with pytest.raises(HTTPException) as error:
+            await form.save(token, body)
+        assert error.value.status_code == 409
+    assert not await form.store.workout_journal(9123)
+
+
+async def test_feedback_is_offered_without_prior_attendance_and_only_once(form, monkeypatch):
+    from datetime import datetime
+    import app.rules as rules_module
+
+    class Evening(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.combine(date.today(), cls.min.time()).replace(hour=20)
+
+    monkeypatch.setattr(rules_module, 'datetime', Evening)
+    history = form.store.training_history
+    monkeypatch.setattr(form.store, 'training_history', lambda: history(now=Evening.now()))
+    await form.store.set_meta('attendance_tracking_since', date.today().isoformat())
+    form.settings.update({'journal': {'level': 'feedback'}})
+    form.notifier.journal_form_channel = lambda: 'telegram'
+    form.notifier.send_journal_form = AsyncMock(return_value=True)
+    engine = rules_module.RulesEngine(form.store, object(), object(), form.notifier)
+    assert await form.store.get_training_outcome(9123) is None
+    await engine.journal_tick()
+    await engine.journal_tick()
+    form.notifier.send_journal_form.assert_awaited_once()
+    assert await form.store.get_training_outcome(9123) is None
+    assert (await form.store.workout_journal(9123))['prompted_at']

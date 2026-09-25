@@ -53,6 +53,7 @@ DEFAULTS: dict = {
     # Per-studio manual quota knobs. Membership-derived quotas already come
     # from the active studio; these overrides must follow the same boundary.
     "studio_quota_settings": {},
+    "balance_reminders_by_studio": {},
     # Stable membership_user id chosen by the user as first priority. None
     # preserves the membership that predated multi-membership support.
     "preferred_membership_id": None,
@@ -520,6 +521,12 @@ class Settings:
         return self._data["notify"]
 
     @property
+    def balance_reminder(self) -> dict:
+        defaults = {"enabled": False, "days_before": 14, "min_entries": 5}
+        raw = (self._data.get("balance_reminders_by_studio") or {}).get(str(getattr(self, "_active_studio_id", None)), {})
+        return {**defaults, **raw}
+
+    @property
     def journal(self) -> dict:
         raw = self._data.get("journal") or {}
         level = str(raw.get("level") or "off")
@@ -609,6 +616,7 @@ class Settings:
                 "ha": ha,
                 "notify": dict(self._data["notify"]),
                 "journal": self.journal,
+                "balance_reminder": self.balance_reminder,
                 "exercise_packs": self.exercise_packs(),
                 "calendar_alarms": self.calendar_alarms,
                 "base_url": self._data.get("base_url", ""),
@@ -617,6 +625,15 @@ class Settings:
     def update(self, patch: dict) -> None:
         """Apply a settings patch from the UI. '***' means keep the stored secret."""
         from urllib.parse import urlsplit
+        if "balance_reminder" in patch:
+            config = patch['balance_reminder']
+            if not isinstance(config, dict) or set(config) - {'enabled', 'days_before', 'min_entries'}:
+                raise ValueError('הגדרות תזכורת יתרה אינן תקינות')
+            config = {**self.balance_reminder, **config}
+            if (type(config['enabled']) is not bool or type(config['days_before']) is not int
+                    or not 1 <= config['days_before'] <= 60 or type(config['min_entries']) is not int
+                    or not 1 <= config['min_entries'] <= 1000):
+                raise ValueError('תזכורת יתרה: 1–60 ימים ו־1–1000 כניסות')
         from .discord_notify import webhook_url
         for channel in ("telegram", "ha", "discord"):
             config = patch.get(channel, {})
@@ -794,6 +811,10 @@ class Settings:
                 level if level in ("off", "quick", "feedback", "full") else "off"
             )
             self._data["journal"]["delay_minutes"] = 30
+        if "balance_reminder" in patch:
+            scoped = dict(self._data.get('balance_reminders_by_studio') or {})
+            scoped[str(getattr(self, '_active_studio_id', None))] = {**self.balance_reminder, **patch['balance_reminder']}
+            self._data['balance_reminders_by_studio'] = scoped
         self.save()
 
     def notification_targets(self, channel: str, kind: str) -> list[str]:

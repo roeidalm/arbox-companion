@@ -1,4 +1,4 @@
-import {feedbackTemplate, mountFeedback} from './feedback-form.js?v=3.5.3';
+import {feedbackTemplate, mountFeedback} from './feedback-form.js?v=3.5.4';
 
 // Fragment capabilities stay out of HTTP access logs and referrers.
 const token = location.hash.slice(1);

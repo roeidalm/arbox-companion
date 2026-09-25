@@ -1,4 +1,4 @@
-import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.5.3";
+import { feedbackTemplate, mountFeedback } from "./feedback-form.js?v=3.5.4";
 import {renderCalendar, calendarRange, calendarSignature} from './panel-calendar.js?v=3.4.0';
 import {renderJournal, journalSignature} from './panel-journal.js?v=3.4.0';
 import {policySummary, policyEditor} from './membership-policy.js?v=3';
@@ -875,11 +875,16 @@ export class ArboxAppPanel extends HTMLElement {
               )
               .join(", ") || "כל הימים",
             [r.time_from, r.time_to].filter(Boolean).join("–"),
+            `לפחות פעם בכל ${r.recurrence_weeks || 1} שבועות`,
           ]
             .filter(Boolean)
             .join(" · "),
         ),
       );
+      const gaps = (r.monitor?.periods || []).filter(p => p.attention);
+      if (gaps.length) card.append(node('p', gaps.map(p => `${p.start}–${p.end}: ${p.state === 'missing' ? 'לא נמצא אימון מתאים' : 'הלוח טרם אומת'}`).join(' · '), 'muted'));
+      else if (r.validation?.message) card.append(node('p', r.validation.message, 'muted'));
+      if (this.canWrite()) for (const p of gaps) card.append(button(`השתק בדיקת חוסר: ${p.start}–${p.end}`, () => this.confirm('להשתיק לתקופה הזו בלבד? ההרשמות והאוטומציה נשארות פעילות.', () => this.act('rule_skip_period', {rule_id:r.id, period_start:p.start}, this.context()))));
       if (this.canWrite()) {
         card.append(
           button("עריכה", () => this.ruleEditor(r)),
@@ -1019,7 +1024,7 @@ export class ArboxAppPanel extends HTMLElement {
       const response = result.data ?? result;
       if (response.needs_confirm) {
         const flag =
-          response.confirm_kind === "vacation"
+          response.confirm_kind === "unmatched_rule" ? "confirm_unmatched" : response.confirm_kind === "vacation"
             ? "ignore_vacation"
             : "confirm_over_quota";
         this.confirm(response.conflict, () =>
@@ -1434,6 +1439,8 @@ export class ArboxAppPanel extends HTMLElement {
         "time_from",
         "time_to",
         "mode",
+        "recurrence_weeks",
+        "recurrence_anchor",
       ]
         .filter((k) => r[k] !== undefined)
         .map((k) => [k, r[k]]),
@@ -1503,6 +1510,10 @@ export class ArboxAppPanel extends HTMLElement {
     form.append(days);
     const from = this.input(form, "משעה", "time_from", "time", rule.time_from),
       to = this.input(form, "עד שעה", "time_to", "time", rule.time_to);
+    const cadence = this.input(form, "מצופה לפחות פעם בכל כמה שבועות?", "recurrence_weeks", "number", rule.recurrence_weeks || 1);
+    cadence.min = 1; cadence.max = 8; cadence.required = true;
+    const anchor = this.input(form, "שבוע התחלה לספירה", "recurrence_anchor", "date", rule.recurrence_anchor || rule.monitor?.anchor || "");
+    form.append(node("p", "המחזוריות משמשת לאיתור אימונים חסרים ואינה משנה את תנאי ההרשמה. לכיבוי או לשמירה כטיוטה, בטלו את הסימון הבא.", "muted"));
     const enabled = node("input");
     enabled.type = "checkbox";
     enabled.checked = rule.enabled ?? true;
@@ -1522,6 +1533,8 @@ export class ArboxAppPanel extends HTMLElement {
             id: rule.id || null,
             name: name.value.trim(),
             mode: mode.value,
+            recurrence_weeks: Number(cadence.value),
+            recurrence_anchor: anchor.value || null,
             enabled: enabled.checked,
             categories: Array.isArray(selected.categories)
               ? selected.categories.filter((x) => x.checked).map((x) => x.value)

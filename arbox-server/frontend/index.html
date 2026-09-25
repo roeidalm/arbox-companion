@@ -246,11 +246,17 @@
           </select>
         </div>
       </div>
+      <div class="rule-row">
+        <label>מצופה לפחות אימון אחד בכל כמה שבועות? <input id="ruleRecurrence" type="number" min="1" max="8" value="1"></label>
+        <label>שבוע התחלה לספירה <input id="ruleAnchor" type="date"></label>
+      </div>
+      <p class="hint">המחזוריות משמשת לבדיקה שלא חסר אימון. היא אינה משנה את תנאי ההרשמה. תאריך ריק ייקבע לפי ההתאמה הראשונה.</p>
       <div id="ruleTimingFields" hidden>
         <div id="ruleTimingPreview"></div>
         <label>הרשמה עבור אוטומציה זו <select id="ruleTimingMode"><option value="keep">השאר את ההעדפה הקיימת</option><option value="inherit">לפי ברירת המחדל</option><option value="immediate">מיידי לאוטומציה הזו</option></select></label>
       </div>
       <button id="ruleSave" class="primary">שמור אוטומציה</button>
+      <button id="ruleDraft" type="button">שמור כטיוטה מושבתת</button>
       <button id="ruleCancelEdit" hidden>בטל עריכה</button>
       <p id="ruleMsg" class="msg"></p>
     </div>
@@ -458,6 +464,15 @@
         <p class="hint">הבדיקה עוברת דרך בחירת הערוצים ורמת החומרה שהגדרת, ואינה מבצעת פעולה באימון. אישור השירות אינו אישור שהטלפון הציג התראה.</p>
         <div class="field-row"><button id="testSystemWarning">בדיקת אזהרה</button><button id="testSystemError">בדיקת שגיאה</button></div>
         <p id="testSystemResult" class="hint" role="status"></p>
+      </div>
+      <div class="card">
+        <h2>תזכורת לכניסות שטרם נוצלו</h2>
+          <label><input id="balanceReminderEnabled" type="checkbox"> להזכיר על יתרה פנויה במנויים ובכרטיסיות של הסטודיו</label>
+          <div class="field-row">
+            <label>כמה ימים לפני סוף התקופה? <input id="balanceReminderDays" type="number" min="1" max="60" value="14"></label>
+            <label>לפחות כמה כניסות פנויות? <input id="balanceReminderEntries" type="number" min="1" max="1000" value="5"></label>
+          </div>
+          <p class="hint">היתרה מחושבת אחרי הרשמות ותכנונים. תזכורת אחת לכל מנוי בתקופה, דרך הערוצים שסומנו ל״עדכוני מנויים״. במנוי חודשי: עד סוף החודש; בכרטיסייה: עד תאריך התפוגה.</p>
       </div>
       <div class="card">
         <h2>תזמון וסדר</h2>
@@ -908,7 +923,7 @@
 <script src="/static/google-calendar.js?v=11"></script>
 <script src="/static/activity-period.js?v=2"></script>
 <script src="/static/notification-routes.js?v=1"></script>
-<script src="/static/app.js?v=2.71.0"></script>
+<script src="/static/app.js?v=2.72.0"></script>
 <script src="/static/registration-learning.js?v=4"></script>
 <script src="/static/registration-guidance.js?v=2"></script>
 </body>

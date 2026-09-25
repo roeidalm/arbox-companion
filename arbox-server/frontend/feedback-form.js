@@ -1,6 +1,6 @@
 const brandIconUrl = new URL("./brand/icon.svg", import.meta.url).href;
 // Shared by the standalone page and the authenticated Home Assistant panel.
-export const feedbackTemplate = "<header><img class=\"brand\" src=\"__ARBOX_BRAND__\" alt=\"Arbox Companion\" width=\"38\" height=\"38\"><span>Arbox Companion <small>יומן האימונים שלך</small></span></header>\n<main><div id=\"loading\" role=\"status\">טוענים את האימון…</div><section id=\"failure\" hidden role=\"alert\"><h1>לא הצלחנו לפתוח את הטופס</h1><p id=\"error-text\"></p><button id=\"retry\">נסה שוב</button></section>\n<section id=\"complete\" hidden tabindex=\"-1\"><div class=\"success-icon\">✓</div><h1 id=\"complete-title\">המשוב נשמר</h1><p id=\"complete-text\">הדירוגים, ההערות והתרגילים מחכים לך ביומן האימונים.</p><p class=\"muted\">אפשר לסגור את החלון ולחזור ליום שלך.</p></section>\n<form id=\"feedback\" hidden><div id=\"demo\" class=\"demo\" hidden>🧪 תצוגת בדיקה · שום תשובה לא תישמר ביומן</div><p class=\"eyebrow\">רגע לעצמך, אחרי האימון</p><h1>איך היה האימון?</h1><article class=\"session\"><div class=\"session-icon\">✦</div><div><strong id=\"class-name\"></strong><p id=\"session-details\"></p></div></article>\n<div id=\"ratings\"></div>\n<details id=\"more\"><summary><span>הערות ותרגילים <small>לא חובה</small></span><span class=\"chevron\">⌄</span></summary><div class=\"details-body\"><label for=\"notes\">משהו שחשוב לזכור?</label><textarea id=\"notes\" maxlength=\"4000\" rows=\"3\" placeholder=\"מה עבד טוב, על מה תרצה לעבוד בפעם הבאה…\"></textarea><div class=\"exercises-title\"><h2>מה עשית באימון?</h2><small>מוסיפים רק מה שרוצים לעקוב אחריו</small></div><div id=\"exercises\"></div><button type=\"button\" class=\"secondary\" id=\"add-exercise\">＋ הוספת תרגיל</button></div></details>\n<div id=\"save-error\" role=\"alert\"></div><button class=\"primary\" id=\"save\" type=\"submit\">שמירת המשוב</button><p class=\"muted footer-note\" id=\"save-hint\">הכול נשמר ביומן האימונים שלך. אפשר לערוך שם בהמשך.</p></form></main>".replace("__ARBOX_BRAND__", brandIconUrl);
+export const feedbackTemplate = "<header><img class=\"brand\" src=\"__ARBOX_BRAND__\" alt=\"Arbox Companion\" width=\"38\" height=\"38\"><span>Arbox Companion <small>יומן האימונים שלך</small></span></header>\n<main><div id=\"loading\" role=\"status\">טוענים את האימון…</div><section id=\"failure\" hidden role=\"alert\"><h1>לא הצלחנו לפתוח את הטופס</h1><p id=\"error-text\"></p><button id=\"retry\">נסה שוב</button></section>\n<section id=\"complete\" hidden tabindex=\"-1\"><div class=\"success-icon\">✓</div><h1 id=\"complete-title\">המשוב נשמר</h1><p id=\"complete-text\">הדירוגים, ההערות והתרגילים מחכים לך ביומן האימונים.</p><p class=\"muted\">אפשר לסגור את החלון ולחזור ליום שלך.</p></section>\n<form id=\"feedback\" hidden><div id=\"demo\" class=\"demo\" hidden>🧪 תצוגת בדיקה · שום תשובה לא תישמר ביומן</div><p class=\"eyebrow\">רגע לעצמך, אחרי האימון</p><h1>איך היה האימון?</h1><article class=\"session\"><div class=\"session-icon\">✦</div><div><strong id=\"class-name\"></strong><p id=\"session-details\"></p></div></article>\n<label id=\"absence-option\" class=\"na\" hidden><input id=\"absent\" type=\"checkbox\">לא הייתי באימון</label>\n<div id=\"ratings\"></div>\n<details id=\"more\"><summary><span>הערות ותרגילים <small>לא חובה</small></span><span class=\"chevron\">⌄</span></summary><div class=\"details-body\"><label for=\"notes\">משהו שחשוב לזכור?</label><textarea id=\"notes\" maxlength=\"4000\" rows=\"3\" placeholder=\"מה עבד טוב, על מה תרצה לעבוד בפעם הבאה…\"></textarea><div class=\"exercises-title\"><h2>מה עשית באימון?</h2><small>מוסיפים רק מה שרוצים לעקוב אחריו</small></div><div id=\"exercises\"></div><button type=\"button\" class=\"secondary\" id=\"add-exercise\">＋ הוספת תרגיל</button></div></details>\n<div id=\"save-error\" role=\"alert\"></div><button class=\"primary\" id=\"save\" type=\"submit\">שמירת המשוב</button><p class=\"muted footer-note\" id=\"save-hint\">הכול נשמר ביומן האימונים שלך. אפשר לערוך שם בהמשך.</p></form></main>".replace("__ARBOX_BRAND__", brandIconUrl);
 
 export function mountFeedback(root, request) {
   const $ = id => root.querySelector(`#${id}`);
@@ -12,10 +12,10 @@ export function mountFeedback(root, request) {
     attempts: [['attempts', 'ניסיונות']], distance: [['distance', 'מרחק (מ׳)']], note: []
   };
   const el = (tag, text, cls) => { const node = document.createElement(tag); if (text) node.textContent = text; if (cls) node.className = cls; return node; };
-  function finish(demo) {
+  function finish(demo, attended = true) {
     $('feedback').hidden = true; $('complete').hidden = false;
-    $('complete-title').textContent = demo ? 'הבדיקה הסתיימה ✓' : 'המשוב נשמר';
-    $('complete-text').textContent = demo ? 'כך תיראה השמירה באימון אמיתי. לא נשמר דבר ביומן ולא שונו נתוני ההגעה.' : 'הדירוגים, ההערות והתרגילים מחכים לך ביומן האימונים.';
+    $('complete-title').textContent = demo ? 'הבדיקה הסתיימה ✓' : attended ? 'המשוב נשמר' : 'נשמר שלא הגעת לאימון';
+    $('complete-text').textContent = demo ? 'כך תיראה השמירה באימון אמיתי. לא נשמר דבר ביומן ולא שונו נתוני ההגעה.' : attended ? 'הדירוגים, ההערות והתרגילים מחכים לך ביומן האימונים.' : 'אי־ההגעה נרשמה ביומן. לא נשמר דירוג לאימון.';
     $('complete').focus();
   }
   function rating(name, title, subtitle) {
@@ -85,8 +85,9 @@ export function mountFeedback(root, request) {
     $('failure').hidden = true; $('loading').hidden = false;
     try {
       data = await request('GET'); $('loading').hidden = true;
-      if (data.complete) {finish(data.demo); return;}
+      if (data.complete) {finish(data.demo, data.attended); return;}
       $('demo').hidden = !data.demo;
+      $('absence-option').hidden = !data.allow_absence;
       $('class-name').textContent = data.session.category_name || 'האימון שלך';
       const date = data.session.date ? new Date(`${data.session.date}T12:00:00`).toLocaleDateString('he-IL', {weekday:'long', day:'numeric', month:'numeric'}) : '';
       $('session-details').textContent = [data.session.coach_name, date, data.session.start_time?.slice(0,5)].filter(Boolean).join(' · ');
@@ -109,14 +110,21 @@ export function mountFeedback(root, request) {
     } catch (error) {$('loading').hidden = true; $('failure').hidden = false; $('error-text').textContent = error.message;}
   }
   $('add-exercise').onclick = () => exercise(); $('retry').onclick = load;
+  $('absent').onchange = () => {
+    const absent = $('absent').checked;
+    $('ratings').hidden = absent; $('more').hidden = absent || data.level === 'quick';
+    for (const input of root.querySelectorAll('#ratings input, #more input, #more select, #more textarea')) input.disabled = absent;
+    $('save').textContent = absent ? 'שמירת אי־הגעה' : 'שמירת המשוב';
+    $('save-error').textContent = '';
+  };
   $('feedback').onsubmit = async event => {
     event.preventDefault(); if (busy) return; $('save-error').textContent = '';
-    const form = new FormData(event.target), body = {class_feedback: form.get('class_feedback'), coach_feedback: form.get('coach_feedback'), notes: $('notes').value.trim(), exercises: Array.from($('exercises').children, card => card.read())};
-    if (!body.class_feedback && !body.coach_feedback && !body.notes && !body.exercises.length) {$('save-error').textContent = 'בחרו דירוג או הוסיפו הערה לפני השמירה.'; return;}
+    const form = new FormData(event.target), body = data.allow_absence && $('absent').checked ? {attended: false} : {class_feedback: form.get('class_feedback'), coach_feedback: form.get('coach_feedback'), notes: $('notes').value.trim(), exercises: Array.from($('exercises').children, card => card.read())};
+    if (body.attended !== false && !body.class_feedback && !body.coach_feedback && !body.notes && !body.exercises.length) {$('save-error').textContent = 'בחרו דירוג או הוסיפו הערה לפני השמירה.'; return;}
     busy = true; $('save').disabled = true; $('save').textContent = 'שומרים…';
-    try {const result = await request('PUT', body); finish(result.demo);}
+    try {const result = await request('PUT', body); finish(result.demo, result.attended);}
     catch (error) {$('save-error').textContent = `המשוב עדיין לא נשמר. ${error.message}`;}
-    finally {busy = false; $('save').disabled = false; $('save').textContent = 'שמירת המשוב';}
+    finally {busy = false; $('save').disabled = false; $('save').textContent = $('absent').checked ? 'שמירת אי־הגעה' : 'שמירת המשוב';}
   };
   return load();
 }

@@ -174,3 +174,33 @@ The internal monitor also reports synchronization older than two hours and
 scheduler failures/missed jobs. An external uptime service must monitor
 `/api/health` to detect a complete host or process outage: a stopped server cannot
 send its own alert. Keep that monitoring on a different host/transport.
+
+## Recurring rule checks and unused entries
+
+New and edited enabled rules are checked against a fresh studio schedule before
+saving. No matching workout, an unavailable schedule, or a published gap in the
+chosen cadence requires explicit confirmation; the rule can instead be saved as
+a disabled draft. Existing rules remain enabled on upgrade and default to a
+weekly expectation. The rule editor supports a fixed starting week and a period
+of 1–8 weeks. Cadence means **at least one match per period**; it does not change
+which matching workouts the booking rule can book.
+
+Before the nightly digest, active booking and notification rules are checked
+independently of schedule IDs, using a read-only upstream request covering up to
+62 days. Published periods with no match are reported through the rule's existing
+notification channels. Empty days inside that published horizon are exempt;
+a completely empty response or the unpublished tail is unverified, not a closure.
+If verification is still unavailable before the expected registration window
+(known advance notice plus a day, at least eight days), an uncertainty alert is sent. Holidays do not need a separate calendar. Configured
+vacations and explicit occurrence decisions are respected. Each incident is
+reported once per state and period after successful delivery, including across
+restarts. The rule card can suppress a period's missing-workout check without
+changing bookings or disabling the rule.
+
+Notifications settings also offer an opt-in, studio-specific balance reminder:
+lead time (1–60 days) and an inclusive free-entry threshold. Monthly memberships
+use their calendar-month end (or earlier expiry); cards use their expiry. The
+existing quota ledger subtracts reservations, waitlists and allocated plans once.
+Only verified balances produce reminders. Delivery uses the selected Membership
+updates channels, with one successful reminder per membership period; failed
+sends retry on the next nightly run. This reminder never books a workout.

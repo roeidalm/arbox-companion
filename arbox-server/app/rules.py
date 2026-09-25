@@ -375,6 +375,10 @@ class RulesEngine:
         from .registration_learning import RegistrationLearning
         self.registration_learning = RegistrationLearning(self)
         self.planning_actions = PlanningActions(self)
+        from .rule_monitor import RuleMonitor
+        from .balance_reminder import BalanceReminder
+        self.rule_monitor = RuleMonitor(self)
+        self.balance_reminder = BalanceReminder(self)
         notifier.on_callback = self.handle_callback
         notifier.on_message = self.handle_message
 
@@ -1077,6 +1081,13 @@ class RulesEngine:
             # Persist before IO: duplicate jobs, reconnects and restarts must
             # not resend the daily message when delivery outcome is uncertain.
             await self.store.set_meta(key, today)
+            # Recurring expectations exist even when no schedule ID matches.
+            # Each monitor owns its delivery deduplication and retry state.
+            for monitor in (self.rule_monitor, self.balance_reminder):
+                try:
+                    await monitor.check()
+                except Exception:
+                    _LOGGER.exception("Nightly monitor failed")
             await self._nightly_digest()
 
     async def _daily_personal_review(self):
@@ -1739,7 +1750,7 @@ class RulesEngine:
             await self._journal_tick()
 
     async def _journal_tick(self) -> None:
-        """Offer the opt-in journal 30 minutes after an attended class ends."""
+        """Offer feedback and an absence option 30 minutes after class ends."""
         level = self.settings.journal["level"]
         if level == "off":
             return
@@ -1759,7 +1770,7 @@ class RulesEngine:
             if existing and existing.get("prompted_at"):
                 continue
             try:
-                channel = self.notifier.journal_form_channel()
+                channel = self.feedback_form.available_channel()
                 if channel is None:
                     return
                 cid, url = await self.feedback_form.create(s, level, channel=channel)
@@ -1767,7 +1778,7 @@ class RulesEngine:
                 _LOGGER.warning("Journal form not sent: %s", err)
                 return
             delivered = await self.notifier.send_journal_form(
-                f"איך היה האימון?\n{s.get('category_name') or 'האימון שלך'} · {s.get('coach_name') or ''}\nמשוב קצר, הערות ותרגילים — בטופס אחד.",
+                f"איך היה האימון?\n{s.get('category_name') or 'האימון שלך'} · {s.get('coach_name') or ''}\nמשוב קצר, או סימון שלא היית באימון — בטופס אחד.",
                 [[{"text": "מילוי משוב", "uri": url}]], channel=channel)
             if delivered:
                 await self.store.mark_journal_prompted(s["schedule_id"])
@@ -1798,6 +1809,9 @@ class RulesEngine:
                     "שאלת ההגעה לא נענתה עד חצות", sid)
                 continue
             if s["date"] != today:
+                continue
+            if (self.settings.journal["level"] != "off"
+                    and self.feedback_form.available_channel() is not None):
                 continue
             try:
                 start = datetime.fromisoformat(f"{s['date']}T{s['start_time']}")

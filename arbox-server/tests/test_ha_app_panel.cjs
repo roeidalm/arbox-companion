@@ -274,3 +274,21 @@ test('Google sync is studio scoped and backend errors are not shown as success',
  await assert.rejects(panel.act('google_calendar_sync',{}, {studio_id:7}),/Google rejected sync/);
  assert.ok(messages.every(text=>!text.includes('הושלם')));
 });
+
+test('unmatched rule requires explicit confirmation and preserves recurrence and studio', async () => {
+  const {panel, calls} = harness();
+  let confirm;
+  panel.confirm = (_, run) => confirm = run;
+  panel._hass.callWS = async msg => {
+    calls.push(msg);
+    return {data: calls.length === 1 ? {ok:false, needs_confirm:true, confirm_kind:'unmatched_rule', conflict:'אין התאמה'} : {ok:true}};
+  };
+  const body = panel.rulePayload({name:'Flex', mode:'notify', recurrence_weeks:2, recurrence_anchor:'2026-10-05'});
+  await panel.act('rule_save', body, {studio_id:7});
+  assert.equal(calls.length, 1);
+  await confirm();
+  assert.equal(calls[1].data.confirm_unmatched, true);
+  assert.equal(calls[1].data.recurrence_weeks, 2);
+  assert.equal(calls[1].data.recurrence_anchor, '2026-10-05');
+  assert.equal(calls[1].studio_id, 7);
+});

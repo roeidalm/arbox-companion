@@ -2740,6 +2740,8 @@ function refreshSuggestedName() {
 }
 
 function resetRuleForm() {
+  $('#ruleRecurrence').value = 1;
+  $('#ruleAnchor').value = '';
   $('#ruleTimingMode').value='inherit';
   editingRuleId = null;
   editingEnabled = true;
@@ -2776,6 +2778,8 @@ async function startAutomationFromSession(s) {
 }
 
 function startEditRule(r) {
+  $('#ruleRecurrence').value = r.recurrence_weeks || 1;
+  $('#ruleAnchor').value = r.recurrence_anchor || r.monitor?.anchor || '';
   $('#ruleTimingMode').value='keep';
   editingRuleId = r.id;
   editingEnabled = r.enabled;
@@ -2954,8 +2958,22 @@ async function loadRules() {
     if (r.weekdays.length) parts.push(r.weekdays.map((w) =>
       RULE_DAYS.find((d) => d.py === w)?.name).join(", "));
     if (r.time_from || r.time_to) parts.push(`${r.time_from || ""}–${r.time_to || ""}`);
+    parts.push(`לפחות פעם בכל ${r.recurrence_weeks || 1} שבועות`);
     desc.textContent = parts.join(" · ") || "כל השיעורים";
     grow.append(name, desc);
+    const issues = (r.monitor?.periods || []).filter(p => p.attention);
+    const status = document.createElement('p'); status.className = 'hint';
+    status.textContent = issues.length ? issues.map(p => `${p.start}–${p.end}: ${p.state === 'missing' ? 'לא נמצא אימון מתאים' : 'הלוח טרם אומת'}`).join(' · ') : r.validation?.message || 'הבדיקה הבאה תתבצע לפני הדוח הלילי';
+    grow.append(status);
+    for (const p of issues) {
+      const skip = document.createElement('button'); skip.textContent = `השתק בדיקת חוסר לתקופה ${p.start}–${p.end}`;
+      skip.onclick = async () => {
+        if (!confirm('להשתיק את בדיקת החוסר לתקופה הזו בלבד? הרשמות קיימות והאוטומציה נשארות פעילות.')) return;
+        try { await api(`/api/rules/${r.id}/skip-period`, {method:'POST', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify({period_start:p.start})}); await loadRules(); }
+        catch (error) { toast(error.message); }
+      };
+      grow.append(skip);
+    }
     if(r.mode==='autobook')grow.append(timingCard(ruleTimingContext?.rules[String(r.id)],{kind:'rule',id:r.id,studio,refresh:loadRules}));
     const tag = document.createElement("span");
     tag.className = "mode-tag" + (r.mode === "autobook" ? " autobook" : "");
@@ -2971,8 +2989,7 @@ async function loadRules() {
       // here left the automation visibly in its old state with nothing said,
       // so "I turned it off" and "it is still booking classes" looked alike
       try {
-        await api("/api/rules", { method: "POST",
-          body: JSON.stringify({ ...r, enabled: !r.enabled }) });
+        await saveRuleChecked({ ...r, enabled: !r.enabled });
         loadRules();
       } catch (e) { toast("נכשל: " + e.message, 6000); }
     };
@@ -3002,11 +3019,29 @@ $("#ruleName").addEventListener("input", () => {
 
 $("#ruleCancelEdit").addEventListener("click", () => { resetRuleForm(); loadRules(); });
 
-$("#ruleSave").onclick = async () => {
+async function saveRuleChecked(payload) {
+  const studio = state.selectedStudioId;
+  const send = body => api('/api/rules', {method:'POST', headers:{'X-Arbox-Studio-Id':String(studio)}, body:JSON.stringify(body)});
+  let result = await send(payload);
+  if (result.needs_confirm) {
+    if (!confirm(result.conflict)) return null;
+    result = await send({...payload, confirm_unmatched:true});
+  }
+  if (!result.ok) throw new Error(result.error || 'האוטומציה לא נשמרה');
+  return result;
+}
+
+$('#ruleDraft').onclick = () => saveRuleForm(true);
+$('#ruleSave').onclick = () => saveRuleForm(false);
+let ruleSaving = false;
+async function saveRuleForm(draft) {
+  if (ruleSaving) return;
   const msg = $("#ruleMsg");
   msg.classList.remove("error");
   const name = $("#ruleName").value.trim();
   if (!name) { msg.classList.add("error"); msg.textContent = "צריך שם לאוטומציה"; return; }
+  ruleSaving = true;
+  $('#ruleSave').disabled = $('#ruleDraft').disabled = true;
   try {
     const payload = {
       name,
@@ -3016,6 +3051,8 @@ $("#ruleSave").onclick = async () => {
       time_from: $("#ruleFrom").value || null,
       time_to: $("#ruleTo").value || null,
       mode: $("#ruleMode").value,
+      recurrence_weeks: Number($('#ruleRecurrence').value),
+      recurrence_anchor: $('#ruleAnchor').value || null,
       timing_mode: $("#ruleTimingMode").value==='keep'?null:$("#ruleTimingMode").value,
     };
     // an id turns the same endpoint into an update instead of an insert
@@ -3023,7 +3060,8 @@ $("#ruleSave").onclick = async () => {
       payload.id = editingRuleId;
       payload.enabled = editingEnabled;
     }
-    await api("/api/rules", { method: "POST", headers:{'X-Arbox-Studio-Id':String(state.selectedStudioId)}, body: JSON.stringify(payload) });
+    if (draft) payload.enabled = false;
+    if (!await saveRuleChecked(payload)) return;
     const wasEditing = editingRuleId !== null;
     resetRuleForm();
     $("#ruleMsg").textContent = wasEditing ? "עודכן ✓" : "נשמר ✓";
@@ -3031,6 +3069,9 @@ $("#ruleSave").onclick = async () => {
   } catch (e) {
     msg.classList.add("error");
     msg.textContent = "נכשל: " + e.message;
+  } finally {
+    ruleSaving = false;
+    $('#ruleSave').disabled = $('#ruleDraft').disabled = false;
   }
 };
 
@@ -3513,6 +3554,9 @@ async function loadSettings() {
   $("#tgLogLevel").value = (s.telegram || {}).log_level || "error";
   $("#haLogLevel").value = (s.ha || {}).log_level || "error";
 
+  $('#balanceReminderEnabled').checked = s.balance_reminder?.enabled || false;
+  $('#balanceReminderDays').value = s.balance_reminder?.days_before ?? 14;
+  $('#balanceReminderEntries').value = s.balance_reminder?.min_entries ?? 5;
   $("#digestHour").value = s.digest_hour;
   $("#monthlyQuota").value = s.monthly_quota ?? 0;
   const membershipSelect = $("#preferredMembership");
@@ -3617,6 +3661,7 @@ async function saveSettings() {
           messages_days: Number($("#retMessages").value) || 365,
         },
         late_cancel_warning_minutes: Number($("#lateCancel").value) || 0,
+        balance_reminder: {enabled:$('#balanceReminderEnabled').checked, days_before:Number($('#balanceReminderDays').value), min_entries:Number($('#balanceReminderEntries').value)},
         digest_hour: Number(dh),
         monthly_quota: Number($("#monthlyQuota").value) || 0,
         preferred_membership_id: Number($("#preferredMembership").value) || null,

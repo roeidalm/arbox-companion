@@ -3,6 +3,15 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.60.0
+
+Validate recurring automation expectations and simplify attendance feedback.
+
+- Validate enabled automation and nightly monitoring rules against published future classes; support drafts and explicit overrides.
+- Monitor anchored weekly or multiweek expectations before the nightly report, respecting closed studio days, vacations and acknowledged exceptions.
+- Add optional remaining-entry reminders with configurable lead time and inclusive threshold, accounting for planned usage.
+- Combine attendance with post-workout feedback and add a did-not-attend option.
+- Update the Home Assistant integration to 3.5.4.
 ## 1.59.1
 
 - Simplify system activity on mobile: one current-status summary, optional connection details, and warnings/errors shown first.

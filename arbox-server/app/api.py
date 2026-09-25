@@ -109,6 +109,9 @@ def _clean_reason(code: str | None, text: str | None) -> tuple[str, str | None]:
 
 
 class RuleBody(BaseModel):
+    recurrence_weeks: int = Field(1, ge=1, le=8)
+    recurrence_anchor: date | None = None
+    confirm_unmatched: bool = False
     timing_mode: Literal["inherit", "immediate"] | None = None
     id: int | None = None
     name: str
@@ -1392,7 +1395,12 @@ async def delete_vacation(request: Request, vac_id: int,
 
 @router.get("/rules")
 async def list_rules(request: Request):
-    return {"rules": await ctx(request).store.list_rules()}
+    s = ctx(request)
+    rules = await s.store.list_rules()
+    for rule in rules:
+        rule["monitor"] = await s.store.get_meta(s.rules_engine.rule_monitor.key(rule['id'])) or {}
+        rule["validation"] = await s.store.get_meta(s.rules_engine.rule_monitor.key(rule['id']) + ':validation') or {}
+    return {"rules": rules}
 
 
 @router.post("/rules")
@@ -1402,14 +1410,72 @@ async def save_rule(request: Request, body: RuleBody,
     if body.mode not in ("notify", "autobook"):
         raise HTTPException(422, "mode must be notify|autobook")
     s = ctx(request)
-    if body.id and body.timing_mode is not None and not any(r['id']==body.id for r in await s.store.list_rules()):
+    if body.id and not any(r['id']==body.id for r in await s.store.list_rules()):
         raise HTTPException(404, 'האוטומציה אינה בסטודיו הפעיל')
-    rid = await s.store.save_rule(body.model_dump())
+    if any(d not in range(7) for d in body.weekdays):
+        raise HTTPException(422, 'יום בשבוע אינו תקין')
+    import re
+    for value in (body.time_from, body.time_to):
+        if value and not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', value):
+            raise HTTPException(422, 'שעה אינה תקינה')
+    if body.time_from and body.time_to and body.time_from > body.time_to:
+        raise HTTPException(422, 'שעת הסיום חייבת להיות אחרי שעת ההתחלה')
+    values = body.model_dump(mode='json')
+    async with s.rules_engine._tick_lock:
+        validation = await s.rules_engine.rule_monitor.validate(values) if body.enabled else {'state': 'draft', 'message': 'טיוטה מושבתת'}
+        if body.enabled and validation['state'] != 'verified' and not body.confirm_unmatched:
+            return {'ok': False, 'needs_confirm': True, 'confirm_kind': 'unmatched_rule',
+                    'validation': validation,
+                    'conflict': validation['message'] + f"\nטווח שנבדק: {validation['date_from']}–{validation['date_to']}\nלהפעיל בכל זאת ללא אימות? אפשר לבטל ולשמור כטיוטה מושבתת."}
+        if not values.get('recurrence_anchor'):
+            from .rule_monitor import monday
+            values['recurrence_anchor'] = monday(date.fromisoformat(validation.get('first_match') or date.today().isoformat())).isoformat()
+        rid = await s.store.save_rule(values)
+        from .rule_monitor import signature
+        monitor_key = s.rules_engine.rule_monitor.key(rid)
+        previous = await s.store.get_meta(monitor_key) or {}
+        if previous.get('signature') != signature(values):
+            await s.store.set_meta(monitor_key, {})
+        await s.store.set_meta(s.rules_engine.rule_monitor.key(rid) + ':validation', validation)
     from .registration_guidance import save_override
     save_override(s.settings, s.store.active_box_id, 'rule', rid, body.timing_mode)
     await s.rules_engine.schedule_openings()
     await s.rules_engine.review_plans()
     return {"ok": True, "id": rid}
+
+
+class SkipRulePeriodBody(BaseModel):
+    period_start: date
+
+
+@router.post('/rules/{rule_id}/skip-period')
+async def skip_rule_period(request: Request, rule_id: int, body: SkipRulePeriodBody,
+                           x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    async with s.rules_engine._tick_lock:
+        rule = next((r for r in await s.store.list_rules() if r['id'] == rule_id), None)
+        if not rule:
+            raise HTTPException(404, 'האוטומציה אינה בסטודיו הפעיל')
+        from .rule_monitor import monday, signature
+        key = s.rules_engine.rule_monitor.key(rule_id)
+        monitor = await s.store.get_meta(key) or {}
+        rule['recurrence_anchor'] = rule.get('recurrence_anchor') or monitor.get('anchor') or monday(date.today()).isoformat()
+        start = body.period_start
+        anchor = monday(date.fromisoformat(rule['recurrence_anchor']))
+        length = 7 * rule['recurrence_weeks']
+        end = start + timedelta(days=length-1)
+        if (start-anchor).days % length or end < date.today() or start > date.today()+timedelta(days=62):
+            raise HTTPException(422, 'תקופת הבדיקה אינה תקינה')
+        skips = await s.store.get_meta(key + ':skips') or []
+        skips = [p for p in skips if p['end'] >= date.today().isoformat() and p['start'] != start.isoformat()]
+        skips.append({'start':start.isoformat(), 'end':end.isoformat(), 'signature':signature(rule)})
+        await s.store.set_meta(key + ':skips', skips)
+        for period in monitor.get('periods', []):
+            if period['start'] == start.isoformat():
+                period.update(state='skipped', attention=False)
+        await s.store.set_meta(key, monitor)
+        return {'ok':True}
 
 
 @router.delete("/rules/{rule_id}")

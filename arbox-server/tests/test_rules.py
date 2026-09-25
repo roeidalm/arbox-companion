@@ -544,6 +544,7 @@ class DigestStore:
 class DigestNotifier:
     def __init__(self, results=None):
         self.settings = SimpleNamespace(
+            journal={"level": "off"},
             is_blocked=lambda category: False,
             base_url="http://arbox.example",
                 browser_url="http://arbox.example",
@@ -1072,3 +1073,24 @@ async def test_free_text_other_reason_is_saved_only_when_armed():
     store.set_training_outcome.assert_awaited_once_with(
         94, "missed", "manual", "other", "train delay")
     store.set_meta.assert_awaited_once_with("attendance_other_input", None)
+
+
+@pytest.mark.parametrize('level,channel,base_url,expected', [
+    ('off', 'telegram', 'http://arbox.example', 1),
+    ('quick', 'telegram', 'http://arbox.example', 0),
+    ('feedback', 'discord', 'http://arbox.example', 0),
+    ('full', 'telegram', 'http://arbox.example', 0),
+    ('full', None, 'http://arbox.example', 1),
+    ('full', 'telegram', '', 1),
+])
+async def test_feedback_replaces_attendance_only_with_usable_route(level, channel, base_url, expected):
+    session = digest_session(91, date.today().isoformat(), '00:00', 'Movement', user_booked=44)
+    store = AttendanceStore([session])
+    notifier = DigestNotifier()
+    notifier.settings.journal = {'level': level}
+    notifier.settings.browser_url = base_url
+    notifier.journal_form_channel = lambda: channel
+    engine = RulesEngine(store, object(), object(), notifier)
+    await engine.attendance_tick()
+    assert len(notifier.sent) == expected
+    assert len(store.prompts) == expected

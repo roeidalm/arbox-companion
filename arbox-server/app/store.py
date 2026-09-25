@@ -406,6 +406,8 @@ class Store:
         await self._db.executescript(SCHEMA)
         # additive migrations for DBs created before a column existed
         for table, col, ddl in (
+            ("rules", "recurrence_weeks", "ALTER TABLE rules ADD COLUMN recurrence_weeks INTEGER NOT NULL DEFAULT 1"),
+            ("rules", "recurrence_anchor", "ALTER TABLE rules ADD COLUMN recurrence_anchor TEXT"),
             ("pending_prompts", "dry_run",
              "ALTER TABLE pending_prompts ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0"),
             ("pending_prompts", "batch_id",
@@ -1557,6 +1559,8 @@ class Store:
             "time_from": rule.get("time_from"),
             "time_to": rule.get("time_to"),
             "mode": rule.get("mode", "notify"),
+            "recurrence_weeks": rule.get("recurrence_weeks", 1),
+            "recurrence_anchor": rule.get("recurrence_anchor"),
         }
         if rule.get("id"):
             sets = ", ".join(f"{k}=?" for k in fields)

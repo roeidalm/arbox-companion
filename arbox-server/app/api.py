@@ -465,8 +465,11 @@ async def messages(request: Request, x_api_key: str | None = Header(None)):
         _last_feed_fetch = now
         try:
             feed = await s.client.feed()
+            await s.notification_health.incident('feed', False, 'פיד הודעות הסטודיו אינו זמין')
         except ArboxError as err:
             _LOGGER.warning("Messages: feed unavailable, serving archive (%s)", err)
+            await s.store.log_event('info', 'system', 'פיד הודעות הסטודיו אינו זמין; מוצג הארכיון', type(err).__name__)
+            await s.notification_health.incident('feed', True, 'פיד הודעות הסטודיו אינו זמין', grace=300)
             feed = {}
     live = feed.get("boxMessage") or []
     await s.store.save_box_messages(live)
@@ -1122,6 +1125,9 @@ async def update_exercise_shortcut(
 @router.get("/events")
 async def events(request: Request, level: str | None = None,
                  source: str | None = None, limit: int = 200,
+                 date_from: date | None = None, date_to: date | None = None,
+                 period: Literal["day", "week", "month", "all", "custom"] = "week",
+                 before_id: int | None = None,
                  x_api_key: str | None = Header(None)):
     """The activity log, plus the status strip computed from it.
 
@@ -1131,7 +1137,18 @@ async def events(request: Request, level: str | None = None,
     """
     require_key(request, x_api_key)
     s = ctx(request)
-    rows = await s.store.list_events(level=level, source=source, limit=limit)
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "תאריך ההתחלה מאוחר מתאריך הסיום")
+    if not date_from and not date_to and period != 'all':
+        today = datetime.now().date()
+        date_from = (today if period == 'day' else today.replace(day=1) if period == 'month'
+                     else today - timedelta(days=(today.weekday()+1)%7))
+        date_to = today
+    limit = max(1, min(limit, 200))
+    rows = await s.store.list_events(level=level, source=source, limit=limit+1,
+                                    date_from=date_from,date_to=date_to,before_id=before_id)
+    more = len(rows) > limit
+    rows = rows[:limit]
 
     last_sync = await s.store.get_meta("last_sync")
     sync_age = None
@@ -1145,27 +1162,13 @@ async def events(request: Request, level: str | None = None,
         except ValueError:
             pass
 
-    channels = {}
-    for name in ("telegram", "ha", "discord"):
-        ch = getattr(s.settings, name)
-        if not ch.get("enabled"):
-            channels[name] = {"state": "off"}
-            continue
-        fails = [
-            e for e in await s.store.list_events(source="notify", tag=name, limit=50)
-            if e["level"] in ("warn", "error")
-        ]
-        if name == "discord":
-            delivery = await s.notifier.discord_delivery.status()
-            channels[name] = {"state": "unconfigured" if not (s.settings.discord_bot_configured or s.settings.discord_webhook) else "disconnected" if s.settings.discord_bot_configured and not s.notifier.discord_bot.connected else "failing" if delivery['failed'] or delivery['unknown'] else "queued" if delivery['queued'] else "ok", **delivery, "failures": delivery['failed'] + delivery['unknown']}
-            continue
-        channels[name] = {"state": "failing" if fails else "ok",
-                          "failures": len(fails),
-                          "last": fails[0]["ts"] if fails else None}
+    channels = await s.notification_health.snapshot()
 
     return {
         "events": rows,
-        "counts": await s.store.event_counts(days=7),
+        "counts": await s.store.event_counts(days=None, date_from=date_from,date_to=date_to,source=source),
+        "range": {"date_from": date_from, "date_to": date_to},
+        "next_cursor": rows[-1]['id'] if more else None,
         "status": {
             "timezone": s.settings.timezone,
             "server_time": datetime.now().isoformat(timespec="seconds"),
@@ -1623,15 +1626,31 @@ async def test_digest(request: Request, x_api_key: str | None = Header(None)):
         raise HTTPException(502, str(err))
 
 
+@router.post("/settings/test-system/{level}")
+async def test_system_event(request: Request, level: Literal['warn','error'],
+                            x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    names = [n for n in s.notifier._eligible('log') if s.settings.wants_log(n, level)]
+    message = 'בדיקת התראת מערכת — לא התרחשה תקלה אמיתית'
+    await s.notifier.push_event(level, 'system', message)
+    await s.store.log_event('info','system',message, 'level=' + level + '; channels=' + ','.join(names), notified=True)
+    snapshot = await s.notification_health.snapshot()
+    return {'channels': {n: snapshot[n] for n in names}, 'filtered': [n for n in ('discord','telegram','ha') if n not in names]}
+
+
 @router.post("/settings/test/{channel}")
-async def test_channel(request: Request, channel: str,
+async def test_channel(request: Request, channel: str, kind: str | None = None,
                        x_api_key: str | None = Header(None)):
     require_key(request, x_api_key)
     try:
-        await ctx(request).notifier.send_test(channel)
+        from .settings import NOTIFICATION_KINDS
+        if kind is not None and kind not in NOTIFICATION_KINDS:
+            raise HTTPException(422, 'סוג התראה אינו תקין')
+        result = await ctx(request).notifier.send_test(channel, kind)
     except Exception as err:  # noqa: BLE001
         raise HTTPException(502, str(err))
-    return {"ok": True, "discord_delivery": await ctx(request).notifier.discord_delivery.status() if channel == "discord" else None}
+    return {"ok": True, "state": result, "discord_delivery": await ctx(request).notifier.discord_delivery.status() if channel == "discord" else None}
 
 
 # ------------------------------------------------------------ HA callback
@@ -1646,12 +1665,23 @@ async def ha_callback(request: Request, x_api_key: str | None = Header(None)):
     if action.startswith("ARBOX_"):
         action = action[len("ARBOX_"):]
     s = ctx(request)
+    extra = {}
+    if action.startswith('route:'):
+        parts = action.split(':', 2)
+        if len(parts) != 3:
+            raise HTTPException(422, 'נתיב חזרה אינו תקין')
+        route_id, action = parts[1:]
+        target = next((r.get('target') for r in s.settings.ha.get('routes', {}).values()
+                       if r.get('target') and s.notifier.target_label('ha', r['target']) == 'webhook:' + route_id), None)
+        if not target:
+            raise HTTPException(409, 'יעד ההתראה אינו מוגדר עוד')
+        extra = {'target': target}
     result = await s.rules_engine.handle_callback(
         action, reply_text=str(body.get("reply_text") or "") or None,
         source_channel="ha")
     from .notification_reply import NotificationReply
     if isinstance(result, NotificationReply):
-        await s.notifier._send_ha(result.text, result.buttons, force=True, tag=result.tag)
+        await s.notifier._send_ha(result.text, result.buttons, force=True, tag=result.tag, **extra)
         return {'ok': True, 'result': result.text}
     # the HA companion has no popup channel like Telegram's — send the
     # outcome back as a notification so the press gets visible feedback
@@ -1660,7 +1690,7 @@ async def ha_callback(request: Request, x_api_key: str | None = Header(None)):
     # calendar file/link, but handle_callback already dispatched that.
     if result:
         try:
-            await s.notifier._send_ha(result, None, force=True)
+            await s.notifier._send_ha(result, None, force=True, **extra)
         except Exception as err:  # noqa: BLE001 — feedback is best-effort
             _LOGGER.warning("HA feedback notification failed: %s", err)
     return {"ok": True, "result": result}

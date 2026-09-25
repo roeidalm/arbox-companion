@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import hmac
+import time
 
 import discord
 
@@ -81,6 +82,7 @@ class DiscordBot:
         self.client = None
         self.task = None
         self.connected = False
+        self.disconnected_since = time.time()
         self.lock = asyncio.Lock()
 
     def start(self):
@@ -106,15 +108,24 @@ class DiscordBot:
             @client.event
             async def on_ready():
                 self.connected = True
+                self.disconnected_since = None
+            @client.event
+            async def on_resumed():
+                self.connected = True
+                self.disconnected_since = None
+                await self.notifier._log('info', 'חיבור בוט Discord חודש', channel='discord_gateway')
             @client.event
             async def on_disconnect():
                 self.connected = False
+                if self.disconnected_since is None:
+                    self.disconnected_since = time.time()
+                    await self.notifier._log('info', 'חיבור בוט Discord נותק; מנסה להתחבר מחדש', channel='discord_gateway')
             @client.event
             async def on_interaction(interaction):
                 try:
                     await self.interaction(interaction)
                 except Exception:
-                    await self.notifier._log('error', 'הטיפול בכפתור Discord נכשל', channel='discord')
+                    await self.notifier._log('error', 'הטיפול בכפתור Discord נכשל', channel='discord', source='system')
             runner = asyncio.create_task(client.start(token))
             try:
                 while not runner.done():
@@ -138,7 +149,7 @@ class DiscordBot:
         s = self.settings.discord
         return (s.get('enabled') and self.settings.discord_bot_configured
                 and str(interaction.user.id) == s.get('allowed_user_id')
-                and str(interaction.channel_id) == s.get('channel_id')
+                and str(interaction.channel_id) in self.settings.allowed_notification_targets('discord')
                 and str(interaction.guild_id) == s.get('guild_id'))
 
     async def interaction(self, interaction):
@@ -180,7 +191,7 @@ class DiscordBot:
                     answer = await self.notifier.on_callback(data, source_channel='discord', reply_text=reply_text)
                 except Exception:
                     await interaction.edit_original_response(content='הפעולה נכשלה. בדקו את מצב האימון לפני ניסיון נוסף.')
-                    await self.notifier._log('error', 'פעולת Discord נכשלה', channel='discord')
+                    await self.notifier._log('error', 'פעולת Discord נכשלה', channel='discord', source='system')
                     return
             # Information must not remove the still-valid booking buttons.
             if data.startswith(('info:', 'infob:')):
@@ -227,4 +238,4 @@ class DiscordBot:
                     await interaction.edit_original_response(content='עודכן ✓')
             except Exception:
                 await interaction.edit_original_response(content='הפעולה טופלה, אך עדכון ההודעה נכשל. בדקו את מצב האימון באפליקציה.')
-                await self.notifier._log('warn', 'פעולת Discord טופלה אך עדכון ההודעה נכשל', channel='discord')
+                await self.notifier._log('warn', 'פעולת Discord טופלה אך עדכון ההודעה נכשל', channel='discord', source='system')

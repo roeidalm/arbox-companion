@@ -11,11 +11,16 @@ import time
 import uuid
 from pathlib import Path
 from .discord_bot import render_bot
+from .notification_context import notification_kind, health_notice
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import aiohttp
 import aiosqlite
 
 CHANNELS = ('telegram', 'ha', 'discord')
+
+
+class DiscordDeliveryError(RuntimeError):
+    """Failure already recorded by the durable delivery worker."""
 
 
 def webhook_url(value: str) -> str:
@@ -64,6 +69,7 @@ class DiscordDelivery:
         self.settings=settings; self.log=log
         self.path=Path(settings._path).parent/'discord-delivery.db'
         self.db=None; self.task=None; self.lock=asyncio.Lock(); self.http=None
+        self.audit = None
 
     async def start(self):
         async with self.lock:
@@ -75,6 +81,10 @@ class DiscordDelivery:
                 event_id TEXT, destination TEXT, part INTEGER, payload TEXT,
                 created REAL, state TEXT, attempts INTEGER DEFAULT 0, next_attempt REAL,
                 message_id TEXT, error TEXT, PRIMARY KEY(event_id,destination,part))''')
+            columns = {r[1] for r in await (await self.db.execute('PRAGMA table_info(delivery)')).fetchall()}
+            for name, definition in (('kind', "TEXT DEFAULT 'system'"), ('target', "TEXT DEFAULT 'primary'"), ('health_notice', 'INTEGER DEFAULT 0')):
+                if name not in columns:
+                    await self.db.execute(f'ALTER TABLE delivery ADD COLUMN {name} {definition}')
             # A process may have died after Discord accepted a request.
             await self.db.execute("UPDATE delivery SET state='unknown',error='interrupted' WHERE state='sending'")
             await self.db.execute("DELETE FROM delivery WHERE created<? AND state IN ('sent','failed','unknown')",(time.time()-30*86400,))
@@ -88,40 +98,49 @@ class DiscordDelivery:
         if self.http:await self.http.close()
         if self.db:await self.db.close()
 
-    def destination(self):
-        if self.settings.discord_bot_configured:
+    def destination(self, target=''):
+        if self.settings.discord_bot_configured and not target.startswith('https://'):
             token = self.settings.discord_bot_token
-            channel = self.settings.discord['channel_id']
+            channel = target or self.settings.discord['channel_id']
             return (f'https://discord.com/api/v10/channels/{channel}/messages',
                     hashlib.sha256(('bot:' + channel + ':' + token).encode()).hexdigest(),
                     {'Authorization': 'Bot ' + token})
-        raw = self.settings.discord_webhook
+        raw = target or self.settings.discord_webhook
         if not raw: raise RuntimeError('Discord אינו מוגדר')
         url = webhook_url(raw)
         return url, hashlib.sha256(url.encode()).hexdigest(), {}
 
-    async def deliver(self,text,buttons=None,*,event_id=None,force=False):
+    async def deliver(self,text,buttons=None,*,event_id=None,force=False,target=''):
         if not self.settings.discord.get('enabled') and not force:raise RuntimeError('Discord כבוי')
-        url, dest, headers = self.destination()
+        url, dest, headers = self.destination(target)
         await self.start()
         event_id=event_id or str(uuid.uuid4())
         async with self.lock:
-            payloads = render_bot(text,buttons,self.settings.discord_bot_token) if self.settings.discord_bot_configured else render(text,buttons,self.settings.browser_url)
+            payloads = render_bot(text,buttons,self.settings.discord_bot_token) if headers else render(text,buttons,self.settings.browser_url)
             for i,payload in enumerate(payloads):
-                await self.db.execute('INSERT OR IGNORE INTO delivery(event_id,destination,part,payload,created,state,next_attempt) VALUES(?,?,?,?,?,?,?)',
-                    (event_id,dest,i,json.dumps(payload,ensure_ascii=False),time.time(),'pending',time.time()))
+                label = (target or self.settings.discord.get('channel_id')) if headers else 'webhook:' + dest[:12]
+                await self.db.execute('INSERT OR IGNORE INTO delivery(event_id,destination,part,payload,created,state,next_attempt,kind,target,health_notice) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                    (event_id,dest,i,json.dumps(payload,ensure_ascii=False),time.time(),'pending',time.time(),notification_kind.get(),label,int(health_notice.get())))
             await self.db.commit()
         await self.drain(event_id=event_id,force=force)
         cur=await self.db.execute('SELECT state FROM delivery WHERE event_id=?',(event_id,))
         states=[r['state'] for r in await cur.fetchall()]
-        if any(s in ('failed','unknown') for s in states):raise RuntimeError('שליחת Discord נכשלה או שתוצאתה אינה ודאית; ראו יומן מערכת')
+        if any(s in ('failed','unknown') for s in states):raise DiscordDeliveryError('שליחת Discord נכשלה או שתוצאתה אינה ודאית; ראו יומן מערכת')
+        if any(s == 'pending' for s in states) and self.audit and not health_notice.get():
+            await self.audit('discord', label, notification_kind.get(), 'pending')
         return event_id  # pending means durably queued, not confirmed delivered.
 
     async def drain(self,event_id=None,force=False):
         async with self.lock:
             if not force and not self.settings.discord.get('enabled'):return
             if not self.settings.discord_bot_configured and not self.settings.discord_webhook:return
-            url, dest, headers = self.destination()
+            destinations = {}
+            for target in {''} | {r.get('target', '') for r in self.settings.discord.get('routes', {}).values()}:
+                try:
+                    url, dest, headers = self.destination(target)
+                    destinations[dest] = (url, headers)
+                except (ValueError, RuntimeError):
+                    continue
             sql="SELECT * FROM delivery WHERE state='pending' AND next_attempt<=?"
             params=[time.time()]
             if event_id:sql+=' AND event_id=?';params.append(event_id)
@@ -130,8 +149,9 @@ class DiscordDelivery:
             for row in await cur.fetchall():
                 current = await (await self.db.execute('SELECT state FROM delivery WHERE event_id=? AND destination=? AND part=?', self.pk(row))).fetchone()
                 if current['state'] != 'pending': continue
-                if row['destination']!=dest:
+                if row['destination'] not in destinations:
                     await self.finish(row,'failed','destination_changed');continue
+                url, headers = destinations[row['destination']]
                 if row['created']<time.time()-3600:
                     await self.finish(row,'failed','expired');continue
                 await self.db.execute("UPDATE delivery SET state='sending',attempts=attempts+1 WHERE event_id=? AND destination=? AND part=?", self.pk(row))
@@ -170,6 +190,10 @@ class DiscordDelivery:
     async def finish(self,row,state,error,mid=None):
         await self.db.execute('UPDATE delivery SET state=?,error=?,message_id=?,payload=CASE WHEN ? IN (\'sent\',\'failed\',\'unknown\') THEN \'{}\' ELSE payload END WHERE event_id=? AND destination=? AND part=?',(state,error,mid,state,*self.pk(row)))
         await self.db.commit()
+        if state == 'sent':
+            await self.log('info', 'Discord אישר קבלת הודעה', f"event={row['event_id']} destination={row['destination'][:12]} message={mid}", channel='discord')
+        if self.audit and not row['health_notice']:
+            await self.audit('discord', row['target'], row['kind'], state, error)
         if state in ('failed','unknown'):
             await self.db.execute("UPDATE delivery SET state='failed',error='earlier_part_failed',payload='{}' WHERE event_id=? AND destination=? AND state='pending'",(row['event_id'],row['destination']))
             await self.db.commit()

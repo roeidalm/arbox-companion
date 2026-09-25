@@ -2012,32 +2012,35 @@ class Store:
                 pass
 
     async def list_events(
-        self,
-        level: str | None = None,
-        source: str | None = None,
-        tag: str | None = None,
-        limit: int = 200,
+        self, *, level=None, source=None, tag=None, limit=200,
+        date_from=None, date_to=None, before_id=None,
     ) -> list[dict]:
-        q = "SELECT * FROM events WHERE 1=1"
-        args: list[Any] = []
-        if level:
-            q += " AND level = ?"; args.append(level)
-        if source:
-            q += " AND source = ?"; args.append(source)
-        if tag:
-            q += " AND tag = ?"; args.append(tag)
+        q, args = self._event_filter(level=level, source=source, tag=tag,
+                                    date_from=date_from, date_to=date_to)
+        if before_id is not None:
+            q += " AND id < ?"; args.append(before_id)
         q += " ORDER BY id DESC LIMIT ?"
         args.append(max(1, min(int(limit), 1000)))
-        cur = await self.db.execute(q, args)
+        cur = await self.db.execute("SELECT * FROM events WHERE 1=1" + q, args)
         return [dict(r) for r in await cur.fetchall()]
 
-    async def event_counts(self, days: int = 7) -> dict[str, int]:
-        """Per-level totals for the filter chips."""
-        cur = await self.db.execute(
-            "SELECT level, COUNT(*) FROM events "
-            "WHERE ts >= datetime('now', 'localtime', ?) GROUP BY level",
-            (f"-{days} days",),
-        )
+    @staticmethod
+    def _event_filter(*, level=None, source=None, tag=None, date_from=None, date_to=None):
+        q, args = "", []
+        for column, value in (("level",level),("source",source),("tag",tag)):
+            if value:
+                q += f" AND {column} = ?"; args.append(value)
+        if date_from:
+            q += " AND ts >= ?"; args.append(str(date_from) + " 00:00:00")
+        if date_to:
+            q += " AND ts < datetime(?, '+1 day')"; args.append(str(date_to))
+        return q, args
+
+    async def event_counts(self, days=7, *, date_from=None, date_to=None, source=None):
+        q, args = self._event_filter(source=source,date_from=date_from,date_to=date_to)
+        if days is not None and not date_from and not date_to:
+            q += " AND ts >= datetime('now', 'localtime', ?)"; args.append(f"-{days} days")
+        cur = await self.db.execute("SELECT level, COUNT(*) FROM events WHERE 1=1" + q + " GROUP BY level", args)
         counts = {lvl: 0 for lvl in EVENT_LEVELS}
         for lvl, n in await cur.fetchall():
             counts[lvl] = n

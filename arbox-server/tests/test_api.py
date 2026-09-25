@@ -348,3 +348,46 @@ def test_ha_calendar_export_preserves_event_alarms_location_and_auth(client):
     google = client.get('/api/calendar/event/987/google', follow_redirects=False)
     assert exported['google'] == google.headers['location']
     assert api_key(client) not in result.text
+
+
+def test_event_period_validation_and_pagination(client):
+    headers={'X-Api-Key':api_key(client)}
+    assert client.get('/api/events?date_from=2026-10-02&date_to=2026-10-01',headers=headers).status_code==422
+    assert client.get('/api/events?date_from=nope',headers=headers).status_code==422
+    assert client.get('/api/events?period=all').status_code==401
+    response=client.get('/api/events?period=all',headers=headers)
+    assert response.status_code==200
+    assert response.json()['range']=={'date_from':None,'date_to':None}
+    assert 'next_cursor' in response.json()
+    assert response.json()['status']['channels']['telegram']['state']=='off'
+
+
+def test_system_event_test_uses_log_selection_and_severity(client):
+    state=client.app.state
+    state.settings.update({'telegram':{'enabled':True,'bot_token':'test','chat_id':'1','log_level':'error'}})
+    state.notifier._send_telegram=AsyncMock()
+    headers={'X-Api-Key':api_key(client)}
+    assert client.post('/api/settings/test-system/warn').status_code==401
+    warning=client.post('/api/settings/test-system/warn',headers=headers)
+    assert warning.json()['channels']=={}
+    state.notifier._send_telegram.assert_not_awaited()
+    error=client.post('/api/settings/test-system/error',headers=headers)
+    assert error.json()['channels']['telegram']['state']=='ok'
+    state.notifier._send_telegram.assert_awaited_once()
+    assert 'בדיקת התראת מערכת' in state.notifier._send_telegram.call_args.args[0]
+
+
+def test_ha_alternate_callback_reply_stays_on_configured_route(client):
+    state=client.app.state
+    url='http://ha.test/api/webhook/private-route'
+    state.settings.update({'ha':{'routes':{'log':{'target':url}}}})
+    state.rules_engine.handle_callback=AsyncMock(return_value='done')
+    state.notifier._send_ha=AsyncMock()
+    rid=state.notifier.target_label('ha',url).split(':')[1]
+    headers={'X-Api-Key':api_key(client)}
+    response=client.post('/api/ha/callback',headers=headers,json={'action':f'ARBOX_route:{rid}:book:123'})
+    assert response.status_code==200
+    state.rules_engine.handle_callback.assert_awaited_once_with('book:123',reply_text=None,source_channel='ha')
+    state.notifier._send_ha.assert_awaited_once_with('done',None,force=True,target=url)
+    state.settings.update({'ha':{'routes':{}}})
+    assert client.post('/api/ha/callback',headers=headers,json={'action':f'ARBOX_route:{rid}:book:123'}).status_code==409

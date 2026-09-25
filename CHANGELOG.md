@@ -3,6 +3,14 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.59.0
+
+- Filter system activity by day, week, month, all history, or a custom date range; navigate periods and load older entries without losing filters.
+- Restore Discord connection status after gateway resume. Separate current delivery health from historical errors and record delivery receipts per destination.
+- Report persistent bot disconnects, delivery failures, stale synchronization, and failed scheduler jobs through another enabled system-alert channel; deduplicate incidents and report recovery.
+- Add optional per-message destinations under advanced notification settings. Empty destinations inherit the primary target; optional copies retain it. Preserve routing in delayed delivery and Discord retries.
+- Add warning/error test actions that use the actual system-event filters and routing. Keep receipt confirmation distinct from phone notification display.
+
 ## 1.58.5
 
 - Collapse routine registration and learning explanations on workout and automation cards; keep fast-fill warnings and active waiting visible, with full details available on demand.

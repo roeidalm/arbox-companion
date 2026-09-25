@@ -316,9 +316,21 @@
       <div><h2>פעילות מערכת</h2><p class="hint">סנכרונים, הרשמות, התראות ושגיאות.</p></div>
     </div>
     <div id="logStatus" class="status-strip"></div>
+    <p class="hint">מצב הערוצים הוא המצב הנוכחי. האירועים והספירות מתייחסים לתקופה שנבחרה.</p>
+    <div id="logAlert" class="card" role="status" hidden></div>
+    <div class="field-row" id="logPeriodControls">
+      <label>תקופה <select id="logPeriod"><option value="day">יום</option><option value="week" selected>שבוע</option><option value="month">חודש</option><option value="all">הכול</option><option value="custom">טווח מותאם</option></select></label>
+      <button id="logPrevious" aria-label="התקופה הקודמת">→ הקודמת</button>
+      <label id="logAnchorLabel">בחירת תאריך <input id="logAnchor" type="date"></label>
+      <label id="logEndLabel" hidden>עד תאריך <input id="logEnd" type="date"></label>
+      <button id="logNext" aria-label="התקופה הבאה">הבאה ←</button>
+      <button id="logToday">היום</button>
+    </div>
+    <p id="logRange" class="hint" aria-live="polite"></p>
     <div class="chips" id="logLevels"></div>
     <div class="chips" id="logSources"></div>
     <div class="card" id="logList"></div>
+    <button id="logMore" hidden>טעינת אירועים נוספים</button>
   </section>
 
   <!-- settings -->
@@ -424,6 +436,17 @@
 <label><input type="checkbox" class="kind-discord" data-kind="membership"> עדכוני מנויים</label>
         </div>
         <div class="field-row"><label>אירועי מערכת <select id="discordLogLevel"><option value="error">שגיאות בלבד</option><option value="warn">אזהרות ושגיאות</option></select></label><button data-test="discord" class="testBtn">שלח בדיקה</button></div>
+      </div>
+      <details class="card" id="notificationAdvanced">
+        <summary>מתקדם — יעדים נפרדים לפי סוג התראה</summary>
+        <p class="hint">בדרך כלל אין צורך לשנות כאן דבר. יעד ריק שולח למקום הרגיל. יעד חלופי מחליף אותו; סמנו „גם לראשי” רק אם רוצים עותק נוסף. סוגי הודעות כבויים יישארו כבויים.</p>
+        <div id="notificationRoutes"></div>
+      </details>
+      <div class="card">
+        <h2>בדיקת התראות מערכת</h2>
+        <p class="hint">הבדיקה עוברת דרך בחירת הערוצים ורמת החומרה שהגדרת, ואינה מבצעת פעולה באימון. אישור השירות אינו אישור שהטלפון הציג התראה.</p>
+        <div class="field-row"><button id="testSystemWarning">בדיקת אזהרה</button><button id="testSystemError">בדיקת שגיאה</button></div>
+        <p id="testSystemResult" class="hint" role="status"></p>
       </div>
       <div class="card">
         <h2>תזמון וסדר</h2>
@@ -865,7 +888,9 @@
 <div id="toast" hidden></div>
 <script src="/static/release-notes.js?v=3"></script>
 <script src="/static/google-calendar.js?v=11"></script>
-<script src="/static/app.js?v=2.69.0"></script>
+<script src="/static/activity-period.js?v=1"></script>
+<script src="/static/notification-routes.js?v=1"></script>
+<script src="/static/app.js?v=2.70.0"></script>
 <script src="/static/registration-learning.js?v=4"></script>
 <script src="/static/registration-guidance.js?v=2"></script>
 </body>

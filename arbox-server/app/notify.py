@@ -30,8 +30,9 @@ from typing import Awaitable, Callable
 
 import aiohttp
 
+from .notification_context import notification_kind, health_notice, routed
 from .settings import Settings
-from .discord_notify import DiscordDelivery, CHANNELS
+from .discord_notify import DiscordDelivery, DiscordDeliveryError, CHANNELS
 from .discord_bot import DiscordBot
 from .notification_reply import NotificationReply
 
@@ -83,11 +84,14 @@ def _telegram_button(b: dict) -> dict:
 class Notifier:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.audit = None
         self.discord_delivery = DiscordDelivery(settings, self._log)
+        self.discord_delivery.audit = self._audit
         self.discord_bot = DiscordBot(self)
         self._session: aiohttp.ClientSession | None = None
         self._tg_task: asyncio.Task | None = None
         self._tg_offset = 0
+        self.telegram_connected = None
         self._preview_telegram_until = 0.0
         self._tg_wakeup = asyncio.Event()
         self._esc_tasks: set[asyncio.Task] = set()
@@ -116,9 +120,9 @@ class Notifier:
         return text
 
     async def _log(self, level: str, message: str, detail: str = "",
-                   channel: str | None = None) -> None:
+                   channel: str | None = None, source: str = "notify") -> None:
         if self.log_event:
-            await self.log_event(level, "notify", message, detail or None,
+            await self.log_event(level, source, message, detail or None,
                                  tag=channel)
 
     async def _http(self) -> aiohttp.ClientSession:
@@ -163,6 +167,7 @@ class Notifier:
             out.append(name)
         return out
 
+    @routed
     async def send(
         self,
         text: str,
@@ -181,7 +186,7 @@ class Notifier:
         text = self._with_studio(text)
         eligible = self._eligible(kind)
         if not eligible:
-            _LOGGER.info("Notify(%s): no eligible channel", kind)
+            await self._log("info", "התראה סוננה לפי ההגדרות", f"type={kind}; לא נבחר ערוץ פעיל ומוגדר")
             return False
         try:
             esc = int(self.settings.notify.get("escalation_minutes") or 0)
@@ -213,17 +218,25 @@ class Notifier:
         each channel's own minimum level, so one channel can take warnings
         while another takes only errors.
         """
+        if level not in ("warn", "error"):
+            return
         names = [n for n in self._eligible("log")
                  if self.settings.wants_log(n, level)]
         if not names:
+            await self._log("info", "אירוע מערכת סונן לפי ההגדרות", f"level={level}; source={source}")
             return
         text = (f"{self.LEVEL_ICON.get(level, '•')} {self.LEVEL_HE.get(level, level)}"
                 f" · {message}")
         if detail:
             text += f"\n{detail}"
         text = self._with_studio(text)
-        await self._send_to(names, text, None)
+        token = notification_kind.set('log')
+        try:
+            return await self._send_to(names, text, None, immediate=True)
+        finally:
+            notification_kind.reset(token)
 
+    @routed
     async def send_document(
         self,
         filename: str,
@@ -257,32 +270,40 @@ class Notifier:
                 await asyncio.sleep(spacing * 60)
             if not getattr(self.settings, name).get("enabled"):
                 continue
-            try:
-                if name == "telegram":
-                    await self._tg_document(filename, content, caption, mime,
-                                            buttons)
-                elif name == "discord":
-                    await self.discord_delivery.deliver(html.unescape(re.sub(r"</?b>", "**", caption)) if caption else filename, [[{"text": link_title or filename, "uri": link}]] if link else buttons)
-                elif link:
-                    await self._send_ha(
-                        caption or filename, [[{
-                            "text": link_title or "📅 הוסף ליומן",
-                            "uri": link,
-                        }]],
-                    )
-            except Exception as err:  # noqa: BLE001 — one channel must not
-                _LOGGER.error("Document via %s failed: %s", name, err)
-                await self._log(
-                    "warn", f"שליחת קובץ ל-{_CHANNEL_HE.get(name, name)} נכשלה",
-                    str(err), channel=name)
+            for target in self.settings.notification_targets(name, notification_kind.get()):
+                extra = {'target': target} if target else {}
+                label = self.target_label(name, target)
+                try:
+                    if name == "telegram":
+                        await self._tg_document(filename, content, caption, mime, buttons, **extra)
+                    elif name == "discord":
+                        await self.discord_delivery.deliver(html.unescape(re.sub(r"</?b>", "**", caption)) if caption else filename,
+                            [[{"text": link_title or filename, "uri": link}]] if link else buttons, **extra)
+                    elif link:
+                        await self._send_ha(caption or filename, [[{"text": link_title or "📅 הוסף ליומן", "uri": link}]], **extra)
+                    else:
+                        continue
+                    if name != 'discord':
+                        await self._audit(name,label,notification_kind.get(),'sent')
+                except Exception as err:
+                    if name != 'discord':
+                        await self._audit(name,label,notification_kind.get(),'failed',type(err).__name__)
+                    await self._log('error', f'שליחת קובץ ל-{_CHANNEL_HE.get(name,name)} נכשלה', type(err).__name__,channel=name)
 
     async def _tg_document(
         self, filename: str, content: bytes, caption: str, mime: str,
-        buttons: list[list[dict]] | None = None,
+        buttons: list[list[dict]] | None = None, *, target: str = "",
     ) -> None:
         tg = self.settings.telegram
         form = aiohttp.FormData()
-        form.add_field("chat_id", str(tg["chat_id"]))
+        form.add_field("chat_id", str(target or tg["chat_id"]))
+        if len(caption.encode('utf-16-le')) // 2 > 1024:
+            # Never truncate HTML in the middle of a tag/entity. Preserve the
+            # complete caption as separate plain-text messages before the file.
+            plain = html.unescape(re.sub(r'<[^>]+>', '', caption))
+            for start in range(0, len(plain), 1800):
+                await self._send_telegram(plain[start:start+1800], None, target=target)
+            caption = ''
         if caption:
             # HTML so a long URL can hide behind a word instead of filling
             # half the screen; callers escape anything user-supplied
@@ -304,11 +325,59 @@ class Notifier:
         ) as resp:
             body = await resp.json(content_type=None)
             if not body.get("ok"):
-                raise RuntimeError(f"Telegram sendDocument: {body}")
+                raise RuntimeError(f"Telegram sendDocument: HTTP {resp.status}")
+
+    async def _audit(self, channel, target, kind, state, error=None):
+        if self.audit and not health_notice.get():
+            try:
+                await self.audit(channel, target, kind, state, error)
+            except Exception:
+                _LOGGER.exception('Could not record notification receipt')
+
+    async def _deliver_channel(self, name, text, buttons, telegram_bold=None, *, require_all=False):
+        kind = notification_kind.get()
+        failures = []
+        accepted = 0
+        for target in self.settings.notification_targets(name, kind):
+            extra = {'target': target} if target else {}
+            label = self.target_label(name, target)
+            try:
+                if name == 'telegram':
+                    await self._send_telegram(text, buttons, **extra,
+                        **({'bold_lines': telegram_bold} if telegram_bold else {}))
+                elif name == 'discord':
+                    await self.discord_delivery.deliver(text, buttons, **extra)
+                else:
+                    await self._send_ha(text, buttons, **extra)
+                accepted += 1
+                if name != 'discord':
+                    await self._audit(name, label, kind, 'sent')
+            except Exception as err:
+                if not isinstance(err, DiscordDeliveryError):
+                    code = re.search(r'(?:HTTP |: |-> )(\d{3})\b', str(err))
+                    await self._audit(name, label, kind, 'failed',
+                                      'http_' + code[1] if code else type(err).__name__)
+                failures.append(err)
+        if failures and (not accepted or require_all):
+            raise failures[0]
+
+    def target_label(self, channel, target=''):
+        import hashlib
+        config = getattr(self.settings, channel)
+        value = target or (config.get('channel_id') if channel == 'discord' else
+                           config.get('chat_id') if channel == 'telegram' else config.get('webhook_url')) or ''
+        if channel == 'discord' and (target.startswith('https://') or not self.settings.discord_bot_configured):
+            try:
+                return 'webhook:' + self.discord_delivery.destination(target)[1][:12]
+            except (ValueError, RuntimeError):
+                return 'primary'
+        if '://' in value:
+            return 'webhook:' + hashlib.sha256(value.encode()).hexdigest()[:12]
+        return str(value) or 'primary'
 
     async def _send_to(
         self, names: list[str], text: str, buttons: list[list[dict]] | None,
-        *, telegram_bold: list[str] | None = None,
+        *, telegram_bold: list[str] | None = None, immediate: bool = False,
     ) -> bool:
         """Deliver to each channel; True if at least one took it.
 
@@ -316,30 +385,25 @@ class Notifier:
         consumed: a flow that hands the user a button and then fails to send
         the message carrying it is dead with no way back.
         """
-        spacing = self.settings.notify.get("delivery_spacing_minutes", 0)
+        spacing = 0 if immediate else self.settings.notify.get("delivery_spacing_minutes", 0)
         if spacing > 0 and len(names) > 1:
             await self._send_to(names[:1], text, buttons, telegram_bold=telegram_bold)
             task = asyncio.create_task(self._send_spaced(names[1:], text, buttons, spacing, telegram_bold))
             self._esc_tasks.add(task)
             task.add_done_callback(self._esc_tasks.discard)
             return True  # Later channels have accepted scheduled delivery.
-        coros = [
-            self._send_telegram(text, buttons, **({'bold_lines': telegram_bold} if telegram_bold else {})) if n == "telegram"
-            else self.discord_delivery.deliver(text, buttons) if n == "discord"
-            else self._send_ha(text, buttons)
-            for n in names
-        ]
+        coros = [self._deliver_channel(n, text, buttons, telegram_bold) for n in names]
         results = await asyncio.gather(*coros, return_exceptions=True)
         failed = [n for n, r in zip(names, results) if isinstance(r, Exception)]
         for name, r in zip(names, results):
             if isinstance(r, Exception):
-                _LOGGER.error("Notify via %s failed: %s", name, r)
+                _LOGGER.error("Notify via %s failed (%s)", name, type(r).__name__)
                 # if another channel carried it, this is a warning; if every
                 # channel failed, the message reached nobody
                 await self._log(
                     "error" if len(failed) == len(names) else "warn",
                     f"שליחת התראה ל-{_CHANNEL_HE.get(name, name)} נכשלה",
-                    f"{r}" + ("" if len(failed) == len(names)
+                    type(r).__name__ + ("" if len(failed) == len(names)
                               else " · ההודעה נשלחה בערוץ אחר"),
                     channel=name,
                 )
@@ -367,8 +431,25 @@ class Notifier:
         _LOGGER.info("Escalating unanswered message to: %s", rest)
         await self._send_to(rest, f"⏰ תזכורת — טרם נענה:\n{text}", buttons, telegram_bold=telegram_bold)
 
-    async def send_test(self, channel: str) -> str:
+    async def send_test(self, channel: str, kind: str | None = None) -> str:
         text = "🧪 Arbox Companion — הודעת בדיקה בלבד. לא בוצעה פעולה באימון."
+        if kind is not None:
+            names = self._eligible(kind)
+            if channel != 'routing':
+                names = [n for n in names if n == channel]
+            if not names:
+                raise ValueError('סוג ההתראה אינו מופעל בערוץ שנבחר')
+            token = notification_kind.set(kind)
+            try:
+                for name in names:
+                    await self._deliver_channel(name, text + '\nסוג: ' + kind, None, require_all=True)
+                if 'discord' in names:
+                    status = await self.discord_delivery.status()
+                    if status['queued']:
+                        return 'pending'
+                return 'sent'
+            finally:
+                notification_kind.reset(token)
         if channel == "routing":
             if not await self.send(text):
                 raise RuntimeError("שליחת הבדיקה לערוץ הראשון נכשלה")
@@ -389,25 +470,31 @@ class Notifier:
     async def send_journal_form(self, text: str, buttons: list[list[dict]], *, channel=None) -> bool:
         """One prompt on the preferred enabled journal channel; no escalation."""
         selected = channel or self.journal_form_channel()
-        return await self._send_to([selected] if selected else [], text, buttons)
+        token = notification_kind.set('journal')
+        try:
+            return await self._send_to([selected] if selected else [], text, buttons)
+        finally:
+            notification_kind.reset(token)
 
     async def send_preview(self, channel: str, text: str, buttons: list[list[dict]]) -> None:
         """Explicit rehearsal: one configured channel, independent of routing."""
-        if channel == "discord":
-            await self.discord_delivery.deliver(text, buttons, force=True)
-        elif channel == "telegram":
-            await self._send_telegram(text, buttons, force=True)
-            self._preview_telegram_until = time.monotonic() + 1800
-            self._tg_wakeup.set()
-            self.start_telegram_poller()
-        elif channel == "ha":
-            await self._send_ha(text, buttons, force=True)
-        else:
-            raise ValueError("unknown preview channel")
+        for target in self.settings.notification_targets(channel, 'journal'):
+            extra = {'target': target} if target else {}
+            if channel == "discord":
+                await self.discord_delivery.deliver(text, buttons, force=True, **extra)
+            elif channel == "telegram":
+                await self._send_telegram(text, buttons, force=True, **extra)
+                self._preview_telegram_until = time.monotonic() + 1800
+                self._tg_wakeup.set()
+                self.start_telegram_poller()
+            elif channel == "ha":
+                await self._send_ha(text, buttons, force=True, **extra)
+            else:
+                raise ValueError("unknown preview channel")
 
     async def _send_telegram(
         self, text: str, buttons: list[list[dict]] | None, force: bool = False,
-        *, bold_lines: list[str] | None = None, message_id: int | None = None,
+        *, bold_lines: list[str] | None = None, message_id: int | None = None, target: str = "",
     ) -> None:
         tg = self.settings.telegram
         if not (tg.get("bot_token") and tg.get("chat_id")):
@@ -416,7 +503,7 @@ class Notifier:
             return
         if not tg.get("enabled") and not force:
             return
-        payload: dict = {"chat_id": tg["chat_id"], "text": text}
+        payload: dict = {"chat_id": target or tg["chat_id"], "text": text}
         if message_id is not None:
             payload['message_id'] = message_id
         if bold_lines:
@@ -444,17 +531,17 @@ class Notifier:
             if not body.get("ok"):
                 if message_id is not None and 'message is not modified' in body.get('description', ''):
                     return
-                raise RuntimeError(f"Telegram sendMessage: {body}")
+                raise RuntimeError(f"Telegram sendMessage: {body.get('error_code', resp.status)}")
 
     async def _send_ha(
         self, text: str, buttons: list[list[dict]] | None, force: bool = False,
-        *, tag: str | None = None,
+        *, tag: str | None = None, target: str = "",
     ) -> None:
         """POST to an HA webhook. The webhook id is the only secret needed —
         no long-lived token, no API access; it can only fire the automation
         attached to it (see dashboard/arbox-callback-automation.yaml)."""
         ha = self.settings.ha
-        url = ha.get("webhook_url")
+        url = target or ha.get("webhook_url")
         if not url:
             if force:
                 raise RuntimeError("HA webhook not configured")
@@ -479,12 +566,17 @@ class Notifier:
                 "title": "Arbox Companion",
                 "actions": [_ha_action(b) for b in (chunk or [])],
             }
+            if target:
+                route_id = self.target_label('ha', target).split(':', 1)[-1]
+                for action in payload['actions']:
+                    if action['action'].startswith('ARBOX_'):
+                        action['action'] = 'ARBOX_route:' + route_id + ':' + action['action'][6:]
             if tag:
                 payload.update(tag=tag if i == 0 else f'{tag}-{i}', alert_once=True)
             async with session.post(url, json=payload) as resp:
                 if resp.status not in (200, 201):
                     raise RuntimeError(
-                        f"HA webhook -> {resp.status}: {await resp.text()}"
+                        f"HA webhook -> {resp.status}"
                     )
 
     # ------------------------------------------------- telegram long-polling
@@ -518,9 +610,11 @@ class Notifier:
                 ) as resp:
                     body = await resp.json(content_type=None)
                 if not body.get("ok"):
-                    _LOGGER.error("getUpdates: %s", body)
+                    await self._telegram_connection(False)
+                    _LOGGER.error("getUpdates failed (code=%s)", body.get('error_code'))
                     await asyncio.sleep(30)
                     continue
+                await self._telegram_connection(True)
                 for upd in body.get("result", []):
                     self._tg_offset = upd["update_id"] + 1
                     cq = upd.get("callback_query")
@@ -534,14 +628,21 @@ class Notifier:
             except asyncio.CancelledError:
                 raise
             except Exception as err:  # noqa: BLE001 - poller must survive
-                _LOGGER.error("Telegram poll error: %s", err)
+                await self._telegram_connection(False)
+                _LOGGER.error("Telegram poll error (%s)", type(err).__name__)
                 await asyncio.sleep(15)
+
+    async def _telegram_connection(self, connected):
+        if self.telegram_connected != connected:
+            self.telegram_connected = connected
+            await self._log('info', 'חיבור קבלת הפעולות מטלגרם פעיל' if connected else
+                            'חיבור קבלת הפעולות מטלגרם נותק', channel='telegram_gateway')
 
     async def _handle_tg_callback(self, cq: dict) -> None:
         tg = self.settings.telegram
         want = str(tg.get("chat_id") or "")
         got = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
-        if not want or not got or got != want:
+        if not want or not got or got not in self.settings.allowed_notification_targets("telegram"):
             # a press from a chat this bot was not configured for: the prompt
             # id is the only thing take_prompt checks, so without this anyone
             # who can see a forwarded button could book or cancel classes
@@ -550,7 +651,7 @@ class Notifier:
             await self._log("warn", "לחיצה מצ׳אט לא מוכר נדחתה",
                             f"chat_id {got}", channel="telegram")
             return
-        if want.startswith("-"):
+        if got.startswith("-"):
             # a group: Telegram gives every member the same buttons, and there
             # is nothing in the callback that distinguishes them. Said once, in
             # the log, rather than pretended away.
@@ -569,25 +670,26 @@ class Notifier:
         ):
             pass
         # and off the poll loop, so a slow booking cannot stall getUpdates
-        task = asyncio.create_task(self._run_callback(cq.get("data", ""), (cq.get('message') or {}).get('message_id')))
+        task = asyncio.create_task(self._run_callback(cq.get("data", ""), (cq.get('message') or {}).get('message_id'), target=got))
         self._cb_tasks.add(task)
         task.add_done_callback(self._cb_tasks.discard)
 
-    async def _run_callback(self, data: str, message_id: int | None = None) -> None:
+    async def _run_callback(self, data: str, message_id: int | None = None, target: str = "") -> None:
         answer = "🤷"
         if self.on_callback:
             try:
                 answer = await self.on_callback(data, source_channel="telegram")
             except Exception as err:  # noqa: BLE001
-                _LOGGER.error("Callback handler failed: %s", err)
+                _LOGGER.error("Callback handler failed (%s)", type(err).__name__)
+                await self._log('error', 'פעולה מטלגרם נכשלה', type(err).__name__, channel='telegram', source='system')
                 answer = f"שגיאה: {err}"
         # the outcome goes to the chat, where it persists — the popup is gone
         # by the time a booking finishes anyway
         try:
             if isinstance(answer, NotificationReply):
-                await self._send_telegram(answer.text, answer.buttons, force=True, message_id=message_id)
+                await self._send_telegram(answer.text, answer.buttons, force=True, message_id=message_id, **({"target": target} if target else {}))
             else:
-                await self._send_telegram(answer, None, force=True)
+                await self._send_telegram(answer, None, force=True, **({"target": target} if target else {}))
         except RuntimeError:
             pass
 
@@ -597,15 +699,16 @@ class Notifier:
         want = str(tg.get("chat_id") or "")
         got = str((message.get("chat") or {}).get("id", ""))
         text = message.get("text")
-        if not text or not self.on_message or (want and got != want):
+        if not text or not self.on_message or (not want or got not in self.settings.allowed_notification_targets("telegram")):
             return
         try:
             answer = await self.on_message(text, preview_only=not tg.get("enabled"))
         except Exception as err:  # noqa: BLE001
-            _LOGGER.error("Telegram message handler failed: %s", err)
+            _LOGGER.error("Telegram message handler failed (%s)", type(err).__name__)
+            await self._log('error', 'שמירת תשובה מטלגרם נכשלה', type(err).__name__, channel='telegram', source='system')
             answer = "שגיאה בשמירת הסיבה — אפשר לנסות שוב"
         if answer:
             try:
-                await self._send_telegram(answer, None, force=True)
+                await self._send_telegram(answer, None, force=True, target=got)
             except RuntimeError:
                 pass

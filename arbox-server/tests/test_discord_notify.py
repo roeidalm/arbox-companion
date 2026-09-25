@@ -187,3 +187,21 @@ async def test_spaced_broadcast_reaches_both_even_when_answered(settings, monkey
 def test_spacing_validation(settings, value):
     with pytest.raises(ValueError):
         settings.update({'notify': {'delivery_spacing_minutes': value}})
+
+@pytest.mark.asyncio
+async def test_alternate_queue_survives_restart_without_rerouting(settings):
+    from app.notification_context import notification_kind
+    alt=URL+'-alternate'
+    settings.update({'discord':{'routes':{'log':{'target':alt}}}})
+    d=DiscordDelivery(settings,AsyncMock());d.http=Transport(Response(429,{'retry_after':60}))
+    token=notification_kind.set('log')
+    try:await d.deliver('system event',target=alt)
+    finally:notification_kind.reset(token)
+    await d.close()
+    d=DiscordDelivery(settings,AsyncMock());d.http=Transport(Response());d.audit=AsyncMock()
+    try:
+        await d.start();await d.db.execute('UPDATE delivery SET next_attempt=0');await d.db.commit()
+        await d.drain()
+        assert '-alternate' in d.http.calls[0][0]
+        assert d.audit.call_args.args[2:4]==('log','sent')
+    finally:await d.close()

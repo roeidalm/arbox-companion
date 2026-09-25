@@ -141,3 +141,36 @@ HTTPS. It has no reason to touch the operating system, so it cannot.
 The UI is protected by an API key, not a login page. Reach it over a VPN
 (Tailscale, WireGuard) or behind a reverse proxy with its own auth — not by
 forwarding the port from the internet.
+
+## Notification health and destinations
+
+System warnings and errors follow each channel's **System events** selection and
+severity. The warning/error test buttons exercise these same filters; provider
+acceptance does not prove that a phone displayed a push notification.
+
+Under Notifications → Advanced, an optional destination can replace the primary
+for each message type, or receive a copy alongside it. Blank or missing means the
+primary destination. Discord bot destinations are channel IDs; webhook targets
+are supported too. Buttons require the configured bot, guild and authorized user.
+Telegram destinations are numeric chat IDs; HA destinations are webhook URLs.
+Use a bot that already has access to the destination and test it after saving.
+Webhook-only Discord destinations deliver links rather than interactive buttons.
+
+The system log defaults to the current week (Sunday–Saturday, server timezone).
+Date filters and source/severity filters apply to events and counts, while current
+channel status remains independent of the selected historical period. Delivery
+receipts begin when 1.59.0 is installed; earlier errors remain in the activity log.
+
+Connection incidents have a two-minute grace period; confirmed delivery failures
+are checked every 30 seconds. Alerts use other enabled System events channels,
+bypassing delivery spacing. Incidents survive restarts, with at most one reminder
+per six hours after a successful report and a separate recovery notice. Failed
+reporting retries after five minutes and cannot recursively create alerts.
+Old delivery failures leave the current failure indicator after 24 hours, but do
+not generate a recovery notice without a successful delivery. Removed routes are
+excluded from current status. The dashboard shows when all enabled channels fail.
+
+The internal monitor also reports synchronization older than two hours and
+scheduler failures/missed jobs. An external uptime service must monitor
+`/api/health` to detect a complete host or process outage: a stopped server cannot
+send its own alert. Keep that monitoring on a different host/transport.

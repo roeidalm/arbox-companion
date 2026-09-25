@@ -28,8 +28,13 @@ const state = {
   serverTz: undefined,
   lastSchedule: null,
   settingsPane: "profile",
-  logLevel: null,
-  logSource: null,
+  logLevel: new URLSearchParams(location.search).get('level'),
+  logSource: new URLSearchParams(location.search).get('source'),
+  logPeriod: new URLSearchParams(location.search).get('period') || 'week',
+  logAnchor: new URLSearchParams(location.search).get('date_from'),
+  logEnd: new URLSearchParams(location.search).get('date_to'),
+  logCursor: null,
+  logRequest: 0,
   journalMode: "sessions",
   journalData: null,
   journalEntry: null,
@@ -2486,11 +2491,12 @@ $("#journalForm").addEventListener("submit", async (event) => {
 /* ------------------------------------------------------------------ log */
 
 const LEVELS = [
-  { value: "info", label: "הצלחות" },
+  { value: "info", label: "מידע" },
   { value: "warn", label: "אזהרות" },
   { value: "error", label: "שגיאות" },
 ];
 const SOURCES = [
+  { value: "system", label: "מערכת" },
   { value: "watchlist", label: "תזמונים" },
   { value: "autobook", label: "אוטומציות" },
   { value: "booking", label: "הרשמות" },
@@ -2505,14 +2511,33 @@ const EV_ICON = {
   sync: "🔄", quota: "🎟️", studio: "📣", vacation: "🏖️", system: "⚙️",
 };
 
-async function loadLog() {
-  const params = new URLSearchParams();
+async function loadLog(append = false) {
+  const requestId = ++state.logRequest;
+  state.logAnchor ||= studioToday();
+  state.logEnd ||= state.logAnchor;
+  if (!['day','week','month','all','custom'].includes(state.logPeriod)) state.logPeriod = 'week';
+  let range;
+  try { range = ActivityPeriod.range(state.logPeriod, state.logAnchor, state.logEnd); }
+  catch (e) { toast(e.message); return; }
+  const params = new URLSearchParams({period: state.logPeriod, ...range});
+  $('#logPeriod').value = state.logPeriod;
+  $('#logAnchor').value = state.logAnchor;
+  $('#logEnd').value = state.logEnd;
+  $('#logEndLabel').hidden = state.logPeriod !== 'custom';
+  $('#logAnchorLabel').hidden = state.logPeriod === 'all';
+  $('#logPrevious').disabled = $('#logNext').disabled = state.logPeriod === 'all';
+  $('#logRange').textContent = state.logPeriod === 'all' ? 'כל ההיסטוריה' : `${range.date_from} — ${range.date_to} · ${state.serverTz || 'שעון השרת'}`;
   if (state.logLevel) params.set("level", state.logLevel);
   if (state.logSource) params.set("source", state.logSource);
+  if (state.view === 'system') history.replaceState(history.state, '', '/system?' + params);
+  if (append && state.logCursor) params.set('before_id', state.logCursor);
   let d;
   try { d = await api("/api/events?" + params); }
   catch (e) { toast("שגיאה בטעינת פעילות המערכת: " + e.message); return; }
 
+  if (requestId !== state.logRequest) return;
+  state.logCursor = d.next_cursor;
+  $('#logMore').hidden = !d.next_cursor;
   renderStatusStrip(d.status);
   renderChips($("#logLevels"), LEVELS.map((l) => ({
     ...l,
@@ -2522,7 +2547,7 @@ async function loadLog() {
     state.logSource, (v) => { state.logSource = v; loadLog(); });
 
   const list = $("#logList");
-  list.innerHTML = "";
+  if (!append) list.innerHTML = "";
   if (!d.events.length) {
     const empty = document.createElement("div");
     empty.className = "ev";
@@ -2564,6 +2589,20 @@ async function loadLog() {
   }
 }
 
+for (const [id, field] of [['logPeriod','logPeriod'],['logAnchor','logAnchor'],['logEnd','logEnd']]) {
+  $('#' + id).addEventListener('change', e => { state[field] = e.target.value; loadLog(); });
+}
+for (const [id, direction] of [['logPrevious',-1],['logNext',1]]) {
+  $('#' + id).addEventListener('click', () => {
+    try {
+      const moved = ActivityPeriod.move(state.logPeriod, state.logAnchor, state.logEnd, direction);
+      state.logAnchor = moved.anchor; state.logEnd = moved.end; loadLog();
+    } catch (e) { toast(e.message); }
+  });
+}
+$('#logToday').addEventListener('click', () => { state.logAnchor = state.logEnd = studioToday(); if (['all','custom'].includes(state.logPeriod)) state.logPeriod = 'day'; loadLog(); });
+$('#logMore').addEventListener('click', () => loadLog(true));
+
 function renderStatusStrip(st) {
   const el = $("#logStatus");
   el.innerHTML = "";
@@ -2584,10 +2623,18 @@ function renderStatusStrip(st) {
        age != null && age < 120 ? "ok" : "bad");
   for (const [name, label] of [["telegram", "טלגרם"], ["ha", "Home Assistant"], ["discord", "Discord"]]) {
     const c = st.channels[name] || {};
-    cell(label,
-         c.state === "off" ? "כבוי" : c.state === "unconfigured" ? "חסרה הגדרה" : c.state === "disconnected" ? "הבוט מתחבר / מנותק" : c.state === "queued" ? `ממתינות לשליחה: ${c.queued}` : c.state === "ok" ? "תקין" : `נכשל ×${c.failures}`,
-         c.state === "off" ? "off" : c.state === "ok" ? "ok" : "bad");
+    const labels = {off:'כבוי',unconfigured:'חסרה הגדרה',unknown:'אין אישור מסירה עדכני',ok:'מסירה תקינה',failing:'כשל במסירה',queued:'ממתינות לשליחה'};
+    let text = labels[c.state] || c.state;
+    if (name === 'discord' && c.gateway !== 'unused') text += c.gateway === 'connected' ? ' · הבוט מחובר' : ' · הבוט מנותק';
+    if (c.last_success) text += ` · הצלחה: ${c.last_success.replace('T',' ')}`;
+    if (c.last_failure) text += ` · כשל אחרון: ${c.last_failure.replace('T',' ')}`;
+    if (c.failures_24h) text += ` · כשלים ב־24 שעות: ${c.failures_24h}`;
+    if (c.queued) text += ` · בתור: ${c.queued}`;
+    cell(label,text,c.state === 'off' ? 'off' : c.state === 'ok' && c.gateway !== 'disconnected' ? 'ok' : 'bad');
   }
+  const enabled = Object.values(st.channels).filter(c => c.state !== 'off');
+  $('#logAlert').hidden = !enabled.length || !enabled.every(c => ['failing','unconfigured'].includes(c.state));
+  $('#logAlert').textContent = 'לא ניתן לאשר מסירה באף אחד מהערוצים הפעילים. בדקו את הגדרות ההתראות ואת היומן.';
   cell("תזמונים ממתינים", String(st.pending_pins ?? 0));
 }
 
@@ -3383,6 +3430,7 @@ async function loadSettings() {
   $('#discordBotHint').textContent = s.discord.bot_configured ? 'פרטי הבוט מוגדרים. רק המשתמש המורשה יכול לבצע פעולות.' : 'להפעלת כפתורים מלאו טוקן, שרת, ערוץ ומשתמש מורשה. את המזהים מעתיקים ב־Discord במצב מפתחים.';
   $('#discordGuild').value = s.discord.guild_id || '';
   $('#discordChannel').value = s.discord.channel_id || '';
+  renderNotificationRoutes(s);
   $('#discordUser').value = s.discord.allowed_user_id || '';
   $("#discordLogLevel").value = s.discord.log_level || 'error';
   $("#journalDiscord").checked = (s.discord.kinds || []).includes('journal');
@@ -3536,6 +3584,7 @@ async function saveSettings() {
         base_url: $("#baseUrl").value.trim(),
         external_url: $("#externalUrl").value.trim(),
         telegram: {
+          routes: collectNotificationRoutes("telegram"),
           log_level: $("#tgLogLevel").value,
           enabled: $("#tgEnabled").checked,
           bot_token: $("#tgToken").value,
@@ -3543,6 +3592,7 @@ async function saveSettings() {
           kinds: tgKinds.filter((k) => k !== "journal" || $("#journalTelegram").checked),
         },
         ha: {
+          routes: collectNotificationRoutes("ha"),
           log_level: $("#haLogLevel").value,
           enabled: $("#haEnabled").checked,
           webhook_url: $("#haWebhook").value.trim(),
@@ -3550,6 +3600,7 @@ async function saveSettings() {
           kinds: haKinds.filter((k) => k !== "journal" || $("#journalHa").checked),
         },
         discord: {
+          routes: collectNotificationRoutes('discord'),
           bot_token: $('#discordBotToken').value.trim(), guild_id: $('#discordGuild').value.trim(), channel_id: $('#discordChannel').value.trim(), allowed_user_id: $('#discordUser').value.trim(),
           enabled: $('#discordEnabled').checked, webhook_url: $('#discordWebhook').value.trim(),
           log_level: $('#discordLogLevel').value,
@@ -3568,6 +3619,21 @@ async function saveSettings() {
     settingsMsg("נכשל: " + e.message, true);
     return false;
   }
+}
+
+for (const [id, level] of [['testSystemWarning','warn'],['testSystemError','error']]) {
+  $('#' + id).addEventListener('click', async () => {
+    const button = $('#' + id); button.disabled = true;
+    try {
+      if (!await saveSettings()) return;
+      const result = await api('/api/settings/test-system/' + level, {method:'POST'});
+      const names = {discord:'Discord',telegram:'טלגרם',ha:'Home Assistant'};
+      const lines = Object.entries(result.channels).map(([name, status]) => `${names[name]}: ${status.state === 'ok' ? 'השירות אישר מסירה' : status.state === 'queued' ? 'ממתינה בתור' : 'המסירה לא אושרה — ראו יומן מערכת'}`);
+      if (result.filtered.length) lines.push('סוננו לפי ההגדרות: ' + result.filtered.map(n => names[n]).join(', '));
+      $('#testSystemResult').textContent = lines.join(' · ');
+    } catch (e) { $('#testSystemResult').textContent = 'הבדיקה נכשלה: ' + e.message; }
+    finally { button.disabled = false; }
+  });
 }
 
 $("#alarmAdd").addEventListener("click", () => {

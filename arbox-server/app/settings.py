@@ -128,6 +128,11 @@ DEFAULTS: dict = {
 # severity order, low to high — a channel set to "warn" also gets errors
 LOG_LEVELS = ("warn", "error")
 
+NOTIFICATION_KINDS = ("digest", "autobook", "standby", "studio", "latecancel",
+                      "log", "vacation", "attendance", "membership", "journal", "system")
+for _channel in ("telegram", "ha", "discord"):
+    DEFAULTS[_channel]["routes"] = {}
+
 # Kinds added after the first release. An existing install has a stored kinds
 # list that predates them, and _eligible() treats absence as "off", so they
 # would stay silent forever. Each entry names the existing opt-ins that imply
@@ -587,6 +592,9 @@ class Settings:
         discord["managed_bot_secret"] = bool(os.environ.get("ARBOX_DISCORD_BOT_TOKEN_FILE") or os.environ.get("ARBOX_DISCORD_BOT_TOKEN"))
         discord["bot_configured"] = self.discord_bot_configured
         discord["configured"] = self.discord_bot_configured or bool(self.discord_webhook)
+        for config in (ha, discord):
+            config["routes"] = {kind: {**route, "target": "***" if "://" in route.get("target", "") else route.get("target", "")}
+                                for kind, route in config.get("routes", {}).items()}
         return {"registration_timing": self._data["registration_timing"], "discord": discord, "timezone": self.timezone,
                 "retention": self.retention,
                 "blocked_categories": self.blocked_categories,
@@ -608,6 +616,41 @@ class Settings:
 
     def update(self, patch: dict) -> None:
         """Apply a settings patch from the UI. '***' means keep the stored secret."""
+        from urllib.parse import urlsplit
+        from .discord_notify import webhook_url
+        for channel in ("telegram", "ha", "discord"):
+            config = patch.get(channel, {})
+            if not isinstance(config, dict):
+                raise ValueError("הגדרות ערוץ אינן תקינות")
+            if "log_level" in config and config["log_level"] not in LOG_LEVELS:
+                raise ValueError("רמת אירועי המערכת אינה תקינה")
+            if "routes" not in config:
+                continue
+            routes = config["routes"]
+            if not isinstance(routes, dict) or any(k not in NOTIFICATION_KINDS for k in routes):
+                raise ValueError("ניתוב התראות אינו תקין")
+            cleaned = {}
+            for kind, route in routes.items():
+                if not isinstance(route, dict) or set(route) - {"target", "copy"}:
+                    raise ValueError("יעד התראה אינו תקין")
+                target = route.get("target") or ""
+                if not isinstance(target, str) or type(route.get("copy", False)) is not bool:
+                    raise ValueError("יעד התראה אינו תקין")
+                target = target.strip()
+                if target == "***":
+                    target = self._data[channel].get("routes", {}).get(kind, {}).get("target", "")
+                if not target:
+                    continue
+                if channel == "telegram" and not target.lstrip("-").isdigit():
+                    raise ValueError("יעד טלגרם חייב להיות Chat ID מספרי")
+                if channel == "discord" and not target.isdigit():
+                    webhook_url(target)
+                if channel == "ha":
+                    parsed = urlsplit(target)
+                    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+                        raise ValueError("כתובת Webhook אינה תקינה")
+                cleaned[kind] = {"target": target, "copy": route.get("copy", False)}
+            config["routes"] = cleaned
         if "registration_timing" in patch:
             if not isinstance(patch["registration_timing"], dict):
                 raise ValueError("הגדרות הרשמה אינן תקינות")
@@ -752,3 +795,20 @@ class Settings:
             )
             self._data["journal"]["delay_minutes"] = 30
         self.save()
+
+    def notification_targets(self, channel: str, kind: str) -> list[str]:
+        """Empty target means the existing primary destination."""
+        route = self._data[channel].get("routes", {}).get(kind) or {}
+        target = route.get("target") or ""
+        if not target:
+            return [""]
+        primary = self._data[channel].get("channel_id" if channel == "discord" else
+                                          "chat_id" if channel == "telegram" else "webhook_url")
+        if target == primary:
+            return [""]
+        return ["", target] if route.get("copy") else [target]
+
+    def allowed_notification_targets(self, channel: str) -> set[str]:
+        primary = self._data[channel].get("channel_id" if channel == "discord" else "chat_id", "")
+        return {str(primary)} | {r["target"] for r in self._data[channel].get("routes", {}).values()
+                                 if r.get("target")}

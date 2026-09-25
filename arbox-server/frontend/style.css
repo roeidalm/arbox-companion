@@ -816,3 +816,14 @@ legend input { width: auto; }
 .registration-context>summary.planning-warning { color:var(--warn); }
 details.registration-context:not([open]) { padding:2px 0; background:transparent; border:0; margin-top:4px; }
 details.registration-context[open]>summary { margin-bottom:8px; }
+
+/* Keep rarely used routing out of the normal notification setup. */
+#notificationAdvanced > summary, #notificationRoutes summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-weight: 600; }
+.notification-route { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; border-bottom: 1px solid var(--line, #ddd); padding: 8px 0; }
+.notification-route > label:first-child { flex: 1 1 240px; }
+.notification-route input[type=checkbox] { width: auto; }
+.notification-route > label:not(:first-child) { display: flex; gap: 6px; align-items: center; }
+#logStatus .v { font-size: 1em; line-height: 1.7; overflow-wrap: anywhere; }
+#logPeriodControls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+#logAlert { border: 1px solid var(--bad); }
+#logPeriodControls [hidden], #logAlert[hidden], #logMore[hidden] { display: none !important; }

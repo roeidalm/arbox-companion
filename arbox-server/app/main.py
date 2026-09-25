@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_EXECUTED
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
@@ -25,6 +26,7 @@ from .google_calendar_api import router as google_router, HideOAuthQuery
 from .feedback_form import router as feedback_router
 from .arbox_client import ArboxClient, ArboxError
 from .notify import Notifier
+from .notification_health import NotificationHealth
 from .rules import RulesEngine
 from .settings import Settings
 from .store import Store
@@ -103,6 +105,9 @@ async def lifespan(app: FastAPI):
     client = ArboxClient(DATA_DIR, whitelabel=os.environ.get("WHITELABEL", "Arbox"))
     notifier = Notifier(settings)
     notifier.log_event = store.log_event
+    notification_health = NotificationHealth(store, notifier)
+    await notification_health.start()
+    app.state.notification_health = notification_health
     await notifier.discord_delivery.start()
     store.on_event = notifier.push_event
     syncer = Syncer(client, store, settings=settings)
@@ -182,6 +187,18 @@ async def lifespan(app: FastAPI):
     # no-ops instantly unless a late-cancel lead time is configured
     scheduler.add_job(rules_engine.late_cancel_tick, IntervalTrigger(minutes=5))
     scheduler.add_job(google_calendar.sync, IntervalTrigger(minutes=1), id="google_calendar")
+    scheduler.add_job(notification_health.tick, IntervalTrigger(seconds=30), id="notification_health")
+    def report_job(event):
+        if event.job_id == 'notification_health':
+            return
+        failed = event.code in (EVENT_JOB_ERROR, EVENT_JOB_MISSED)
+        job = scheduler.get_job(event.job_id)
+        name = job.name if job else event.job_id
+        task = asyncio.create_task(notification_health.incident('job:' + name,
+                                   failed, 'משימת רקע: ' + name))
+        store._push_tasks.add(task)
+        task.add_done_callback(store._push_tasks.discard)
+    scheduler.add_listener(report_job, EVENT_JOB_ERROR | EVENT_JOB_MISSED | EVENT_JOB_EXECUTED)
     scheduler.start()
     app.state.scheduler = scheduler
     rules_engine.scheduler = scheduler

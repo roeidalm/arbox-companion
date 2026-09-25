@@ -153,3 +153,28 @@ async def test_reason_selection_replaces_whole_menu_without_detached_ack(notifie
     i.message.channel.send.assert_not_awaited()
     i.delete_original_response.assert_awaited_once()
     i.edit_original_response.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_gateway_resume_restores_connected_flag(notifier, monkeypatch):
+    handlers={}; ready=asyncio.Event()
+    class Client:
+        def __init__(self,**kwargs):pass
+        def event(self, fn): handlers[fn.__name__]=fn;return fn
+        async def start(self,token): ready.set();await asyncio.Event().wait()
+        async def close(self):pass
+    monkeypatch.setattr('app.discord_bot.discord.Client',Client)
+    notifier.discord_bot.start()
+    try:
+        await ready.wait()
+        await handlers['on_ready']();assert notifier.discord_bot.connected
+        await handlers['on_disconnect']();assert not notifier.discord_bot.connected
+        await handlers['on_resumed']();assert notifier.discord_bot.connected
+    finally:await notifier.close()
+
+
+def test_alternate_discord_channel_authorization_keeps_user_and_guild_checks(notifier):
+    notifier.settings.update({'discord':{'routes':{'log':{'target':'9'}}}})
+    assert notifier.discord_bot.authorized(interaction(channel=9))
+    assert not notifier.discord_bot.authorized(interaction(channel=9,user=99))
+    assert not notifier.discord_bot.authorized(interaction(channel=9,guild=99))
+    assert not notifier.discord_bot.authorized(interaction(channel=8))

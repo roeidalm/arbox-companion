@@ -1,11 +1,12 @@
 """Evidence-backed membership eligibility. Never infer it from a plan's name.
 
-Only exact, unique category matches are automatic. Unrecognised restrictions
+Exact category names are matched against the studio catalog. Unrecognised restrictions
 remain visible for the account owner to resolve. No registration is performed
 by this module: reading the shop is safe even when a class is already open.
 """
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import re
@@ -22,15 +23,22 @@ def normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
-def resolve_categories(names: list[str], catalog: list[dict]) -> tuple[list[int], list[str]]:
-    """Only a unique exact normalized name establishes a category's identity."""
+def resolve_categories(names: list[str], catalog: list[dict], *, complete_duplicates: bool = False) -> tuple[list[int], list[str]]:
+    """Resolve exact names; repeated shop entries can cover all namesakes.
+
+    A single ambiguous entry never grants every matching ID. Duplicate coverage
+    requires exactly as many shop entries as distinct catalog IDs. Rejection
+    text and denial clearing retain unique-name matching.
+    """
     index = {}
     for cat in catalog:
         index.setdefault(normalized(cat["name"]), set()).add(cat["id"])
+    counts = Counter(normalized(name) for name in names)
     ids, unmatched = set(), []
     for name in names:
         matches = index.get(normalized(name), set())
-        if len(matches) == 1:
+        if len(matches) == 1 or (complete_duplicates and matches
+                                 and counts[normalized(name)] == len(matches)):
             ids.update(matches)
         else:
             unmatched.append(name)
@@ -99,7 +107,8 @@ class MembershipPolicy:
         ids = list(saved.get("category_ids") or []) if saved.get("source") == "manual" else []
         unmatched = []
         if saved.get("source") != "manual":
-            ids, unmatched = resolve_categories(saved.get("category_names") or [], catalog)
+            ids, unmatched = resolve_categories(saved.get("category_names") or [], catalog,
+                                                complete_duplicates=saved.get("source") == "shop")
         else:
             known = {c["id"] for c in catalog}
             unmatched = [str(cid) for cid in ids if cid not in known]

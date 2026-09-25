@@ -1,7 +1,7 @@
 """One ledger for display and booking gates; no upstream IO or plan-name guesses."""
 from __future__ import annotations
 
-from .membership_policy import eligible, period_bounds
+from .membership_policy import eligible, period_bounds, normalized
 
 
 REASONS = {
@@ -128,7 +128,14 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
             reason = reason or ("sync_pending" if any(m.get("policy", {}).get("state") == "sync_pending" for m in possible) else "needs_review" if unverified_capacity else "no_capacity" if allowed else "needs_review" if any(
                 m.get("policy", {}).get("state") != "ready" or
                 m.get("policy", {}).get("unmatched") for m in possible) else "no_membership")
-            states[str(sid)] = {"state": reason, "reason": REASONS[reason],
+            explanation = REASONS[reason]
+            if reason == "needs_review" and any(
+                normalized(plan.get("category_name") or "") in
+                {normalized(name) for name in m.get("policy", {}).get("unmatched", [])}
+                for m in possible
+            ):
+                explanation = "סוג האימון מופיע במנוי, אך שיוך הקטגוריה טרם אומת — ההרשמה מושהית"
+            states[str(sid)] = {"state": reason, "reason": explanation,
                                 "membership_user_id": explicit}
 
     details = []

@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.60.1
+
+- Resolve repeated shop class names when every same-name category is listed, preserving explicit denials and quota limits.
+- Explain unresolved membership category mapping in paused-registration messages.
+
 ## 1.60.0
 
 Validate recurring automation expectations and simplify attendance feedback.

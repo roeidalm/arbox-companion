@@ -483,3 +483,37 @@ async def test_refresh_reconciles_only_explicit_unambiguous_denials(engine, refr
         # A subsequent explicit rejection is newer evidence and blocks again.
         await reader.learn_rejection(m, session, denial)
         assert not eligible({**m, 'policy': await reader.get(m)}, session)
+
+@pytest.mark.asyncio
+async def test_shop_lists_every_namesake_and_preserves_denials_and_quota(engine):
+    m = (await engine.store.get_meta('memberships'))[0]
+    await engine.store.upsert_sessions([raw(90, 3, box_categories={'id': 3, 'name': 'Class 1'})], box_id=73)
+    saved = {'source': 'shop', 'fingerprint': fingerprint(m), 'categories_known': True,
+             'category_names': ['Class 1', ' Class 1 '],
+             'limits': [{'count': 1, 'period': 'month'}], 'denied_category_ids': [3]}
+    await engine.store.set_meta(engine.membership_policy.key(m['id']), saved)
+    policy = await engine.membership_policy.get(m)
+    assert policy['category_ids'] == [1, 3]
+    assert policy['unmatched'] == []
+    assert eligible({**m, 'policy': policy}, {'category_id': 1})
+    assert not eligible({**m, 'policy': policy}, {'category_id': 3})
+    q = plan_quota([{**m, 'policy': policy}], [], [plan(100), plan(101)], '2026-09')
+    assert q['plan_states']['100']['state'] == 'ready'
+    assert q['plan_states']['101']['state'] == 'no_capacity'
+    # A partial list remains ambiguous; rejection text cannot grant duplicates.
+    for source, names in [('shop', ['Class 1']), ('rejection', ['Class 1', 'Class 1'])]:
+        await engine.store.set_meta(engine.membership_policy.key(m['id']),
+                                   {**saved, 'source': source, 'category_names': names})
+        policy = await engine.membership_policy.get(m)
+        assert not eligible({**m, 'policy': policy}, {'category_id': 1})
+        q = plan_quota([{**m, 'policy': policy}], [],
+                       [plan(100, category_name='Class 1')], '2026-09')
+        assert 'שיוך הקטגוריה' in q['plan_states']['100']['reason']
+
+
+def test_duplicate_category_counts_must_match_distinct_ids():
+    from app.membership_policy import resolve_categories
+    catalog = [{'id': 1, 'name': 'Flex'}, {'id': 1, 'name': 'Flex'},
+               {'id': 2, 'name': 'Flex'}, {'id': 3, 'name': 'Flex'}]
+    assert resolve_categories(['Flex', 'Flex'], catalog, complete_duplicates=True)[0] == []
+    assert resolve_categories(['Flex'] * 3, catalog, complete_duplicates=True) == ([1, 2, 3], [])

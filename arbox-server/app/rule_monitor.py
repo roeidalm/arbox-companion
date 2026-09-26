@@ -150,7 +150,7 @@ class RuleMonitor:
         excluded.update(s['date'] for s in originals if rule_matches(rule, s))
         return excluded
 
-    async def check(self, today=None):
+    async def check(self, today=None, *, deferred=None):
         today = today or date.today()
         rules = [r for r in await self.e.store.list_rules() if r['enabled']]
         if not rules:
@@ -178,20 +178,34 @@ class RuleMonitor:
             for period in periods:
                 period['attention'] = period in due
             fresh = [p for p in due if notices.get(p['start']) != p['state']]
+            incident = sorted({p['state'] for p in due})
+            if (prior.get('signature') == sig and prior.get('incident') == incident
+                    and any(notices.get(p['start']) == p['state'] for p in due)):
+                fresh = []
+            receipt = None
             if fresh:
-                lines = [f"⚠️ בדיקת אוטומציה · {rule['name']}"]
-                for p in fresh:
-                    why = ('לא נמצא אימון שתואם את הבקשה' if p['state'] == 'missing' else
-                           'טרם ניתן לאמת את הלוח וההרשמה אינה מובטחת')
-                    lines.append(f"{p['start']}–{p['end']}: {why}")
-                lines.append('בדקו את הכלל בלשונית האוטומציות; אפשר לעדכן את המחזוריות או להגדיר חופשה.')
-                delivered = await self.e.notifier.send('\n'.join(lines), kind=rule['mode'] if rule['mode']=='autobook' else 'digest')
-                if delivered:
-                    notices.update({p['start']: p['state'] for p in fresh})
+                p = due[0]
+                why = ('לא נמצא אימון שתואם את הבקשה' if p['state'] == 'missing' else
+                       'טרם ניתן לאמת את הלוח וההרשמה אינה מובטחת')
+                text = (f"⚠️ {rule['name']} · {p['start']}–{p['end']}\n{why}"
+                        + (' · הפער נמשך גם בתקופות נוספות' if len(due) > 1 else '')
+                        + '\nפירוט ותיקון בלשונית האוטומציות.')
+                if deferred is not None:
+                    receipt = {'text': text, 'key': key}
+                elif await self.e.notifier.send(text, kind=rule['mode'] if rule['mode']=='autobook' else 'digest'):
+                    notices.update({p['start']: p['state'] for p in due})
+                    prior['incident'] = incident
+                    prior['signature'] = sig
             # Re-arm resolved periods if they disappear again later.
             for p in periods:
                 if p['state'] in ('matched', 'closed', 'skipped'):
                     notices.pop(p['start'], None)
-            await self.e.store.set_meta(key, {'anchor': rule['recurrence_anchor'], 'signature': sig,
+            state = {'anchor': rule['recurrence_anchor'], 'signature': sig,
                 'checked_at': datetime.now().isoformat(), 'periods': periods, 'notices': notices,
-                'published_through': snapshot['published_through'], 'lead_days': lead_days})
+                'published_through': snapshot['published_through'], 'lead_days': lead_days,
+                'incident': prior.get('incident') if due and prior.get('signature') == sig else []}
+            await self.e.store.set_meta(key, state)
+            if receipt is not None:
+                receipt['value'] = {**state, 'incident': incident,
+                    'notices': {**notices, **{p['start']: p['state'] for p in due}}}
+                deferred.append(receipt)

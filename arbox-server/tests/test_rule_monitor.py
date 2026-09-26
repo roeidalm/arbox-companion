@@ -168,7 +168,9 @@ async def test_unknown_schedule_warns_before_long_registration_window(monitor):
     await monitor.e.store.set_meta(monitor.key(1)+':validation', {'lead_days':16})
     await monitor.check(TODAY)
     text = monitor.e.notifier.send.await_args.args[0]
-    assert '2026-10-12' in text
+    assert '2026-09-28' in text and '2026-10-12' not in text
+    state = await monitor.e.store.get_meta(monitor.key(1))
+    assert any(p['start'] == '2026-10-12' and p['attention'] for p in state['periods'])
     assert 'טרם ניתן לאמת' in text
 
 
@@ -180,3 +182,19 @@ async def test_creation_detects_incorrect_weekly_cadence(monitor):
     assert result['state'] == 'partial'
     result = await monitor.validate({**RULE, 'recurrence_weeks':2}, TODAY)
     assert result['state'] == 'verified'
+
+async def test_deferred_monitor_waits_for_delivery_and_compacts_continuing_gap(monitor):
+    monitor.snapshot.return_value.update(
+        sessions=[session((TODAY+timedelta(days=7*i)).isoformat(), coach='Other') for i in range(8)],
+        published_through='2026-11-16')
+    receipts = []
+    await monitor.check(TODAY, deferred=receipts)
+    monitor.e.notifier.send.assert_not_awaited()
+    assert len(receipts) == 1 and receipts[0]['text'].count('לא נמצא') == 1
+    retry = []
+    await monitor.check(TODAY, deferred=retry)
+    assert len(retry) == 1
+    await monitor.e.store.set_meta(retry[0]['key'], retry[0]['value'])
+    later = []
+    await monitor.check(TODAY+timedelta(days=7), deferred=later)
+    assert later == []

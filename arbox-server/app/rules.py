@@ -1082,13 +1082,17 @@ class RulesEngine:
             # not resend the daily message when delivery outcome is uncertain.
             await self.store.set_meta(key, today)
             # Recurring expectations exist even when no schedule ID matches.
-            # Each monitor owns its delivery deduplication and retry state.
+            # Collect reminders; acknowledge them only after the combined send.
+            deferred = []
             for monitor in (self.rule_monitor, self.balance_reminder):
                 try:
-                    await monitor.check()
+                    await monitor.check(deferred=deferred)
                 except Exception:
                     _LOGGER.exception("Nightly monitor failed")
-            await self._nightly_digest()
+            delivered = await self._nightly_digest(extra_sections=[r["text"].split("\n") for r in deferred])
+            if delivered:
+                for receipt in deferred:
+                    await self.store.set_meta(receipt["key"], receipt["value"])
 
     async def _daily_personal_review(self):
         today = date.today().isoformat()
@@ -1140,7 +1144,7 @@ class RulesEngine:
         await self.store.set_meta(self.membership_policy.key(0) + ':daily_mine_checked_at', datetime.now().isoformat())
         return (['🔄 שינויים באימונים שלך'] + lines if lines else []), problems
 
-    async def _nightly_digest(self) -> None:
+    async def _nightly_digest(self, extra_sections=None) -> bool:
         """One evening message with independent tomorrow and booking sections.
 
         The first section is a reminder about commitments on the next day and
@@ -1165,7 +1169,9 @@ class RulesEngine:
             and s.get("user_in_standby") is not None
         ]
 
-        sections: list[list[str]] = [changes] if changes else []
+        sections: list[list[str]] = list(extra_sections or [])
+        if changes:
+            sections.append(changes)
         if booked_next_day:
             sections.append(
                 ["📌 מחר"]
@@ -1329,6 +1335,7 @@ class RulesEngine:
                 len(matches) + len(covered), next_day)
         else:
             _LOGGER.warning("Nightly message delivery failed")
+        return bool(delivered)
 
     async def _digest_buttons(
         self, sessions: list[dict], dry_run: bool = False,

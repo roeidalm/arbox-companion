@@ -9,7 +9,7 @@ class BalanceReminder:
     def __init__(self, engine):
         self.e = engine
 
-    async def check(self, today=None):
+    async def check(self, today=None, *, deferred=None):
         config = getattr(self.e.settings, 'balance_reminder', {})
         if not config.get('enabled'):
             return
@@ -40,5 +40,8 @@ class BalanceReminder:
                     f"כבר נלקחו בחשבון {member.get('reserved', 0)} הרשמות, "
                     f"{member.get('planned', 0)} אימונים מתוכננים ו־{member.get('standby', 0)} בהמתנה.\n"
                     "כדאי לפזר את האימונים שנותרו לאורך התקופה.")
-            if await self.e.notifier.send(text, kind='membership'):
-                await self.e.store.set_meta(key, {'sent_at': datetime.now().isoformat(), 'free_entries': free})
+            value = {'sent_at': datetime.now().isoformat(), 'free_entries': free}
+            if deferred is not None:
+                deferred.append({'text': text, 'key': key, 'value': value})
+            elif await self.e.notifier.send(text, kind='membership'):
+                await self.e.store.set_meta(key, value)

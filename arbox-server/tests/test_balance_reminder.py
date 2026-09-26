@@ -85,3 +85,14 @@ async def test_card_balance_does_not_subtract_existing_bookings_twice(reminder):
     reminder.e.quota_status.return_value = q
     await reminder.check(date(2026, 9, 16))
     assert '5 כניסות פנויות' in reminder.e.notifier.send.await_args.args[0]
+
+async def test_balance_is_not_acknowledged_before_combined_delivery(reminder):
+    receipts = []
+    await reminder.check(date(2026, 9, 16), deferred=receipts)
+    reminder.e.notifier.send.assert_not_awaited()
+    assert len(receipts) == 1
+    assert not await reminder.e.store.get_meta(receipts[0]['key'])
+    await reminder.e.store.set_meta(receipts[0]['key'], receipts[0]['value'])
+    retry = []
+    await reminder.check(date(2026, 9, 17), deferred=retry)
+    assert retry == []

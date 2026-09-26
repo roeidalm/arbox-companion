@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.60.2
+
+- Combine recurring-rule warnings and unused-entry reminders with the nightly digest, using its notification routing.
+- Summarize each rule once with its nearest affected period; keep all periods in the app and suppress repeats for continuing incidents.
+- Acknowledge reminders only after successful combined delivery.
+
 ## 1.60.1
 
 - Resolve repeated shop class names when every same-name category is listed, preserving explicit denials and quota limits.

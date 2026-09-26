@@ -1094,3 +1094,28 @@ async def test_feedback_replaces_attendance_only_with_usable_route(level, channe
     await engine.attendance_tick()
     assert len(notifier.sent) == expected
     assert len(store.prompts) == expected
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('delivered', [False, True])
+async def test_nightly_combines_monitors_and_acknowledges_only_delivered(monkeypatch, delivered):
+    fixed_digest_clock(monkeypatch)
+    store = DigestStore({}, [])
+    notifier = DigestNotifier()
+    notifier.send = AsyncMock(return_value=delivered)
+    engine = RulesEngine(store, object(), DigestSyncer(), notifier)
+    engine.quota_status = AsyncMock(return_value=None)
+    async def rules_check(*, deferred):
+        deferred.append({'text': 'Rule needs review', 'key': 'rule-receipt', 'value': 'sent'})
+    async def balance_check(*, deferred):
+        deferred.append({'text': 'Unused entries', 'key': 'balance-receipt', 'value': 'sent'})
+    engine.rule_monitor.check = rules_check
+    engine.balance_reminder.check = balance_check
+    await engine.nightly_digest()
+    notifier.send.assert_awaited_once()
+    text = notifier.send.await_args.args[0]
+    assert 'Rule needs review' in text and 'Unused entries' in text
+    assert notifier.send.await_args.kwargs['kind'] == 'digest'
+    assert bool(await store.get_meta('rule-receipt')) is delivered
+    assert bool(await store.get_meta('balance-receipt')) is delivered
+    await engine.nightly_digest()
+    notifier.send.assert_awaited_once()

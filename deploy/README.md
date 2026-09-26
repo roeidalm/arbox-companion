@@ -187,20 +187,18 @@ which matching workouts the booking rule can book.
 
 Before the nightly digest, active booking and notification rules are checked
 independently of schedule IDs, using a read-only upstream request covering up to
-62 days. Published periods with no match are reported through the rule's existing
-notification channels. Empty days inside that published horizon are exempt;
+62 days. Published periods with no match are summarized once per rule in the combined nightly digest. Empty days inside that published horizon are exempt;
 a completely empty response or the unpublished tail is unverified, not a closure.
 If verification is still unavailable before the expected registration window
 (known advance notice plus a day, at least eight days), an uncertainty alert is sent. Holidays do not need a separate calendar. Configured
 vacations and explicit occurrence decisions are respected. Each incident is
-reported once per state and period after successful delivery, including across
-restarts. The rule card can suppress a period's missing-workout check without
+acknowledged only after successful digest delivery, including across restarts.
+Overlapping periods of the same continuing incident do not produce new pushes. The rule card can suppress a period's missing-workout check without
 changing bookings or disabling the rule.
 
 Notifications settings also offer an opt-in, studio-specific balance reminder:
 lead time (1–60 days) and an inclusive free-entry threshold. Monthly memberships
 use their calendar-month end (or earlier expiry); cards use their expiry. The
 existing quota ledger subtracts reservations, waitlists and allocated plans once.
-Only verified balances produce reminders. Delivery uses the selected Membership
-updates channels, with one successful reminder per membership period; failed
+Only verified balances produce reminders. Delivery is included in the nightly digest and uses its channels, with one successful reminder per membership period; failed
 sends retry on the next nightly run. This reminder never books a workout.

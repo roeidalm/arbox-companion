@@ -9,7 +9,7 @@
 # repo: the tag is republished whenever Alpine moves, and two builds of the
 # same git tag could otherwise ship different system libraries. Renovate keeps
 # the digest current (docker:pinDigests).
-FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b728874824e6c0a27cb96fc AS test
+FROM python:3.14-alpine@sha256:2e740b2c28a426e74f11396c05e38afb3191acced75045b8d62df573c1dc8ce8 AS test
 
 # Tests have their own fully hashed dependency graph. This stage is disposable:
 # pytest, httpx2 and their transitive dependencies are never inherited by the
@@ -32,7 +32,7 @@ RUN python -m pytest
 
 # Start again from the pristine base, not from `test`: only runtime packages
 # cross this boundary into the image users pull.
-FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b728874824e6c0a27cb96fc AS runtime
+FROM python:3.14-alpine@sha256:2e740b2c28a426e74f11396c05e38afb3191acced75045b8d62df573c1dc8ce8 AS runtime
 
 # The lock, not the six top-level pins: those left starlette, pydantic, yarl
 # and the rest floating, so two builds of the same git tag could ship

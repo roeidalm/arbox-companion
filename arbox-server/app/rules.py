@@ -726,7 +726,7 @@ class RulesEngine:
                     continue
                 policy = await self.membership_policy.get(member)
                 # Explicit evidence/manual decisions are never probed again.
-                if (policy.get("categories_known") or not policy.get("quota_known")
+                if (eligible({**member, 'policy': policy}, session) or not policy.get("quota_known")
                         or session['category_id'] in policy.get('confirmed_category_ids', [])
                         or session['category_id'] in policy.get('preflight_category_ids', [])
                         or session['category_id'] in policy.get('denied_category_ids', [])
@@ -752,8 +752,8 @@ class RulesEngine:
                 details = [{**m, "policy": await self.membership_policy.get(m)} for m in members]
                 for d in details:
                     if d["id"] == member["id"]:
-                        d["policy"] = {**policy, "state": "ready", "confirmed_category_ids":
-                            list(set(policy.get('confirmed_category_ids', [])) | {session['category_id']})}
+                        d["policy"] = {**policy, "state": "ready", "preflight_category_ids":
+                            list(set(policy.get('preflight_category_ids', [])) | {session['category_id']})}
                 commitments = await self._quota_commitments(members)
                 pending_key = self.membership_policy.key(0) + ":uncertain"
                 pending = await self.store.get_meta(pending_key) or {}

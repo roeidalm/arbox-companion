@@ -109,6 +109,18 @@ class MembershipPolicy:
         if saved.get("source") != "manual":
             ids, unmatched = resolve_categories(saved.get("category_names") or [], catalog,
                                                 complete_duplicates=saved.get("source") == "shop")
+            # A booking rejection concerns one category. Keep the independent
+            # shop evidence, including exact IDs, for the unchanged membership.
+            if current:
+                for section in saved.get('evidence') or []:
+                    if normalized(str(section.get('header') or '')) != 'available classes':
+                        continue
+                    shop_ids, _ = resolve_categories(section.get('values') or [], catalog,
+                                                    complete_duplicates=True)
+                    exact = section.get('box_category_ids')
+                    if isinstance(exact, list) and all(type(cid) is int and cid > 0 for cid in exact):
+                        shop_ids.extend(exact)
+                    ids.extend(shop_ids)
         else:
             known = {c["id"] for c in catalog}
             unmatched = [str(cid) for cid in ids if cid not in known]
@@ -226,7 +238,7 @@ class MembershipPolicy:
             return False
         key = self.key(member['id'])
         policy = await self.get(member)
-        if (policy.get('categories_known') or policy.get('contradiction')
+        if (policy.get('contradiction')
                 or policy.get('source') == 'manual'
                 or session['category_id'] in policy.get('denied_category_ids', [])):
             return False
@@ -250,7 +262,7 @@ class MembershipPolicy:
         key = self.key(member["id"])
         state = await self.store.get_meta(key) or {}
         if state.get('fingerprint') != fingerprint(member):
-            state.pop('preflight_categories', None)
+            state = {}
         value = message.get("value") or {}
         names = [s.strip() for s in str(value.get("allowedText") or "").splitlines() if s.strip()]
         state.update(fingerprint=fingerprint(member), verified_at=time.time(),
@@ -316,6 +328,7 @@ def eligible(member: dict, session: dict) -> bool:
         allowed.update(policy.get('category_ids', []))
     else:
         allowed.update(policy.get('confirmed_category_ids', []))
+    if policy.get('source') != 'manual':
         allowed.update(policy.get('preflight_category_ids', []))
     return bool(policy.get("state") == "ready"
                 and session.get('category_id') in allowed

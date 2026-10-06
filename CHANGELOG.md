@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.60.4
+
+- Preserve independent shop category evidence when another class is rejected; use exact category IDs when supplied.
+- Check unresolved categories individually and retain successful early checks alongside known categories.
+- Show explicit Arbox category denials separately from missing verification.
+
 ## 1.60.3
 
 - Learn membership eligibility from confirmed upstream bookings with matching membership, studio and category IDs, even when shop names are outdated.

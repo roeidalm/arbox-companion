@@ -98,3 +98,40 @@ async def test_old_explicit_categories_survive_failed_or_missing_metadata(engine
         {"header":"Available Classes","values":["Class 2"]}]}
     await engine.membership_policy.refresh([m])
     assert not eligible({**m,"policy":await engine.membership_policy.get(m)},s)
+
+@pytest.mark.asyncio
+async def test_missing_category_is_probed_despite_partial_shop_list(engine):
+    m=(await engine.store.get_meta('memberships'))[1]
+    await engine.store.set_meta(engine.membership_policy.key(20), {
+        'fingerprint':fingerprint(m), 'source':'shop', 'categories_known':True,
+        'category_names':['Class 2'], 'checked_at':time.time()})
+    await engine.store.watch(77,membership_user_id=20)
+    engine.client.book.side_effect=ArboxError('early',status=425,body={'error':{'messageToUser':[TIME]}})
+    await engine.preflight_plans()
+    await engine.preflight_plans()
+    engine.client.book.assert_awaited_once_with(77,20)
+    assert (await engine.quota_status())['plan_states']['77']['state']=='ready'
+
+@pytest.mark.asyncio
+async def test_shop_ids_survive_unrelated_denial_and_reader_restart(engine):
+    from app.membership_policy import MembershipPolicy
+    m=(await engine.store.get_meta('memberships'))[1]
+    key=engine.membership_policy.key(20)
+    await engine.store.set_meta(key, {
+        'fingerprint':fingerprint(m), 'source':'shop', 'categories_known':True,
+        'category_names':['Old name'], 'evidence':[
+            {'header':'Available Classes','values':['Old name'],'box_category_ids':[1,2]}]})
+    await engine.membership_policy.learn_rejection(m,{'category_id':2},ArboxError('denied',status=425,
+        body={'error':{'messageToUser':[{'name':'classTypeRestricts','value':{'allowedText':'Old name'}}]}}))
+    reader=MembershipPolicy(engine.store,engine.client,engine.syncer)
+    p=await reader.get(m)
+    assert eligible({**m,'policy':p},{'category_id':1})
+    assert not eligible({**m,'policy':p},{'category_id':2})
+    await engine.store.watch(77,membership_user_id=20)
+    await engine.preflight_plans()
+    engine.client.book.assert_not_awaited()
+    changed={**m,'end':'2026-12-01'}
+    assert not eligible({**changed,'policy':await reader.get(changed)},{'category_id':1})
+    await reader.learn_rejection(changed,{'category_id':2},ArboxError('denied',status=425,
+        body={'error':{'messageToUser':[{'name':'classTypeRestricts','value':{}}]}}))
+    assert not eligible({**changed,'policy':await reader.get(changed)},{'category_id':1})

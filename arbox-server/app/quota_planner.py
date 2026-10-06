@@ -129,7 +129,12 @@ def plan_quota(members: list[dict], commitments: list[dict], plans: list[dict],
                 m.get("policy", {}).get("state") != "ready" or
                 m.get("policy", {}).get("unmatched") for m in possible) else "no_membership")
             explanation = REASONS[reason]
-            if reason == "needs_review" and any(
+            if not allowed and possible and all(
+                plan.get('category_id') in m.get('policy', {}).get('denied_category_ids', [])
+                for m in possible
+            ) and reason not in ('uncertain', 'unattributed', 'sync_pending'):
+                explanation = "Arbox דחה את סוג האימון עבור המנוי — נדרש בירור מול הסטודיו"
+            elif reason == "needs_review" and any(
                 normalized(plan.get("category_name") or "") in
                 {normalized(name) for name in m.get("policy", {}).get("unmatched", [])}
                 for m in possible

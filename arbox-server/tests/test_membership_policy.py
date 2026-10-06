@@ -517,3 +517,41 @@ def test_duplicate_category_counts_must_match_distinct_ids():
                {'id': 2, 'name': 'Flex'}, {'id': 3, 'name': 'Flex'}]
     assert resolve_categories(['Flex', 'Flex'], catalog, complete_duplicates=True)[0] == []
     assert resolve_categories(['Flex'] * 3, catalog, complete_duplicates=True) == ([1, 2, 3], [])
+
+@pytest.mark.asyncio
+async def test_exact_upstream_booking_covers_new_category_without_name_inference(engine):
+    m = (await engine.store.get_meta('memberships'))[0]
+    saved = {'source': 'shop', 'fingerprint': fingerprint(m), 'categories_known': True,
+             'category_names': ['Old name'], 'limits': [{'count': 1, 'period': 'month'}]}
+    await engine.store.set_meta(engine.membership_policy.key(m['id']), saved)
+    row = {'id': 77, 'date': '2026-09-20', 'box_fk': 73, 'membership_user_fk': m['id'],
+           'user_booked': 1234, 'box_category_fk': 999, 'box_categories': {'id': 999, 'name': 'New name'}}
+    groups = {'past': [row], 'future': [], 'lateCancellation': []}
+    await engine.membership_policy.learn_booked_categories(m, groups)
+    policy = await MembershipPolicy(engine.store, engine.client, engine.syncer).get(m)
+    assert eligible({**m, 'policy': policy}, {'category_id': 999})
+    assert not eligible({**m, 'policy': policy}, {'category_id': 998, 'category_name': 'New name'})
+    q = plan_quota([{**m, 'policy': policy}], [], [plan(100, cat=999), plan(101, cat=999)], '2026-09')
+    assert q['plan_states']['100']['state'] == 'ready'
+    assert q['plan_states']['101']['state'] == 'no_capacity'
+    changed = {**m, 'end': '2027-01-01'}
+    assert not eligible({**changed, 'policy': await engine.membership_policy.get(changed)}, {'category_id': 999})
+    state = await engine.store.get_meta(engine.membership_policy.key(m['id']))
+    await engine.store.set_meta(engine.membership_policy.key(m['id']), {**state, 'denied_category_ids': [999]})
+    assert not eligible({**m, 'policy': await engine.membership_policy.get(m)}, {'category_id': 999})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('patch', [
+    {'membership_user_fk': 99999}, {'box_fk': 74}, {'user_booked': None},
+    {'box_category_fk': 998}, {'box_categories': {}}, {'date': '2000-01-01'},
+])
+async def test_booking_evidence_rejects_unproven_identity(engine, patch):
+    m = (await engine.store.get_meta('memberships'))[0]
+    await engine.store.set_meta(engine.membership_policy.key(m['id']), {
+        'source': 'shop', 'fingerprint': fingerprint(m), 'categories_known': True,
+        'category_names': [], 'limits': [{'count': 5, 'period': 'month'}]})
+    row = {'id': 77, 'date': '2026-09-20', 'box_fk': 73, 'membership_user_fk': m['id'],
+           'user_booked': 1234, 'box_category_fk': 999, 'box_categories': {'id': 999}}
+    await engine.membership_policy.learn_booked_categories(m, {'past': [{**row, **patch}]})
+    assert not eligible({**m, 'policy': await engine.membership_policy.get(m)}, {'category_id': 999})

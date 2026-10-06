@@ -7,6 +7,16 @@ from test_api import client, api_key
 from app.external_cancellations import notify_pending, callback, save_reason
 
 
+@pytest.fixture(autouse=True)
+def cancellation_clock(monkeypatch):
+    # Fixtures describe September bookings; elapsed wall time must not age them out.
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 9, 25)
+    monkeypatch.setattr('app.external_cancellations.date', FixedDate)
+
+
 @pytest.mark.asyncio
 async def test_late_cancel_import_preserves_reason_and_counts_once(engine):
     s = engine.store

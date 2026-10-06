@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.60.3
+
+- Learn membership eligibility from confirmed upstream bookings with matching membership, studio and category IDs, even when shop names are outdated.
+- Preserve explicit restrictions, membership revision checks and quota limits.
+
 ## 1.60.2
 
 - Combine recurring-rule warnings and unused-entry reminders with the nightly digest, using its notification routing.

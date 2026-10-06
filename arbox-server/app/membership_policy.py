@@ -125,18 +125,50 @@ class MembershipPolicy:
         preflight = [int(cid) for cid, evidence in (saved.get('preflight_categories') or {}).items()
                      if current and not saved.get('contradiction')
                      and 0 < evidence.get('at', 0) <= time.time()]
+        booked = [int(cid) for cid in saved.get('booked_categories', {})]
+        if not current or saved.get('contradiction') or saved.get('source') == 'manual':
+            booked = []
         return {
             **saved, "fingerprint": fingerprint(member), "category_ids": sorted(set(ids)),
             "categories_known": category_known, "quota_known": quota_known,
             "limits": limits, "unmatched": unmatched,
             "confirmed_category_ids": confirmed,
+            "booked_category_ids": booked,
             "preflight_category_ids": preflight,
-            "state": "ready" if (category_known or confirmed or preflight) and quota_known else "needs_review",
+            "state": "ready" if (category_known or confirmed or preflight or booked) and quota_known else "needs_review",
             "reason": ("פרטי המנוי השתנו — נדרש אימות מחדש" if saved and not current else
                        "השרת דחה את ההגדרה — נדרש לבדוק את ההתאמה" if saved.get("contradiction") else
-                       "נדרשת השלמת סוגי השיעורים המותרים" if not category_known else
+                       "נדרשת השלמת סוגי השיעורים המותרים" if not category_known and not booked else
                        "נדרשת השלמת המכסה והתקופה" if not quota_known else ""),
         }
+
+    async def learn_booked_categories(self, member: dict, groups: dict) -> None:
+        """Learn exact IDs only from the account's upstream membership history."""
+        key = self.key(member['id'])
+        saved = await self.store.get_meta(key) or {}
+        if (saved.get('fingerprint') != fingerprint(member)
+                or saved.get('source') == 'manual' or saved.get('contradiction')):
+            return
+        evidence = dict(saved.get('booked_categories') or {})
+        for group in ('past', 'future'):
+            for row in groups.get(group, []):
+                cid = row.get('box_category_fk')
+                nested = row.get('box_categories') or {}
+                if (row.get('membership_user_fk') != member['id']
+                        or row.get('box_fk') != self.store.active_box_id
+                        or type(cid) is not int or cid <= 0
+                        or not isinstance(nested, dict) or nested.get('id') != cid
+                        or type(row.get('user_booked')) is not int or row['user_booked'] <= 0
+                        or not row.get('id') or not row.get('date')
+                        or (member.get('start') and row['date'] < member['start'])
+                        or (member.get('end') and row['date'] > member['end'])):
+                    continue
+                evidence[str(cid)] = {'schedule_id': row['id'], 'booking_id': row['user_booked'],
+                    'membership_user_id': member['id'], 'category_id': cid,
+                    'box_id': self.store.active_box_id, 'date': row['date']}
+        if evidence != saved.get('booked_categories', {}):
+            await self.store.set_meta(key, {**saved, 'booked_categories': evidence})
+            await self.store.set_meta('quota_cache', None)
 
     async def refresh(self, memberships: list[dict]) -> None:
         """Read each unchanged membership at most daily, including failed reads."""
@@ -279,8 +311,12 @@ class MembershipPolicy:
 
 def eligible(member: dict, session: dict) -> bool:
     policy = member.get("policy") or {}
+    allowed = set(policy.get('booked_category_ids', []))
+    if policy.get('categories_known', True):
+        allowed.update(policy.get('category_ids', []))
+    else:
+        allowed.update(policy.get('confirmed_category_ids', []))
+        allowed.update(policy.get('preflight_category_ids', []))
     return bool(policy.get("state") == "ready"
-                and session.get('category_id') in (policy.get('category_ids', [])
-                    if policy.get('categories_known', True) else [*policy.get('confirmed_category_ids', []),
-                                                                *policy.get('preflight_category_ids', [])])
+                and session.get('category_id') in allowed
                 and session.get("category_id") not in policy.get("denied_category_ids", []))

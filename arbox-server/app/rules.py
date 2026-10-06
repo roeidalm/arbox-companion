@@ -635,6 +635,7 @@ class RulesEngine:
                 try:
                     groups = await self.client.membership_schedules(member["id"])
                     await self.store.reconcile_membership_history(member["id"], groups)
+                    await self.membership_policy.learn_booked_categories(member, groups)
                     evidence["ok"] = True
                     evidence['charges'] = [
                         {'schedule_id': r['id'], 'date': r['date'], 'membership_user_id': member['id'],

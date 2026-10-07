@@ -111,10 +111,10 @@ class Notifier:
         # discovery is live Arbox state, not user-entered configuration.
         self.studio_context: Callable[[], tuple[str | None, int]] | None = None
 
-    def _with_studio(self, text: str) -> str:
-        if not self.studio_context:
+    def _with_studio(self, text: str, studio=None) -> str:
+        if studio is None and not self.studio_context:
             return text
-        name, count = self.studio_context()
+        name, count = studio if studio is not None else self.studio_context()
         if count > 1 and name:
             return f"📍 {name}\n{text}"
         return text
@@ -211,7 +211,7 @@ class Notifier:
     LEVEL_HE = {"warn": "אזהרה", "error": "שגיאה"}
 
     async def push_event(self, level: str, source: str, message: str,
-                         detail: str | None = None) -> None:
+                         detail: str | None = None, *, studio=None) -> None:
         """Announce one event-log entry, per channel, per severity.
 
         Not routed through send(): the "log" kind is filtered a second time by
@@ -229,7 +229,7 @@ class Notifier:
                 f" · {message}")
         if detail:
             text += f"\n{detail}"
-        text = self._with_studio(text)
+        text = self._with_studio(text, studio)
         token = notification_kind.set('log')
         try:
             return await self._send_to(names, text, None, immediate=True)

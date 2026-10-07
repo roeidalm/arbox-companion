@@ -126,3 +126,20 @@ async def test_journal_uses_one_selected_channel_without_escalation(tmp_path):
     assert not notifier._esc_tasks
     settings.update({"ha": {"enabled": False}, "telegram": {"enabled": False}})
     assert notifier.journal_form_channel() is None
+
+
+async def test_deferred_system_event_keeps_originating_studio_label(tmp_path):
+    from unittest.mock import AsyncMock
+    from app.notify import Notifier
+    from app.settings import Settings
+    notifier = Notifier(Settings(str(tmp_path)))
+    notifier._eligible = lambda kind: ['telegram']
+    notifier.settings.wants_log = lambda channel, level: True
+    notifier._send_to = AsyncMock()
+    notifier.studio_context = lambda: ('Moveom', 2)
+    pending = notifier.push_event('error', 'sync', 'Synchronization failed', studio=('Rashty', 2))
+    # The selected panel differs by the time the detached coroutine runs.
+    await pending
+    sent = notifier._send_to.call_args.args[1]
+    assert sent.startswith('📍 Rashty\n')
+    assert 'Moveom' not in sent

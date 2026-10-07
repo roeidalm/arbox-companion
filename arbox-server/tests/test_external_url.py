@@ -17,7 +17,7 @@ def test_redirect_migration_preserves_calendar_and_tokens(client):
     state=client.app.state
     state.settings.update({'base_url':'http://internal.example:8177','external_url':'https://public.example'})
     state.store.active_box_id=73
-    state.client.email='test@example.com'
+    state.client.legacy.email='test@example.com'
     g=state.google_calendar
     p=g.profile()
     p.update(credentials={'client_id':'123.apps.googleusercontent.com','redirect_uri':REDIRECT},

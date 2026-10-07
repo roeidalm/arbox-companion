@@ -130,6 +130,74 @@ def test_temporary_studio_switch_does_not_change_default(tmp_path):
     assert settings.preferred_studio_id == 10
 
 
+def test_background_updates_preserve_selection_on_disk(tmp_path):
+    settings = Settings(str(tmp_path))
+    settings.select_studio(10)
+    settings.update({"preferred_membership_id": 101})
+
+    with settings.background_studio(20):
+        settings.update({"preferred_membership_id": 202, "monthly_quota": 8})
+        assert settings.preferred_membership_id == 202
+        reloaded = Settings(str(tmp_path))
+        assert reloaded.preferred_studio_id == 10
+        assert reloaded.preferred_membership_id == 101
+        assert reloaded._data["studio_membership_preferences"] == {"10": 101, "20": 202}
+        assert reloaded._data["studio_quota_settings"]["20"]["monthly_quota"] == 8
+
+    assert settings._active_studio_id == 10
+    assert settings.preferred_membership_id == 101
+
+
+def test_background_membership_change_for_selected_studio_survives_restoration(tmp_path):
+    settings = Settings(str(tmp_path))
+    settings.select_studio(10)
+    settings.update({"preferred_membership_id": 101})
+
+    with settings.background_studio(10):
+        settings.update({"preferred_membership_id": 102})
+        assert Settings(str(tmp_path)).preferred_membership_id == 102
+    assert settings.preferred_membership_id == 102
+
+    with settings.background_studio(10):
+        settings.update({"preferred_membership_id": None})
+        assert Settings(str(tmp_path)).preferred_membership_id is None
+    assert settings.preferred_membership_id is None
+
+
+def test_nested_background_scopes_keep_original_disk_selection(tmp_path):
+    settings = Settings(str(tmp_path))
+    settings.select_studio(10)
+    settings.update({"preferred_membership_id": 101})
+
+    with settings.background_studio(20):
+        settings.update({"preferred_membership_id": 202})
+        with settings.background_studio(10):
+            settings.update({"preferred_membership_id": 102})
+            reloaded = Settings(str(tmp_path))
+            assert reloaded.preferred_studio_id == 10
+            assert reloaded.preferred_membership_id == 102
+        assert settings._active_studio_id == 20
+        assert settings.preferred_membership_id == 202
+    assert settings._active_studio_id == 10
+    assert settings.preferred_membership_id == 102
+
+
+def test_background_scope_preserves_panel_selection_when_default_differs(tmp_path):
+    settings = Settings(str(tmp_path))
+    settings.select_studio(10)
+    settings.update({"preferred_membership_id": 101})
+    settings.activate_studio(20, previous_box_id=10)
+    settings.update({"preferred_membership_id": 202})
+
+    with settings.background_studio(10):
+        settings.update({"preferred_membership_id": 102})
+        reloaded = Settings(str(tmp_path))
+        assert reloaded.preferred_studio_id == 10
+        assert reloaded.preferred_membership_id == 202
+    assert settings._active_studio_id == 20
+    assert settings.preferred_membership_id == 202
+
+
 def test_ignored_studios_are_normalized(tmp_path):
     settings = Settings(str(tmp_path))
     settings.set_ignored_studios([20, 20, "30"])

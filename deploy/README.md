@@ -87,6 +87,26 @@ integration files into the running HA container.
 uncomment the label at the bottom of the file so it skips this container. The
 server runs SQLite migrations on startup, which is the argument for pinning.
 
+### Safe version before additional studio connections
+
+The production baseline before 1.61.0 is **1.60.5**, commit
+`4e576c99dad0e7a958f279b90eb3848d5a692b10`, retained by the annotated Git tag
+`safe/pre-multi-connections-2026-10-07`. The consistent SQLite backup plus
+settings, credentials and version metadata are stored on `openclaw-vm` in
+`/root/backups/arbox/safe-v1.60.5-before-connections-2026-10-07` (root only).
+
+For a code rollback, pin the managed stack image to
+`ghcr.io/roeidalm/arbox-server:1.60.5`, commit it and run the stack deploy script.
+Additional connections use their own credential files; the original login and
+original studio metadata remain available to that version. Select the original
+studio/default before rolling back. The new prompt column is additive.
+Do not restore an old database for a routine code rollback: that would discard
+new local decisions and history, and would not undo bookings already made in Arbox.
+
+Additional connections are managed under **Settings → Studio**. Discovery
+checks Arbox and saved app names; candidates are enabled explicitly. The nightly
+connection check refreshes saved connections without enrolling new studios.
+
 ### Upgrading past 1.33.0 — one-time permission fix
 
 From 1.33.0 the server runs as `nobody` (uid 65534) instead of root. A volume

@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.61.0
+
+- Connect additional branded Arbox apps from the existing Studio settings and add verified studios to the existing selector.
+- Keep independent credentials per connection and route membership, schedule and booking calls to the verified studio owner.
+- Run background automation for all enabled studios while preserving the selected panel and default membership.
+- Bind notification actions and deferred jobs to their original studio; isolate cached metadata and deduplication state.
+
 ## 1.60.5
 
 - Make explicit membership refresh bypass the daily permission cache while retaining click debouncing.

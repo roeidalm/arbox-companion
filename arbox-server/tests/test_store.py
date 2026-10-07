@@ -116,6 +116,48 @@ async def test_active_studio_scopes_schedule_and_rules(store):
     assert [r["name"] for r in await store.list_rules()] == ["Studio A"]
 
 
+async def test_studio_snapshots_are_isolated_and_legacy_rollback_remains_current(store):
+    store.active_box_id = 10
+    await store.set_meta('identity', {'box_id': 10})
+    await store.set_meta('membership', {'id': 100})
+    await store.set_meta('seen_box_messages', [1])
+    await store.enable_studio_metadata()
+    assert await store.get_meta('membership') == {'id': 100}
+    store.active_box_id = 20
+    assert await store.get_meta('membership') is None
+    assert await store.get_meta('seen_box_messages') is None
+    await store.set_meta('identity', {'box_id': 20})
+    await store.set_meta('membership', {'id': 200})
+    await store.set_meta('seen_box_messages', [2])
+    await store.set_meta('studios', [{'id': 10}, {'id': 20}])
+    store.active_box_id = 10
+    assert await store.get_meta('membership') == {'id': 100}
+    assert await store.get_meta('seen_box_messages') == [1]
+    assert len(await store.get_meta('studios')) == 2
+    await store.set_meta('membership', {'id': 101})
+    store._studio_metadata = False  # version 1.60.5 reads these original keys
+    assert await store.get_meta('identity') == {'box_id': 10}
+    assert await store.get_meta('membership') == {'id': 101}
+
+
+async def test_prompt_studio_survives_selection_and_supports_legacy_tokens(store):
+    store.active_box_id = 10
+    await store.set_meta('identity', {'box_id': 10})
+    await store.enable_studio_metadata()
+    await store.upsert_sessions([raw_session(400, '2026-10-07')], box_id=10)
+    await store.add_prompt('a', 400, 'book', batch_id='batch')
+    await store.add_prompt('legacy', 400, 'book')
+    await store.db.execute('UPDATE pending_prompts SET box_id=NULL WHERE callback_id=?', ('legacy',))
+    await store.db.commit()
+    store.active_box_id = 20
+    await store.add_prompt('b', 0, 'membership_select')
+    assert await store.prompt_studio('a') == 10
+    assert await store.prompt_studio('batch', batch=True) == 10
+    assert await store.prompt_studio('legacy') == 10
+    assert await store.prompt_studio('b') == 20
+    assert await store.prompt_studio('missing') is None
+
+
 async def test_quota_commitments_separate_used_reserved_and_standby(store):
     await store.upsert_sessions([
         raw_session(31, "2026-09-01", time="08:00", user_booked=1,

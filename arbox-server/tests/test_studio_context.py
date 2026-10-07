@@ -70,10 +70,11 @@ async def test_action_waits_for_tick_and_blocks_studio_switch(panel_app):
 
     # Exercise the actual legacy (headerless) selection path, including its
     # outer lock, rather than merely assigning the active studio in the test.
-    syncer.client = SimpleNamespace(profile=AsyncMock(return_value={}))
-    syncer.discover_studios = AsyncMock(return_value=[{"id": 20}])
+    syncer.client = SimpleNamespace(profile=AsyncMock(return_value={
+        "users_boxes": [{"box_fk": 20, "locations_box_fk": 21}]}))
+    syncer.discover_studios = AsyncMock(return_value=[{"id": 20, "location_id": 21}])
     syncer._store_profile = AsyncMock()
-    syncer._store_membership = AsyncMock(return_value={"id": 200})
+    syncer._store_membership = AsyncMock(return_value={"id": 200, "active": True})
     syncer.store.set_meta = AsyncMock()
     syncer.window_sync = AsyncMock()
 

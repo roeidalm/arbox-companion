@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import nullcontext
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Awaitable, Callable
 
@@ -96,6 +98,7 @@ class Syncer:
         profile = profile or await self.client.profile()
         studios = []
         affiliations = []
+        previous_studios = {s['id']: s for s in await self.store.get_meta('studios') or []}
         seen = set()
         ignored = set(self.settings.ignored_studio_ids if self.settings else [])
         for ub in profile.get("users_boxes") or []:
@@ -125,6 +128,8 @@ class Syncer:
                 _LOGGER.warning("Could not inspect memberships for box %s: %s",
                                 box_id, err)
                 affiliations.append({**base, "has_active_membership": None})
+                if box_id in previous_studios:
+                    studios.append({**previous_studios[box_id], 'connection_unavailable': True})
                 continue
             active = [m for m in rows if m.get("active")]
             affiliations.append({**base, "has_active_membership": bool(active)})
@@ -541,41 +546,82 @@ class Syncer:
             profile = await self.client.profile()
             studios = await self.discover_studios(profile)
             selected = next((x for x in studios if x["id"] == self.box_id), None)
-            if not selected and studios:
-                selected = studios[0]
-                self._apply_studio(selected)
-                if self.settings:
-                    self.settings.select_studio(self.box_id)
+            if not selected:
+                raise ArboxError('הסטודיו הנבחר אינו זמין כרגע — החיבור הקיים נשמר')
             await self._store_membership()
             await self._store_profile(profile)
             return await self.store.get_meta("memberships") or []
 
     async def select_studio(self, box_id: int, make_default: bool = False) -> dict:
-        """Switch the active studio and rebuild its local identity snapshots."""
+        """Validate a target completely before committing the panel selection."""
         async with self._lock:
-            previous_box_id = self.box_id
-            profile = await self.client.profile()
-            studios = await self.discover_studios(profile)
-            selected = next((x for x in studios if x["id"] == box_id), None)
-            if not selected:
-                raise ArboxError("Studio has no active membership")
-            check_identity_change(self, selected.get("id"))
-            self.membership_user_id = None
-            self.memberships = []
-            self._apply_studio(selected)
-            if self.settings:
-                self.settings.activate_studio(
-                    box_id, previous_box_id=previous_box_id,
-                    make_default=make_default)
-            await self._store_profile(profile)
-            membership = await self._store_membership()
-            await self.store.set_meta("identity", {
-                "box_id": self.box_id, "location_id": self.location_id,
-                "membership_user_id": membership.get("id") if membership else None,
-                "studio_name": self.studio_name, "address": self.address,
-            })
-        await self.window_sync()
-        return selected
+            fields = ("box_id", "location_id", "membership_user_id", "memberships",
+                      "studio_name", "address", "studio_count")
+            previous = {name: deepcopy(getattr(self, name)) for name in fields}
+            previous_store_box = self.store.active_box_id
+            settings_data = deepcopy(self.settings._data) if self.settings else None
+            settings_active = getattr(self.settings, "_active_studio_id", None)
+            target_cache = None
+            settings_commit = False
+            try:
+                profile = await self.client.profile()
+                studios = await self.discover_studios(profile)
+                selected = next((x for x in studios if x["id"] == box_id), None)
+                if not selected:
+                    raise ArboxError("Studio has no active membership")
+                check_identity_change(self, box_id)
+                if not selected.get("location_id") or not any(
+                        row.get("box_fk") == box_id for row in profile.get("users_boxes") or []):
+                    raise ArboxError("Studio location could not be verified")
+                scope = (self.settings.background_studio(box_id)
+                         if self.settings else nullcontext())
+                with scope:
+                    self.membership_user_id = None
+                    self.memberships = []
+                    self._apply_studio(selected)
+                    target_cache = {key: await self.store.get_meta(key)
+                                    for key in ("identity", "membership", "memberships", "profile")}
+                    membership = await self._store_membership()
+                    if (not membership or not membership.get("active")
+                            or type(membership.get("id")) is not int or membership["id"] <= 0):
+                        raise ArboxError("Studio has no active membership")
+                    self.membership_user_id = membership["id"]
+                    await self._store_profile(profile)
+                    await self.store.set_meta("identity", {
+                        "box_id": self.box_id, "location_id": self.location_id,
+                        "membership_user_id": self.membership_user_id,
+                        "studio_name": self.studio_name, "address": self.address,
+                    })
+                if self.settings:
+                    settings_commit = True
+                    self.settings.activate_studio(
+                        box_id, previous_box_id=previous["box_id"],
+                        make_default=make_default)
+            except BaseException:
+                # Restore memory synchronously even when cancellation or a
+                # failed settings write interrupted the tentative selection.
+                for name, value in previous.items():
+                    setattr(self, name, value)
+                if self.settings:
+                    self.settings._data = settings_data
+                    self.settings._active_studio_id = settings_active
+                    if settings_commit:
+                        try:
+                            self.settings.save()
+                        except Exception:
+                            _LOGGER.exception("Could not restore settings after failed studio selection")
+                try:
+                    if target_cache is not None:
+                        self.store.active_box_id = box_id
+                        for key, value in target_cache.items():
+                            await self.store.set_meta(key, value)
+                finally:
+                    self.store.active_box_id = previous_store_box
+                raise
+            # The identity is now valid and committed. A schedule outage may
+            # leave its cached calendar visible, but must not undo selection.
+            await self.window_sync()
+            return selected
 
     async def refresh_profile(self) -> dict:
         """Force-refresh the account + membership snapshots."""

@@ -144,7 +144,7 @@ async def test_invalid_grant(calendar):
     with pytest.raises(CalendarError,match='מחדש'):await calendar.access(calendar.profile())
 
 def test_api_auth_validation_secrets(client):
-    g=client.app.state.google_calendar;g.engine.client.email='user@example.test';g.engine.store.active_box_id=73
+    g=client.app.state.google_calendar;g.engine.client.legacy.email='user@example.test';g.engine.store.active_box_id=73
     g.engine.settings.update({'base_url':'http://server.example:8177'})
     h={'X-Api-Key':api_key(client)}
     for route in ['credentials','preferences','connect','enable','pause','disconnect','recover','sync']:
@@ -189,7 +189,7 @@ async def test_foreign_event_is_never_patched_or_deleted(calendar):
     ('http://testserver/evil','http://server.example:8177/settings?google_calendar=connected'),
 ])
 def test_oauth_returns_to_validated_browser_origin(client,origin,expected):
-    g=client.app.state.google_calendar;g.engine.client.email='user@example.test';g.engine.store.active_box_id=73
+    g=client.app.state.google_calendar;g.engine.client.legacy.email='user@example.test';g.engine.store.active_box_id=73
     g.engine.settings.update({'base_url':'http://server.example:8177'})
     g.profile()['credentials']=validate_credentials(CREDS,REDIRECT,'server.example')
     r=client.post('/api/calendar/google/connect',headers={'X-Api-Key':api_key(client),'Origin':origin})
@@ -274,6 +274,6 @@ def test_monitoring_status_has_no_credentials_or_account_email(calendar):
 
 
 def test_manual_sync_rejects_inactive_connection(client):
-    g=client.app.state.google_calendar;g.engine.client.email='user@example.test';g.engine.store.active_box_id=73
+    g=client.app.state.google_calendar;g.engine.client.legacy.email='user@example.test';g.engine.store.active_box_id=73
     response=client.post('/api/calendar/google/sync',headers={'X-Api-Key':api_key(client)})
     assert response.status_code==409

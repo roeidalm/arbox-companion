@@ -8,9 +8,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .api import require_key
+from .studio_context import StudioContextRoute
 from .google_calendar import CALLBACK, CalendarError, validate_credentials, validate_preferences
 
-router = APIRouter(prefix='/api/calendar/google')
+router = APIRouter(prefix='/api/calendar/google', route_class=StudioContextRoute)
 COOKIE = 'arbox_google_oauth'
 
 

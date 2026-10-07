@@ -168,8 +168,10 @@ async function loadStudioSwitch() {
     };
     host.appendChild(select);
     host.hidden = false;
+    return true;
   } catch (e) {
-    host.hidden = true;
+    // A connection refresh must not remove a working studio selector.
+    return false;
   }
 }
 
@@ -3084,11 +3086,29 @@ function showPane(name) {
     (b) => b.classList.toggle("active", b.dataset.pane === name));
   if (name === "registration" && typeof loadRegistrationLearning === "function") loadRegistrationLearning();
   if (name === "profile" || name === "studio") loadProfile();
+  if (name === "studio") loadStudioConnections();
   if (name === "calendar") {
     const host = $("#googleCalendarPanel");
     if (!host.dataset.mounted) { host.dataset.mounted = "1"; GoogleCalendarUI.mount(host, api); }
     else GoogleCalendarUI.refresh();
   }
+}
+
+let studioConnectionsPanel;
+async function loadStudioConnections() {
+  const host = $('#studioConnections');
+  try {
+    if (!studioConnectionsPanel) {
+      const ui = await import('/static/studio-connections.js?v=1');
+      if (!studioConnectionsPanel) studioConnectionsPanel = ui.mountConnections(host, api, {
+        afterEnable: async () => {
+          if (!await loadStudioSwitch()) throw new Error('studio selector refresh failed');
+          await loadProfile();
+        },
+      });
+      await studioConnectionsPanel.ready;
+    } else await studioConnectionsPanel.refresh();
+  } catch (error) { host.textContent = 'לא ניתן לטעון חיבורים: ' + error.message; }
 }
 
 function kvRow(el, label, value, cls) {

@@ -18,6 +18,8 @@ from pydantic import BaseModel, Field
 
 from .rules import PlanningBlocked
 from .arbox_client import ArboxAuthError, ArboxError
+from .connections import ConnectionError
+from .studio_runtime import StudioUnavailable
 from .ical import build_calendar, google_calendar_url
 from .journal import (
     KIND_LABELS, METRIC_LABELS, PACKS, catalog_equipment, catalog_metadata, catalogue,
@@ -27,7 +29,7 @@ from .rules import fmt_class, fmt_when, registration_open, rule_matches
 
 _LOGGER = logging.getLogger(__name__)
 
-from .studio_context import StudioContextRoute
+from .studio_context import StudioContextRoute, _expected_context
 
 router = APIRouter(prefix="/api", route_class=StudioContextRoute)
 
@@ -81,6 +83,15 @@ class ScheduleAction(BaseModel):
 
 class StudioAction(BaseModel):
     studio_id: int
+
+
+class ConnectionDiscoveryBody(BaseModel):
+    whitelabel: str | None = Field(None, max_length=64)
+
+
+class ConnectionEnableBody(BaseModel):
+    connection_id: str = Field(min_length=1, max_length=40, pattern=r"^(legacy|brand-[a-f0-9]{16})$")
+    studio_id: int = Field(gt=0, strict=True)
 
 
 class StudioPreferences(BaseModel):
@@ -198,7 +209,7 @@ async def setup(request: Request, body: SetupBody):
     except ArboxError as err:
         s.client.clear_creds()
         raise HTTPException(502, f"Arbox unreachable: {err}")
-    asyncio.create_task(_bg_window_sync(s, "initial"))
+    asyncio.create_task(_initial_connection_sync(s))
     # the ONE place the key is handed out, so the UI can store it
     return {"ok": True, "api_key": s.settings.api_key}
 
@@ -227,7 +238,7 @@ async def schedule(
     # reading the cached schedule stays open; making the server call Arbox
     # does not — and this path had no debounce at all
     if refresh and has_key(request, x_api_key):
-        asyncio.create_task(_bg_window_sync(s, "on-demand"))
+        s.rules_engine.spawn_in_studio(_bg_window_sync, s, "on-demand")
     if not date_from:
         date_from = date.today().isoformat()
     if not date_to:
@@ -289,6 +300,17 @@ def _annotate(rows: list[dict], blocked=lambda _n: False,
     return rows
 
 
+async def _initial_connection_sync(s) -> None:
+    # There is no studio context to capture before the first profile fetch.
+    # Serialize bootstrap until a concrete identity and window are initialized.
+    async with s.syncer.exclusive():
+        try:
+            await s.connections.discover()
+            await s.syncer.window_sync()
+        except (ArboxError, OSError, TimeoutError):
+            _LOGGER.warning("Initial connection discovery or sync is unavailable")
+
+
 async def _bg_window_sync(s, label: str) -> None:
     try:
         await s.syncer.window_sync()
@@ -322,7 +344,7 @@ async def refresh(request: Request, body: RefreshBody | None = None,
     require_key(request, x_api_key)
     s = ctx(request)
     body = body or RefreshBody()
-    key = f"{body.date_from}|{body.date_to}"
+    key = f"{id(s.store)}|{s.client.user_id}|{s.store.active_box_id}|{body.date_from}|{body.date_to}"
     now = time.monotonic()
     if now - _last_manual_refresh.get(key, 0.0) < 10:
         return {
@@ -744,7 +766,7 @@ async def _do_action(
             if pending_text and int(pending_text.get("schedule_id", -1)) == schedule_id:
                 await s.store.set_meta("attendance_other_input", None)
         if kind == "cancel":
-            asyncio.create_task(s.rules_engine._refresh_memberships_quietly())
+            s.rules_engine.spawn_in_studio(s.rules_engine._refresh_memberships_quietly)
     fresh = await s.store.get_session(schedule_id)
     if fresh:
         fresh.pop("raw_json", None)
@@ -1366,8 +1388,8 @@ async def add_vacation(request: Request, body: VacationBody,
             max(prev["date_to"], body.date_to))
         if revived:
             await s.rules_engine.schedule_openings()
-            asyncio.create_task(s.rules_engine.watchlist_tick())
-            asyncio.create_task(s.rules_engine.autobook_tick())
+            s.rules_engine.spawn_in_studio(s.rules_engine.watchlist_tick)
+            s.rules_engine.spawn_in_studio(s.rules_engine.autobook_tick)
     await s.rules_engine.reconcile_planned_quota()
     return {"ok": True, "id": vid, "revived": revived}
 
@@ -1385,8 +1407,8 @@ async def delete_vacation(request: Request, vac_id: int,
     if v:
         revived = await s.store.revive_vacation_skips(v["date_from"], v["date_to"])
         await s.rules_engine.schedule_openings()
-        asyncio.create_task(s.rules_engine.watchlist_tick())
-        asyncio.create_task(s.rules_engine.autobook_tick())
+        s.rules_engine.spawn_in_studio(s.rules_engine.watchlist_tick)
+        s.rules_engine.spawn_in_studio(s.rules_engine.autobook_tick)
     await s.rules_engine.reconcile_planned_quota()
     return {"ok": True, "revived": revived}
 
@@ -1535,6 +1557,81 @@ async def studios(request: Request, x_api_key: str | None = Header(None)):
     }
 
 
+@router.get("/connections")
+async def connections(request: Request, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    return ctx(request).connections.public()
+
+
+@router.post("/connections/discover")
+async def discover_connections(request: Request, body: ConnectionDiscoveryBody | None = None,
+                               x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    async with s.syncer.exclusive():
+        try:
+            result = await s.connections.discover(body.whitelabel if body else None)
+        except ConnectionError as err:
+            raise HTTPException(422, str(err)) from None
+        except (ArboxError, OSError, TimeoutError):
+            raise HTTPException(502, "לא ניתן לבדוק את החיבורים כרגע") from None
+        try:
+            await s.syncer.discover_studios()
+        except (ArboxError, OSError, TimeoutError):
+            result["warning"] = "הבדיקה הסתיימה; רשימת הסטודיואים הקודמת נשמרה עד לחידוש החיבור."
+        return result
+
+
+@router.post("/connections/enable")
+async def enable_connection(request: Request, body: ConnectionEnableBody,
+                            x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    async with s.syncer.exclusive():
+        before = s.connections.public()
+        already_enabled = any(
+            studio["id"] == body.studio_id and studio.get("enabled")
+            for connection in before["connections"] for studio in connection["studios"])
+        try:
+            s.connections.enable(body.connection_id, body.studio_id)
+        except ConnectionError as err:
+            raise HTTPException(422, str(err)) from None
+        except (ArboxError, OSError, TimeoutError):
+            raise HTTPException(502, "לא ניתן להוסיף את הסטודיו כרגע") from None
+        pending = False
+        try:
+            await s.syncer.discover_studios()
+            if not already_enabled:
+                async def initialize():
+                    # review_plans contains a real booking preflight. Initial
+                    # discovery only imports data and reconciles local plans.
+                    on_sync = s.syncer.on_sync
+                    s.syncer.on_sync = None
+                    try:
+                        await s.syncer.window_sync()
+                    finally:
+                        s.syncer.on_sync = on_sync
+                    await s.rules_engine.refresh_planning_evidence()
+                    await s.rules_engine.reconcile_planned_quota()
+                    await s.rules_engine.schedule_openings()
+
+                # This account-level operation may initialize another studio
+                # under a request pinned to the current panel. Runtime restores
+                # selection; the outer route guard checks it again afterward.
+                token = _expected_context.set(None)
+                try:
+                    await s.studio_runtime.run_for(body.studio_id, initialize)
+                finally:
+                    _expected_context.reset(token)
+        except (ArboxError, OSError, TimeoutError, StudioUnavailable):
+            pending = True
+        result = s.connections.public()
+        if pending:
+            result.update(sync_pending=True,
+                          warning="הסטודיו נוסף; הסנכרון הראשוני טרם הושלם. אפשר לרענן שוב בהמשך.")
+        return result
+
+
 @router.post("/studios/select")
 async def select_studio(request: Request, body: StudioAction,
                         x_api_key: str | None = Header(None)):
@@ -1583,6 +1680,7 @@ async def studio_preferences(request: Request, body: StudioPreferences,
 CRON_JOBS = {
     "window_sync": {"hour": "7,15"},
     "nightly_roll": {"hour": 3, "minute": 5},
+    "connection_discovery": {"hour": 2, "minute": 50},
 }
 
 

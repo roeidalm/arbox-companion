@@ -1423,8 +1423,47 @@ class RulesEngine:
 
     # ----------------------------------------------------------- callbacks
 
+    def spawn_in_studio(self, function, *args, box_id=None):
+        """Detach work without letting a later panel switch change its owner."""
+        runtime = getattr(self, 'studio_runtime', None)
+        target = box_id if box_id is not None else getattr(self.store, 'active_box_id', None)
+
+        async def run():
+            try:
+                if runtime:
+                    return await runtime.run_for(target, function, *args)
+                return await function(*args)
+            except Exception:
+                _LOGGER.exception('Deferred operation %s failed for studio %s',
+                                  getattr(function, '__name__', 'operation'), target)
+
+        task = asyncio.create_task(run())
+        tasks = getattr(self.store, '_push_tasks', None)
+        if tasks is not None:
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+        return task
+
     async def handle_callback(self, data: str, reply_text: str | None = None,
                               source_channel: str | None = None) -> str:
+        """Resolve the opaque prompt's studio before reading or consuming it."""
+        async with self._tick_lock:
+            runtime = getattr(self, 'studio_runtime', None)
+            if runtime and ':' in data and not data.startswith('preview_'):
+                action, cid = data.split(':', 1)
+                target = await self.store.prompt_studio(cid, batch=action == 'infob')
+                if target is None:
+                    return 'הבקשה כבר אינה זמינה. פתחו את הסטודיו באפליקציה.'
+                from .studio_runtime import StudioUnavailable
+                try:
+                    return await runtime.run_for(target, self._handle_callback,
+                        data, reply_text, source_channel)
+                except (StudioUnavailable, ArboxError):
+                    return 'החיבור לסטודיו אינו זמין כרגע. לא בוצע שינוי; אפשר לנסות שוב.'
+            return await self._handle_callback(data, reply_text, source_channel)
+
+    async def _handle_callback(self, data: str, reply_text: str | None = None,
+                               source_channel: str | None = None) -> str:
         """A button was pressed (Telegram callback or HA action)."""
         try:
             action, cid = data.split(":", 1)
@@ -1527,6 +1566,7 @@ class RulesEngine:
                     return "נשמר ביומן ✓"
                 await self.store.set_meta("journal_text_input", {
                     "kind": "journal", "schedule_id": schedule_id,
+                    "box_id": getattr(self.store, 'active_box_id', None),
                     "date": date.today().isoformat(),
                 })
                 return ("✍️ אפשר לכתוב עכשיו מה עשית. למשל: "
@@ -1618,6 +1658,7 @@ class RulesEngine:
             if code == "other":
                 await self.store.set_meta("attendance_other_input", {
                     "schedule_id": schedule_id,
+                    "box_id": getattr(self.store, 'active_box_id', None),
                     "date": date.today().isoformat(),
                 })
                 return ("✍️ כתוב/י עכשיו את הסיבה בהודעה חופשית בטלגרם, "
@@ -1699,6 +1740,28 @@ class RulesEngine:
         return result
 
     async def handle_message(self, text: str, preview_only: bool = False) -> str | None:
+        """Route free text to the studio that requested it, not the open panel."""
+        async with self._tick_lock:
+            runtime = getattr(self, 'studio_runtime', None)
+            if runtime and not preview_only:
+                for key in ('external_cancel_input', 'journal_text_input', 'attendance_other_input'):
+                    pending = await self.store.get_meta(key)
+                    if not pending:
+                        continue
+                    target = pending.get('box_id')
+                    if target is None:
+                        target = await self.store.session_studio(
+                            pending.get('schedule_id') or pending.get('sid'))
+                    if target is None:
+                        return 'האימון אינו זמין כרגע. אפשר לעדכן דרך ההיסטוריה באפליקציה.'
+                    from .studio_runtime import StudioUnavailable
+                    try:
+                        return await runtime.run_for(target, self._handle_message, text, preview_only)
+                    except (StudioUnavailable, ArboxError):
+                        return 'החיבור לסטודיו אינו זמין כרגע. ההודעה לא נשמרה; אפשר לנסות שוב.'
+            return await self._handle_message(text, preview_only)
+
+    async def _handle_message(self, text: str, preview_only: bool = False) -> str | None:
         """Consume free text only after an explicit reason/journal button."""
         preview = await self.journal_preview.message(text)
         if preview is not None or preview_only:
@@ -2211,8 +2274,8 @@ class RulesEngine:
         # windows that already opened are taken by the ticks; detached so a
         # slow Arbox round-trip cannot expire the callback query. Both, since
         # the revive covers pins and rule matches alike.
-        asyncio.create_task(self.watchlist_tick())
-        asyncio.create_task(self.autobook_tick())
+        self.spawn_in_studio(self.watchlist_tick)
+        self.spawn_in_studio(self.autobook_tick)
         await self.store.log_event(
             "info", "vacation", f"החופשה בוטלה מההתראה · {rng}",
             f"{revived} שיעורים הוחזרו לתור", notified=True)
@@ -2368,18 +2431,20 @@ class RulesEngine:
                 if s["schedule_id"] not in skipped and any(rule_matches(r, s) for r in rules):
                     wanted.add(s["schedule_id"])
 
+        runtime = getattr(self, 'studio_runtime', None)
+        prefix = f'open_{self.store.active_box_id}_' if runtime else 'open_'
         opening_jobs = {
-            int(job.id.removeprefix("open_")): job
+            int(job.id.removeprefix(prefix)): job
             for job in self.scheduler.get_jobs()
-            if job.id.startswith("open_")
-            and job.id.removeprefix("open_").isdigit()
+            if job.id.startswith(prefix)
+            and job.id.removeprefix(prefix).isdigit()
         }
         for sid, job in opening_jobs.items():
             if sid not in wanted:
                 self.scheduler.remove_job(job.id)
 
         for sid in wanted:
-            job_id = f"open_{sid}"
+            job_id = f"{prefix}{sid}"
             existing = opening_jobs.get(sid)
             s = await self.store.get_session(sid)
             if not s or not s.get("advance_hours"):
@@ -2416,9 +2481,10 @@ class RulesEngine:
             # then, so this is the widest jitter that still wins the race.
             delay = random.uniform(*OPENING_JITTER_SECONDS)
             self.scheduler.add_job(
-                self._opening_fired, "date",
+                runtime.run_for if runtime else self._opening_fired, "date",
                 run_date=opens + timedelta(seconds=delay),
-                args=[sid], id=job_id, replace_existing=True,
+                args=[self.store.active_box_id, self._opening_fired, sid] if runtime else [sid],
+                id=job_id, replace_existing=True,
                 misfire_grace_time=300,
             )
             _LOGGER.info(
@@ -2675,7 +2741,7 @@ class RulesEngine:
         # Promotion consumes capacity even though no action passed through our
         # booking endpoint. Refresh immediately so the next scheduled class is
         # allocated from the true upstream balance.
-        asyncio.create_task(self._refresh_memberships_quietly())
+        self.spawn_in_studio(self._refresh_memberships_quietly)
 
     async def standby_watch_tick(self) -> None:
         """Every 5 min: while waitlisted for a near-term class, poll fast.

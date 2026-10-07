@@ -11,6 +11,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from functools import wraps
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_EXECUTED
@@ -31,6 +32,8 @@ from .rules import RulesEngine
 from .settings import Settings
 from .store import Store
 from .sync import Syncer
+from .connections import Connections
+from .studio_runtime import StudioRuntime
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -102,23 +105,62 @@ async def lifespan(app: FastAPI):
                  datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     store = Store(os.path.join(DATA_DIR, "arbox.db"))
     await store.open()
-    client = ArboxClient(DATA_DIR, whitelabel=os.environ.get("WHITELABEL", "Arbox"))
+    await store.enable_studio_metadata()
+    legacy_client = ArboxClient(DATA_DIR, whitelabel=os.environ.get("WHITELABEL", "Arbox"))
+    client = Connections(DATA_DIR, legacy_client)
+    client.active_box_id = lambda: store.active_box_id
     notifier = Notifier(settings)
     notifier.log_event = store.log_event
     notification_health = NotificationHealth(store, notifier)
     await notification_health.start()
     app.state.notification_health = notification_health
     await notifier.discord_delivery.start()
-    store.on_event = notifier.push_event
     syncer = Syncer(client, store, settings=settings)
     notifier.studio_context = lambda: (syncer.studio_name, syncer.studio_count)
+    # Capture before Store detaches the coroutine and the runtime restores the
+    # panel selection. Delivery must retain the originating studio's label.
+    store.on_event = lambda *args: notifier.push_event(
+        *args, studio=(syncer.studio_name, syncer.studio_count))
     rules_engine = RulesEngine(store, client, syncer, notifier)
+    runtime = StudioRuntime(syncer, rules_engine, settings, store)
+    rules_engine.studio_runtime = runtime
+
+    def in_studios(function):
+        @wraps(function)
+        async def run():
+            if not client.configured:
+                return
+            if not syncer.box_id:
+                await syncer.ensure_identity()
+            results = await runtime.run_all(function)
+            expected = {row['id'] for row in await runtime._studios()}
+            failed = expected - results.keys()
+            if failed:
+                # Healthy studios have already run; keep the scheduler's
+                # existing health incident open for this failed operation.
+                raise RuntimeError('Studio operation failed: ' + ', '.join(map(str, sorted(failed))))
+            return results
+        return run
+
+    async def discover_connections():
+        if client.configured:
+            async with syncer.exclusive():
+                await client.discover()
+                await syncer.discover_studios()
+
+    async def check_notification_health():
+        # Health reads the selected studio's last_sync. Do not sample one of
+        # the temporary scopes while another background job is running.
+        async with syncer.exclusive():
+            await notification_health.tick()
     syncer.on_standby_promoted = rules_engine.on_standby_promoted
     syncer.on_sync = rules_engine.review_plans
 
     app.state.settings = settings
     app.state.store = store
     app.state.client = client
+    app.state.connections = client
+    app.state.studio_runtime = runtime
     app.state.notifier = notifier
     app.state.syncer = syncer
     app.state.rules_engine = rules_engine
@@ -136,23 +178,24 @@ async def lifespan(app: FastAPI):
     # Explicit ids on every cron job: _reschedule_cron matches by id, and
     # APScheduler's generated ids are uuid4 hex, which no name can match — a
     # timezone change used to move only the two jobs that had ids.
-    scheduler.add_job(syncer.window_sync, CronTrigger(hour="7,15"),
+    scheduler.add_job(in_studios(syncer.window_sync), CronTrigger(hour="7,15"),
                       id="window_sync")
-    scheduler.add_job(syncer.nightly_roll, CronTrigger(hour=3, minute=5),
+    scheduler.add_job(in_studios(syncer.nightly_roll), CronTrigger(hour=3, minute=5),
                       id="nightly_roll")
-    scheduler.add_job(syncer.near_term_sync, IntervalTrigger(minutes=30))
-    scheduler.add_job(syncer.mid_range_sync, IntervalTrigger(hours=2))
+    scheduler.add_job(in_studios(syncer.near_term_sync), IntervalTrigger(minutes=30))
+    scheduler.add_job(in_studios(syncer.mid_range_sync), IntervalTrigger(hours=2))
+    scheduler.add_job(discover_connections, CronTrigger(hour=2, minute=50), id='connection_discovery')
     scheduler.add_job(
-        syncer.far_range_sync,
+        in_studios(syncer.far_range_sync),
         CronTrigger(hour=(settings.digest_hour - 1) % 24, minute=30),
         id="far_range_sync",
     )
     scheduler.add_job(
-        rules_engine.membership_check,
+        in_studios(rules_engine.membership_check),
         CronTrigger(hour=(settings.digest_hour - 1) % 24, minute=0),
         id="membership_check")
     scheduler.add_job(
-        rules_engine.nightly_digest,
+        in_studios(rules_engine.nightly_digest),
         CronTrigger(hour=settings.digest_hour, minute=0),
         id="digest",  # rescheduled live by /api/settings when the hour changes
     )
@@ -161,33 +204,33 @@ async def lifespan(app: FastAPI):
     # may still have arrived at 20:00; on a vacation's last day this rides just
     # below them.
     scheduler.add_job(
-        rules_engine.vacation_announce_tick,
+        in_studios(rules_engine.vacation_announce_tick),
         CronTrigger(hour=settings.digest_hour, minute=2),
         id="vacation_announce",
     )
-    scheduler.add_job(rules_engine.refresh_pending_evidence, IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(rules_engine.refresh_pending_evidence), IntervalTrigger(minutes=5))
     await rules_engine.registration_learning.open()
-    scheduler.add_job(rules_engine.registration_learning.tick, IntervalTrigger(seconds=20, jitter=20), id="registration_learning", max_instances=1, coalesce=True)
-    scheduler.add_job(rules_engine.autobook_tick, IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(rules_engine.registration_learning.tick), IntervalTrigger(seconds=20, jitter=20), id="registration_learning", max_instances=1, coalesce=True)
+    scheduler.add_job(in_studios(rules_engine.autobook_tick), IntervalTrigger(minutes=5))
     # pinned classes: same 5-min safety net, plus exact-moment jobs below
-    scheduler.add_job(rules_engine.watchlist_tick, IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(rules_engine.watchlist_tick), IntervalTrigger(minutes=5))
     # refresh the one-shot opening jobs as the window rolls forward
-    scheduler.add_job(rules_engine.schedule_openings, IntervalTrigger(minutes=30))
+    scheduler.add_job(in_studios(rules_engine.schedule_openings), IntervalTrigger(minutes=30))
     # fast standby watch: no-ops instantly unless a waitlist spot is held
-    scheduler.add_job(rules_engine.standby_watch_tick, IntervalTrigger(minutes=5))
-    scheduler.add_job(rules_engine.studio_messages_tick, IntervalTrigger(hours=1))
+    scheduler.add_job(in_studios(rules_engine.standby_watch_tick), IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(rules_engine.studio_messages_tick), IntervalTrigger(hours=1))
     # no-ops instantly unless a pre-class reminder is configured
-    scheduler.add_job(rules_engine.class_reminder_tick, IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(rules_engine.class_reminder_tick), IntervalTrigger(minutes=5))
     # Local-only check: one-minute cadence makes the yes/no question land
     # within the five minutes before class without adding any Arbox traffic.
-    scheduler.add_job(rules_engine.attendance_tick, IntervalTrigger(minutes=1))
+    scheduler.add_job(in_studios(rules_engine.attendance_tick), IntervalTrigger(minutes=1))
     # Post-class journal is opt-in and local-only; five minutes is precise
     # enough around the fixed 30-minute delay without extra Arbox traffic.
-    scheduler.add_job(rules_engine.journal_tick, IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(rules_engine.journal_tick), IntervalTrigger(minutes=5))
     # no-ops instantly unless a late-cancel lead time is configured
-    scheduler.add_job(rules_engine.late_cancel_tick, IntervalTrigger(minutes=5))
-    scheduler.add_job(google_calendar.sync, IntervalTrigger(minutes=1), id="google_calendar")
-    scheduler.add_job(notification_health.tick, IntervalTrigger(seconds=30), id="notification_health")
+    scheduler.add_job(in_studios(rules_engine.late_cancel_tick), IntervalTrigger(minutes=5))
+    scheduler.add_job(in_studios(google_calendar.sync), IntervalTrigger(minutes=1), id="google_calendar")
+    scheduler.add_job(check_notification_health, IntervalTrigger(seconds=30), id="notification_health")
     def report_job(event):
         if event.job_id == 'notification_health':
             return
@@ -209,7 +252,10 @@ async def lifespan(app: FastAPI):
     if client.configured:
         # in the background: the HTTP server (health, UI, HA) must not wait
         # on Arbox, and a restart right after a sync shouldn't re-pull at all
-        startup_sync = asyncio.create_task(_startup_sync(store, syncer, rules_engine))
+        async def startup():
+            await syncer.ensure_identity()
+            await runtime.run_all(_startup_sync, store, syncer, rules_engine)
+        startup_sync = asyncio.create_task(startup())
     else:
         startup_sync = None
         _LOGGER.info("No credentials yet — waiting for /api/setup")

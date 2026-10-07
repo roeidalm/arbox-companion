@@ -76,7 +76,8 @@ async def callback(engine, action, cid, reply_text=None):
         if code not in engine.REASON_LABELS:
             return 'סיבה לא מוכרת'
         if code == 'other' and not (reply_text or '').strip():
-            await engine.store.set_meta('external_cancel_input', {'sid':sid,'cid':cid,'at':datetime.now().isoformat()})
+            await engine.store.set_meta('external_cancel_input', {'sid':sid,'cid':cid,
+                'box_id':getattr(engine.store, 'active_box_id', None),'at':datetime.now().isoformat()})
             return 'כתוב את סיבת הביטול בהודעה הבאה, או דרך ההיסטוריה באתר'
         await save_reason(engine, sid, code, reply_text.strip()[:500] if code=='other' else None)
         await engine.store.set_meta('external_cancel_input', None)

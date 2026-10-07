@@ -399,6 +399,8 @@ class Store:
         # table exists to guarantee would vanish without a trace.
         self._push_tasks: set[asyncio.Task] = set()
         self.active_box_id: int | None = None
+        self._studio_metadata = False
+        self._legacy_meta_box = None
 
     async def open(self) -> None:
         self._db = await aiosqlite.connect(self._path)
@@ -427,6 +429,8 @@ class Store:
              "ALTER TABLE pending_prompts ADD COLUMN vacation_ref TEXT"),
             ("pending_prompts", "payload",
              "ALTER TABLE pending_prompts ADD COLUMN payload TEXT"),
+            ("pending_prompts", "box_id",
+             "ALTER TABLE pending_prompts ADD COLUMN box_id INTEGER"),
             ("sessions", "cancel_hours",
              "ALTER TABLE sessions ADD COLUMN cancel_hours INTEGER"),
             ("sessions", "membership_user_id",
@@ -1600,12 +1604,43 @@ class Store:
     ) -> None:
         await self.db.execute(
             "INSERT OR REPLACE INTO pending_prompts "
-            "(callback_id, schedule_id, action, dry_run, batch_id, vacation_ref, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(callback_id, schedule_id, action, dry_run, batch_id, vacation_ref, payload, box_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (callback_id, schedule_id, action, int(dry_run), batch_id,
-             vacation_ref, payload),
+             vacation_ref, payload, self.active_box_id),
         )
         await self.db.commit()
+
+    async def session_studio(self, schedule_id: int) -> int | None:
+        """Look up notification ownership without changing the selected panel."""
+        cur = await self.db.execute('SELECT box_id FROM sessions WHERE schedule_id=?', (schedule_id,))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def prompt_studio(self, callback_id: str, *, batch: bool = False) -> int | None:
+        """Resolve an opaque notification token before selecting its studio.
+
+        Old prompts predate box_id: use their signed-in payload or the saved
+        session, then the original legacy studio for non-session prompts.
+        """
+        column = 'batch_id' if batch else 'callback_id'
+        cur = await self.db.execute(
+            f'SELECT p.*, s.box_id AS session_box FROM pending_prompts p '
+            f'LEFT JOIN sessions s ON s.schedule_id=p.schedule_id WHERE p.{column}=?',
+            (callback_id,))
+        owners = set()
+        for row in await cur.fetchall():
+            box = row['box_id'] or row['session_box']
+            if not box and row['payload']:
+                try:
+                    payload = json.loads(row['payload'])
+                    box = payload.get('box_id') or payload.get('studio')
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            box = box or self._legacy_meta_box
+            if type(box) is int and box > 0:
+                owners.add(box)
+        return next(iter(owners)) if len(owners) == 1 else None
 
     async def answer_batch(self, batch_id: str | None) -> int:
         """Disarm every still-live prompt in a batch.
@@ -2066,14 +2101,43 @@ class Store:
 
     # ----------------------------------------------------------------- meta
 
+    STUDIO_META_KEYS = frozenset({
+        'identity', 'membership', 'memberships', 'profile', 'last_sync',
+        'quota_cache', 'effective_membership_id', 'history_backfill', 'activity',
+        'seen_box_messages', 'seen_standby_approvals', 'reminded_sessions',
+        'late_cancel_warned', 'attendance_tracking_since',
+        'vacation_open_announced', 'vacation_close_announced',
+    })
+
+    async def enable_studio_metadata(self):
+        """Separate runtime snapshots, retaining the original box for rollback."""
+        legacy = await self.get_meta('identity') or {}
+        self._legacy_meta_box = legacy.get('box_id')
+        self._studio_metadata = True
+
+    def _meta_key(self, key):
+        if self._studio_metadata and self.active_box_id and key in self.STUDIO_META_KEYS:
+            return f'studio_snapshot:{self.active_box_id}:{key}'
+        return key
+
     async def get_meta(self, key: str, default: Any = None) -> Any:
-        cur = await self.db.execute("SELECT value FROM meta WHERE key=?", (key,))
+        scoped = self._meta_key(key)
+        cur = await self.db.execute("SELECT value FROM meta WHERE key=?", (scoped,))
         r = await cur.fetchone()
+        if r is None and scoped != key and self.active_box_id == self._legacy_meta_box:
+            cur = await self.db.execute("SELECT value FROM meta WHERE key=?", (key,))
+            r = await cur.fetchone()
         return json.loads(r[0]) if r else default
 
     async def set_meta(self, key: str, value: Any) -> None:
+        if (self._studio_metadata and self._legacy_meta_box is None and key == 'identity'
+                and isinstance(value, dict) and value.get('box_id')):
+            self._legacy_meta_box = value['box_id']
         await self.db.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            (key, json.dumps(value, ensure_ascii=False)),
+            (self._meta_key(key), json.dumps(value, ensure_ascii=False)),
         )
+        if self._meta_key(key) != key and self.active_box_id == self._legacy_meta_box:
+            await self.db.execute('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)',
+                                  (key, json.dumps(value, ensure_ascii=False)))
         await self.db.commit()

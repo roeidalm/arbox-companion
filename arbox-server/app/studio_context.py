@@ -63,7 +63,10 @@ class StudioContextRoute(APIRoute):
         async def guarded(request: Request):
             raw = request.headers.get("X-Arbox-Studio-Id")
             if raw is None:
-                return await handler(request)
+                # Background work temporarily visits other studios. Even
+                # headerless reads must see the restored selected studio.
+                async with request.app.state.syncer.exclusive():
+                    return await handler(request)
             # Imported here to avoid the router's module initialization cycle.
             from .api import require_key
             require_key(request, request.headers.get("X-Api-Key"))

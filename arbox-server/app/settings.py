@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from contextlib import contextmanager
 
 SETTINGS_FILE = "settings.json"
 
@@ -201,6 +202,14 @@ class Settings:
             self._migrate_legacy_quota_to_studio(self._active_studio_id)
 
     def save(self) -> None:
+        data = self._data
+        selection = getattr(self, "_background_selection", None)
+        if selection is not None:
+            # Background jobs may learn membership/category preferences and
+            # save them, but their temporary scope is not the panel selection.
+            data = dict(data)
+            data["preferred_studio_id"] = selection["default"]
+            data["preferred_membership_id"] = self._restored_membership(selection)
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         tmp = self._path + ".tmp"
         # 0600 before a byte is written, not after: this file holds the API
@@ -214,8 +223,48 @@ class Settings:
             os.close(fd)
             raise
         with os.fdopen(fd, "w") as f:   # closes fd on the way out
-            json.dump(self._data, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
         os.replace(tmp, self._path)
+
+    def _restored_membership(self, selection: dict) -> int | None:
+        """Keep intentional updates made to the returning studio's preference."""
+        key = str(selection["active"])
+        before = selection["preferences"]
+        after = self._data.get("studio_membership_preferences") or {}
+        if (key in before) != (key in after) or before.get(key) != after.get(key):
+            return after.get(key)
+        return selection["membership"]
+
+    @contextmanager
+    def background_studio(self, box_id: int):
+        """Temporarily scope a serialized job without persisting its selection.
+
+        Callers must hold the shared studio lock. Normal settings updates still
+        persist; only selection fields are protected while this scope is open.
+        Nested scopes retain the original panel selection for serialization.
+        """
+        selection = {
+            "active": getattr(self, "_active_studio_id", None),
+            "default": self._data.get("preferred_studio_id"),
+            "membership": self._data.get("preferred_membership_id"),
+            "preferences": dict(self._data.get("studio_membership_preferences") or {}),
+        }
+        outer = getattr(self, "_background_selection", None)
+        if outer is None:
+            self._background_selection = selection
+        self._active_studio_id = box_id
+        if selection["active"] != box_id:
+            self._data["preferred_membership_id"] = selection["preferences"].get(str(box_id))
+        try:
+            yield
+        finally:
+            self._active_studio_id = selection["active"]
+            self._data["preferred_studio_id"] = selection["default"]
+            self._data["preferred_membership_id"] = self._restored_membership(selection)
+            if outer is None:
+                del self._background_selection
+            else:
+                self._background_selection = outer
 
     @property
     def api_key(self) -> str:

@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.61.1
+
+- Open and reload the schedule at today in the studio timezone while retaining day, week or month mode.
+- Keep the actual day as the calendar anchor when switching from weekly to daily view; omit a fixed date from today’s URL and preserve deliberate in-page history navigation.
+
 ## 1.61.0
 
 - Connect additional branded Arbox apps from the existing Studio settings and add verified studios to the existing selector.

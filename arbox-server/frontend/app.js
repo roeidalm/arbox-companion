@@ -8,7 +8,7 @@ const initialHistoryRequested = new URLSearchParams(location.search).has("histor
 
 const state = {
   apiKey: null,
-  weekStart: startOfWeek(new Date()),   // the calendar anchor (any date)
+  weekStart: new Date(),                // anchor replaced with studio today at boot
   calMode: "week",                       // "day" | "week" | "month"
   coach: null,
   category: null,
@@ -385,9 +385,7 @@ function iso(d) {
    class that finished last night still reads as upcoming. The app has a
    vacation feature, so being abroad is an expected state, not an edge case. */
 function studioToday() {
-  try {
-    return new Date().toLocaleDateString("en-CA", { timeZone: state.serverTz });
-  } catch (e) { return iso(new Date()); }
+  return ScheduleNavigation.today(state.serverTz);
 }
 function studioNowStamp() {
   try {
@@ -506,15 +504,10 @@ function viewFromPath() {
   return hit ? hit[0] : "schedule";
 }
 
-function initScheduleFromURL() {
-  const q = new URLSearchParams(location.search);
-  const mode = q.get("mode");
-  if (["day", "week", "month"].includes(mode)) state.calMode = mode;
-  const d = q.get("d");
-  if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-    const parsed = new Date(`${d}T00:00`);
-    if (!isNaN(parsed)) state.weekStart = parsed;
-  }
+function initScheduleFromURL(restoreDate = false) {
+  const calendar = ScheduleNavigation.initial(location.search, studioToday(), {restoreDate});
+  state.calMode = calendar.mode;
+  state.weekStart = new Date(`${calendar.anchor}T12:00`);
   setCalModeUI();
 }
 
@@ -568,7 +561,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 window.addEventListener("popstate", () => {
   const v = viewFromPath();
-  if (v === "schedule") initScheduleFromURL();
+  if (v === "schedule") initScheduleFromURL(true);
   showView(v, false);
 });
 
@@ -648,7 +641,7 @@ async function boot() {
   }
   loadFacets(); // fills the chips when it lands; schedule doesn't wait on it
   await loadStudioSwitch(); // Establish the studio before starting context-bound reads.
-  initScheduleFromURL();   // restore ?mode=&d= before the first render
+  initScheduleFromURL();   // retain the view mode, start at studio today
   showView(viewFromPath(), false);
   window.dispatchEvent(new CustomEvent("arbox:ready", { detail: health }));
 }
@@ -895,7 +888,7 @@ function updateScheduleURL() {
   if (state.view !== "schedule") return;
   // replaceState on purpose: browsing months must not bloat back-history
   history.replaceState(history.state, "",
-    `/schedule?mode=${state.calMode}&d=${iso(state.weekStart)}`);
+    ScheduleNavigation.url(state.calMode, iso(state.weekStart), studioToday()));
 }
 
 async function loadSchedule(refresh = false) {
@@ -1263,7 +1256,7 @@ function setCalModeUI() {
 $("#prevWeek").onclick = () => navSchedule(-1);
 $("#nextWeek").onclick = () => navSchedule(1);
 $("#todayBtn").onclick = () => {
-  state.weekStart = state.calMode === "week" ? startOfWeek(new Date()) : new Date();
+  state.weekStart = new Date(`${studioToday()}T12:00`);
   loadSchedule();
 };
 $$(".cal-modes .seg-btn").forEach((b) => b.addEventListener("click", () => {

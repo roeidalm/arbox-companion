@@ -619,12 +619,13 @@ class RulesEngine:
         plans.extend(row for row in pending_rows if row['schedule_id'] not in planned_ids)
         return plan_quota(details, commitments, plans, anchor[:7], uncertain, anchor=anchor)
 
-    async def refresh_planning_evidence(self, *, force_history: bool = False) -> None:
+    async def refresh_planning_evidence(self, *, force_history: bool = False,
+                                        force_policy: bool = False) -> None:
         """Read-only review; failures are cached, never retried on every render."""
         import time
         async with self._membership_lock:
             members = await self.store.get_meta("memberships") or []
-            await self.membership_policy.refresh(members)
+            await self.membership_policy.refresh(members, force=force_policy)
             for member in members:
                 key = self.membership_policy.key(member["id"]) + ":history"
                 previous = await self.store.get_meta(key) or {}
@@ -952,7 +953,7 @@ class RulesEngine:
                 return
             # Keep the active studio and cached upstream login intact.
             await self.syncer.refresh_profile()
-            await self.refresh_planning_evidence(force_history=True)
+            await self.refresh_planning_evidence(force_history=True, force_policy=True)
             await self.preflight_plans()
             await self.reconcile_planned_quota()
             await self.store.set_meta('quota_cache', None)

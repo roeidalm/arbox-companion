@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.60.5
+
+- Make explicit membership refresh bypass the daily permission cache while retaining click debouncing.
+- Clear stale category denials when fresh studio permissions explicitly include the category ID; preserve restrictions on failed reads.
+
 ## 1.60.4
 
 - Preserve independent shop category evidence when another class is rejected; use exact category IDs when supplied.

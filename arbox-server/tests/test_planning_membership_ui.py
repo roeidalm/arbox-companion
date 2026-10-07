@@ -102,6 +102,7 @@ async def test_membership_refresh_is_quiet_and_debounced_but_save_can_force(engi
     await engine.refresh_membership_inventory()
     await engine.refresh_membership_inventory()
     engine.syncer.refresh_profile.assert_awaited_once()
+    engine.refresh_planning_evidence.assert_awaited_once_with(force_history=True, force_policy=True)
     await engine.refresh_membership_inventory(force=True)
     assert engine.syncer.refresh_profile.await_count == 2
     engine.notifier.send.assert_not_awaited()

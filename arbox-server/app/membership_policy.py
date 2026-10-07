@@ -182,8 +182,8 @@ class MembershipPolicy:
             await self.store.set_meta(key, {**saved, 'booked_categories': evidence})
             await self.store.set_meta('quota_cache', None)
 
-    async def refresh(self, memberships: list[dict]) -> None:
-        """Read each unchanged membership at most daily, including failed reads."""
+    async def refresh(self, memberships: list[dict], *, force: bool = False) -> None:
+        """Cache background reads daily; explicit refreshes fetch current permissions."""
         for member in memberships:
             key = self.key(member["id"])
             previous = await self.store.get_meta(key) or {}
@@ -192,7 +192,7 @@ class MembershipPolicy:
                 # The user confirmed a different membership revision. Preserve
                 # the draft and request confirmation, even if shop data exists.
                 continue
-            if current and time.time() - previous.get("checked_at", 0) < POLICY_TTL:
+            if not force and current and time.time() - previous.get("checked_at", 0) < POLICY_TTL:
                 continue
             state = dict(previous) if current else {}
             state.update(fingerprint=fingerprint(member), checked_at=time.time())
@@ -224,6 +224,10 @@ class MembershipPolicy:
                     # for the categories we can identify unambiguously. Missing
                     # lists, failed reads and other denials remain unchanged.
                     allowed, _ = resolve_categories(state["category_names"], await self.catalog())
+                    for section in classes:
+                        exact = section.get('box_category_ids')
+                        if isinstance(exact, list) and all(type(cid) is int and cid > 0 for cid in exact):
+                            allowed.extend(exact)
                     state["denied_category_ids"] = sorted(
                         set(state.get("denied_category_ids") or []) - set(allowed))
             except (ArboxError, TypeError, ValueError, KeyError) as err:

@@ -555,3 +555,25 @@ async def test_booking_evidence_rejects_unproven_identity(engine, patch):
            'user_booked': 1234, 'box_category_fk': 999, 'box_categories': {'id': 999}}
     await engine.membership_policy.learn_booked_categories(m, {'past': [{**row, **patch}]})
     assert not eligible({**m, 'policy': await engine.membership_policy.get(m)}, {'category_id': 999})
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fresh_grant', [True, False])
+async def test_explicit_refresh_bypasses_daily_cache_and_only_clears_fresh_grants(engine, fresh_grant):
+    m=(await engine.store.get_meta('memberships'))[1]
+    key=engine.membership_policy.key(m['id'])
+    await engine.store.set_meta(key, {
+        'fingerprint':fingerprint(m), 'source':'rejection', 'checked_at':time.time(),
+        'categories_known':True, 'category_names':['Class 2'], 'denied_category_ids':[1,3]})
+    await engine.membership_policy.refresh([m])
+    engine.client.membership_details.assert_not_awaited()
+    if fresh_grant:
+        engine.client.membership_details.side_effect=None
+        engine.client.membership_details.return_value={'limitations':[
+            {'header':'Available Classes','values':['Outdated label'],'box_category_ids':[1]}]}
+    await engine.membership_policy.refresh([m],force=True)
+    engine.client.membership_details.assert_awaited_once()
+    reader=MembershipPolicy(engine.store,engine.client,engine.syncer)
+    policy=await reader.get(m)
+    assert (1 not in policy['denied_category_ids']) is fresh_grant
+    assert 3 in policy['denied_category_ids']
+    assert eligible({**m,'policy':policy},{'category_id':1}) is fresh_grant

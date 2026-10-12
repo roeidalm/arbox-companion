@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.64.0
+
+- Show Arbox profile photos beside names in the on-demand attendee list in Mine and the schedule, with initials when a photo is missing or fails to load.
+- Load photos only from Arbox’s image account without sending the page referrer; preserve studio roster visibility rules and discard the list on close.
+
 ## 1.63.0
 
 - Remove occupancy learning, waiting thresholds and per-workout timing overrides from settings, Mine, automations and scheduling. Automatic and pinned workouts register when booking opens, subject to the existing eligibility checks.

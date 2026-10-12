@@ -1,6 +1,26 @@
 """Project the member-visible roster without persisting other members' data."""
 
+from urllib.parse import urlsplit
+
 from .arbox_client import ArboxError
+
+
+def avatar_url(value) -> str | None:
+    # Both studios return public images from Arbox's Cloudinary account.
+    # Keep this in step with index.html's image CSP; never expose arbitrary
+    # upstream URLs as browser requests or fetch them with account credentials.
+    if (not isinstance(value, str) or len(value) > 2048
+            or any(char.isspace() or ord(char) < 32 or char == "\\" for char in value)):
+        return None
+    try:
+        url = urlsplit(value)
+        if (url.scheme == "https" and url.netloc == "res.cloudinary.com"
+                and url.path.startswith("/arbox/image/upload/")
+                and not url.fragment):
+            return value
+    except ValueError:
+        pass
+    return None
 
 
 def roster(session: dict) -> dict:
@@ -36,7 +56,11 @@ def roster(session: dict) -> dict:
                             (user.get("first_name"), user.get("last_name"))
                             if isinstance(part, str) and part.strip() and part != "None")
         if name.strip():
-            result["attendees"].append({"name": name.strip()})
+            person = {"name": name.strip()}
+            image = avatar_url(user.get("image"))
+            if image:
+                person["image_url"] = image
+            result["attendees"].append(person)
     # Missing/withheld names must never look like an empty class.
     status = "available" if result["attendees"] or registered == 0 else "unavailable"
     return {**result, "status": status}

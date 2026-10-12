@@ -62,10 +62,12 @@ DATA_DIR=/path/to/data TZ=Asia/Jerusalem uvicorn app.main:app --app-dir arbox-se
 
 The timetable and HA read SQLite — opening the week view costs zero Arbox calls.
 Click the registered count in the schedule or **נרשמים** in Mine to load the
-workout's current attendee names. This authenticated, on-demand read uses the
+workout's current attendee names and profile photos. This authenticated, on-demand read uses the
 selected studio's connection and honors its `whoIsBooked` visibility setting.
-Names are not stored in SQLite or browser storage; closing the dialog discards
-them. The dialog becomes a bottom sheet on phones.
+Names and photo URLs are not stored in SQLite or browser storage; closing the
+dialog discards them. Public photos load from Arbox’s Cloudinary account without
+a page referrer, with initials for missing or failed images. The dialog becomes
+a bottom sheet on phones.
 Registration uses the opening time directly, without occupancy-based waiting or
 background learning. Upgrading to 1.63.0 removes the retired learning records and
 timing preferences while preserving automations, planned workouts and the journal.

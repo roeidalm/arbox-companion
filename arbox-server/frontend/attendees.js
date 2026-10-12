@@ -1,4 +1,4 @@
-/* One on-demand roster for Mine and the schedule. No persistent name cache. */
+/* One on-demand roster for Mine and the schedule. No persistent roster cache. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Attendees = factory();
@@ -21,6 +21,26 @@
     const status = element('p', 'attendees-status'); status.setAttribute('role', 'status');
     const list = element('ul', 'attendees-list'); list.setAttribute('aria-label', 'רשימת הנרשמים');
     const retry = element('button', 'attendees-retry', 'ניסיון נוסף'); retry.type = 'button'; retry.hidden = true;
+    function attendee(person) {
+      const row = element('li');
+      const avatar = element('span', 'attendees-avatar'); avatar.setAttribute('aria-hidden', 'true');
+      const parts = person.name.trim().split(/\s+/);
+      const initials = [parts[0], ...(parts.length > 1 ? [parts.at(-1)] : [])]
+        .map(part => Array.from(part)[0]).join('');
+      const fallback = element('span', '', initials);
+      avatar.append(fallback);
+      if (person.image_url) {
+        const img = element('img', 'attendees-photo');
+        img.alt = ''; img.width = 44; img.height = 44;
+        img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+        img.onload = () => { fallback.hidden = true; img.className = 'attendees-photo is-loaded'; };
+        img.onerror = () => { fallback.hidden = false; avatar.replaceChildren(fallback); };
+        img.src = person.image_url;
+        avatar.append(img);
+      }
+      row.append(avatar, element('span', 'attendees-name', person.name));
+      return row;
+    }
     head.append(title, closeButton); dialog.append(head, subtitle, status, list, retry);
     document.body.append(dialog);
     let generation = 0, controller = null, context = null;
@@ -64,7 +84,7 @@
           Number.isInteger(data.registered) && data.registered !== count
             ? `מוצגים ${count} שמות · ${data.registered} נרשמים בסך הכול`
             : `${count} נרשמים`;
-        for (const person of data.attendees) list.append(element('li', '', person.name));
+        for (const person of data.attendees) list.append(attendee(person));
       } catch (error) {
         if (!current() || error.name === 'AbortError') return;
         status.textContent = error.message || 'לא ניתן לטעון נרשמים כרגע'; retry.hidden = false;

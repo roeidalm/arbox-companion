@@ -7,25 +7,42 @@ from fastapi import FastAPI
 
 from app.api import router
 from app.arbox_client import ArboxError
-from app.attendees import roster
+from app.attendees import avatar_url, roster
 from app.studio_context import ReentrantAsyncLock
+
+PHOTO = "https://res.cloudinary.com/arbox/image/upload/c_fit,h_500,w_500/member.jpg"
 
 
 def session(**extra):
     return {"id": 42, "box_fk": 10, "locations_box_fk": 11, "registered": 2,
             "booked_users": [
-                {"id": 1, "schedule_user_id": 101, "full_name": "דנה לוי", "email": "private@example.test"},
+                {"id": 1, "schedule_user_id": 101, "full_name": "דנה לוי", "image": PHOTO, "email": "private@example.test"},
                 {"id": 2, "schedule_user_id": 102, "first_name": "יובל", "last_name": None},
             ], **extra}
 
 
-def test_roster_only_returns_names_and_preserves_distinct_people_with_same_name():
+def test_roster_only_returns_names_and_safe_photos_and_preserves_distinct_people_with_same_name():
     data = session()
     data["booked_users"] += [data["booked_users"][0],
                               {"id": 3, "schedule_user_id": 103, "full_name": "דנה לוי"},
                               {"id": 4, "full_name": "Cancelled", "late_cancellation": 1}]
     assert roster(data) == {"status": "available", "registered": 2,
-                            "attendees": [{"name": "דנה לוי"}, {"name": "יובל"}, {"name": "דנה לוי"}]}
+                            "attendees": [{"name": "דנה לוי", "image_url": PHOTO},
+                                          {"name": "יובל"}, {"name": "דנה לוי"}]}
+
+
+@pytest.mark.parametrize("image", [None, "", {}, 12, "javascript:alert(1)",
+    "data:image/svg+xml,<svg/>", "http://res.cloudinary.com/arbox/image/upload/a.jpg",
+    "https://res.cloudinary.com.evil.test/arbox/image/upload/a.jpg",
+    "https://res.cloudinary.com@evil.test/arbox/image/upload/a.jpg",
+    "https://res.cloudinary.com/other/image/upload/a.jpg",
+    "https://res.cloudinary.com:444/arbox/image/upload/a.jpg", PHOTO + "#fragment",
+    PHOTO + "\n", PHOTO.replace("/arbox/", "\\arbox/"), "https://[broken",
+    PHOTO + "a" * 2048])
+def test_missing_or_untrusted_photo_falls_back_to_name(image):
+    assert avatar_url(image) is None
+    data = roster(session(booked_users=[{"full_name": "דנה לוי", "image": image}]))
+    assert data["attendees"] == [{"name": "דנה לוי"}]
 
 
 @pytest.mark.parametrize("nested", [False, True])

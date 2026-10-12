@@ -26,7 +26,7 @@ test('closed by default, only fetches on opening, and clears names on close', as
   let calls = 0;
   const w = widget(async () => { calls++; return result(); });
   assert.equal(calls, 0); assert.equal(w.dialog.open, false);
-  await w.open(); assert.equal(calls, 1); assert.equal(w.list.children[0].textContent, 'דנה לוי');
+  await w.open(); assert.equal(calls, 1); assert.equal(w.list.children[0].children[1].textContent, 'דנה לוי');
   w.ui.close(); assert.equal(w.list.children.length, 0); assert.equal(w.dialog.open, false);
   await w.open(); assert.equal(calls, 2);
 });
@@ -37,7 +37,7 @@ test('late answers cannot repopulate a closed dialog or replace a newer workout'
   const current = w.open(43);
   second.resolve(result({schedule_id: 43, attendees: [{name: 'Current'}]})); await current;
   first.resolve(result()); await old;
-  assert.deepEqual(w.list.children.map(x => x.textContent), ['Current']);
+  assert.deepEqual(w.list.children.map(x => x.children[1].textContent), ['Current']);
 });
 test('studio changes and wrong response identities cannot show names', async () => {
   const p = pending(), w = widget(() => p.promise);
@@ -62,6 +62,26 @@ test('hidden and unavailable names differ from an empty roster; failures can ret
 test('names are text, and a partial list shows the total without fabricating people', async () => {
   const name = '<img src=x onerror=alert(1)>';
   const w = widget(async () => result({registered: 5, attendees: [{name}]})); await w.open();
-  assert.equal(w.list.children[0].textContent, name); assert.equal(w.list.children[0].children.length, 0);
+  const label = w.list.children[0].children[1];
+  assert.equal(label.textContent, name); assert.equal(label.children.length, 0);
   assert.match(w.status.textContent, /1.*5/);
+});
+
+test('photos load on demand with initials until loaded and recover on error', async () => {
+  const image_url = 'https://res.cloudinary.com/arbox/image/upload/member.jpg';
+  const w = widget(async () => result({attendees: [{name: 'דנה לוי', image_url}, {name: 'יובל'}]}));
+  assert.equal(w.list.children.length, 0);
+  await w.open();
+  const avatar = w.list.children[0].children[0];
+  const [initials, img] = avatar.children;
+  assert.equal(avatar.attributes['aria-hidden'], 'true');
+  assert.equal(initials.textContent, 'דל');
+  assert.equal(img.src, image_url); assert.equal(img.className, 'attendees-photo');
+  assert.equal(img.alt, ''); assert.equal(img.referrerPolicy, 'no-referrer');
+  assert.equal(img.loading, 'lazy');
+  img.onload(); assert.equal(initials.hidden, true); assert.equal(img.className, 'attendees-photo is-loaded');
+  img.onerror(); assert.equal(initials.hidden, false); assert.deepEqual(avatar.children, [initials]);
+  const noPhoto = w.list.children[1].children[0];
+  assert.equal(noPhoto.children.length, 1); assert.equal(noPhoto.children[0].textContent, 'י');
+  w.ui.close(); assert.equal(w.list.children.length, 0);
 });

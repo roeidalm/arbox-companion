@@ -6,6 +6,7 @@ import {quotaSummary, quotaRow, membershipDisclosure} from './membership-ui.js?v
 import {membershipChoice} from './membership-choice.js?v=2';
 import {calendarLinks} from './session-calendar.js?v=1';
 import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
+import './attendees.js?v=3';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
@@ -115,10 +116,12 @@ export class ArboxAppPanel extends HTMLElement {
     this._hass = value;
     this.style.colorScheme = value.themes?.darkMode ? "dark" : "light";
     if (this._menu) this._menu.hass = value;
-    if (this._built && value.connected === false)
+    if (this._built && value.connected === false) {
+      this._attendees?.close();
       this.connectionError(
         "החיבור ל־Home Assistant נותק. הנתונים המוצגים הם מהטעינה האחרונה.",
       );
+    }
     if (was === false && value.connected !== false && this._built) this.load();
     this.start();
   }
@@ -140,6 +143,7 @@ export class ArboxAppPanel extends HTMLElement {
     this.start();
   }
   disconnectedCallback() {
+    this._attendees?.destroy();
     clearInterval(this._timer);
     window.removeEventListener("hashchange", this._onLocation);
     window.removeEventListener("location-changed", this._onLocation);
@@ -175,7 +179,7 @@ export class ArboxAppPanel extends HTMLElement {
   build() {
     const css = node("link");
     css.rel = "stylesheet";
-    css.href = new URL("./app-panel.css?v=3.5.0", import.meta.url).href;
+    css.href = new URL("./app-panel.css?v=3.6.0", import.meta.url).href;
     this._shell = node("div", null, "app");
     this._shell.dir = "rtl";
     this._shell.lang = "he";
@@ -200,6 +204,7 @@ export class ArboxAppPanel extends HTMLElement {
       this._entry = this._entries.find(
         (e) => e.entry_id === this._entrySelect.value,
       );
+      this._attendees?.close();
       this._data = {};
       this._contexts = {};
       this._currentContext = null;
@@ -250,7 +255,35 @@ export class ArboxAppPanel extends HTMLElement {
     );
     const membershipCSS = node('link'); membershipCSS.rel = 'stylesheet';
     membershipCSS.href = new URL('./membership-ui.css?v=4', import.meta.url).href;
-    this.shadowRoot.replaceChildren(css, membershipCSS, this._shell);
+    const attendeesCSS = node('link'); attendeesCSS.rel = 'stylesheet';
+    attendeesCSS.href = new URL('./attendees.css?v=1', import.meta.url).href;
+    this._attendees?.destroy();
+    this.shadowRoot.replaceChildren(css, membershipCSS, attendeesCSS, this._shell);
+    this._attendees = globalThis.Attendees.create({document, mount: this.shadowRoot,
+      getStudio: () => this.context().studio_id,
+      request: (id, studio) => this.readAttendees(id, studio),
+    });
+  }
+  async readAttendees(scheduleId, studioId) {
+    const entry = this._entry.entry_id;
+    const result = await this.read('attendees', {schedule_id: scheduleId, studio_id: studioId});
+    if (entry !== this._entry.entry_id || studioId !== this.context().studio_id
+        || result.context?.studio_id !== studioId)
+      throw new Error('הסטודיו השתנה. פתחו את רשימת הנרשמים מחדש');
+    return result.data;
+  }
+  attendeesButton(s, label = '👥 נרשמים') {
+    const entry = this._entry.entry_id, studio = this.context().studio_id;
+    const trigger = button(label, () => {
+      if (entry !== this._entry.entry_id || studio !== this.context().studio_id) {
+        this.toast('הסטודיו השתנה. פתחו את האימון מחדש'); return;
+      }
+      return this._attendees.open(s, studio,
+        `${s.category_name || 'אימון'}${s.coach_name ? ' · ' + s.coach_name : ''}\n${fmtDate(s.date)} · \u2066${s.start_time}–${s.end_time || ''}\u2069`);
+    }, 'attendees-trigger');
+    trigger.setAttribute('aria-haspopup', 'dialog');
+    trigger.setAttribute('aria-label', `הצגת נרשמים · ${s.category_name || 'אימון'} · ${s.date} ${s.start_time}`);
+    return trigger;
   }
   navigate(tab) {
     window.history.replaceState(null, "", `#${tab}`);
@@ -261,6 +294,7 @@ export class ArboxAppPanel extends HTMLElement {
     const previousTab = this._tab;
     this._tab = parts[0] === "studio" || TABS.some((t) => t[0] === parts[0]) ? parts[0] : "overview";
     if (previousTab !== this._tab) {
+      this._attendees?.close();
       this._filtersByTab ||= {};
       this._filtersByTab[previousTab] = this._filters;
       this._filters = this._filtersByTab[this._tab] || {};
@@ -371,6 +405,7 @@ export class ArboxAppPanel extends HTMLElement {
         throw new Error("הסטודיו השתנה בזמן הטעינה. רעננו את הנתונים.");
       const nextContext = results[0][1].context || {};
       if (this._currentContext?.studio_id !== nextContext.studio_id) {
+        this._attendees?.close();
         this._data = {};
         this._contexts = {};
         this._journalState = null;
@@ -399,6 +434,7 @@ export class ArboxAppPanel extends HTMLElement {
     } catch (e) {
       if (generation === this._generation) {
         if (e.code === "forbidden") {
+          this._attendees?.close();
           this._data = {};
           this._contexts = {};
           this._currentContext = null;
@@ -524,8 +560,11 @@ export class ArboxAppPanel extends HTMLElement {
   }
   card(s) {
     if (this._tab === "mine") return this.mineCard(s);
-    const card = button("", () => this.openSession(s), "session-card");
-    card.dataset.focusKey = `session-${s.schedule_id}`;
+    const withRoster = this._tab === 'schedule';
+    const card = withRoster ? node('article', null, 'session-card session-roster-card')
+      : button("", () => this.openSession(s), "session-card");
+    const main = withRoster ? button('', () => this.openSession(s), 'session-open') : card;
+    main.dataset.focusKey = `session-${s.schedule_id}`;
     const time = node("div", null, "session-time");
     time.append(
       node("b", s.start_time?.slice(0, 5) || "—"),
@@ -541,19 +580,20 @@ export class ArboxAppPanel extends HTMLElement {
     if (this._tab !== "journal" && ["planned", "automatic"].includes(cls) && s.registration_note)
       info.append(node("small", s.registration_note, "planning-note"));
     if (this._tab === 'schedule') {
-      info.append(node('small', `${s.registered ?? '—'}/${s.max_users ?? '—'} רשומים${s.free > 0 ? ` · ${s.free} פנויים` : ''}`, 'session-capacity'));
       if (s.planning && s.planning.state !== 'ready') info.append(node('small', s.planning.reason, 'warning'));
     }
     if (this._tab === "journal")
       info.append(
         node("small", hasFeedback(s) ? "משוב נשמר" : "ללא משוב", "muted"),
       );
-    card.append(
+    main.append(
       time,
       info,
       node("span", label, `badge ${cls}`),
       node("span", "‹", "chevron"),
     );
+    if (withRoster) card.append(main, this.attendeesButton(s,
+      `👥 ${s.registered ?? '—'}/${s.max_users ?? '—'} רשומים${s.free > 0 ? ` · ${s.free} פנויים` : ''} ›`));
     if (this._tab === "journal") {
       card.classList.add("journal-card");
       const details = node("div", null, "journal-preview");
@@ -632,6 +672,7 @@ export class ArboxAppPanel extends HTMLElement {
     if (member) card.append(node('small', member.plan, 'mine-member muted'));
     if (planning && planning.state !== 'ready') card.append(node('p', planning.reason, 'mine-reason warning'));
     const actions = node('div', null, 'mine-actions');
+    actions.append(this.attendeesButton(s));
     const entry = this._entry.entry_id, studio = this.context().studio_id;
     if (!s.automation_skipped) actions.append(calendarLinks(s, async () => {
       if (entry !== this._entry.entry_id || studio !== this.context().studio_id) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');
@@ -1123,6 +1164,7 @@ export class ArboxAppPanel extends HTMLElement {
     }
     const body = inlineHost ? node('section', null, 'mine-inline') : this.dialog(s.category_name || "פרטי האימון"),
       context = { ...this.context() };
+    if (!inlineHost) body.append(this.attendeesButton(s));
     if (inlineHost) {
       body.append(button('סגירה', () => {this.closeInline(); this.render();}));
       inlineHost.append(body); this.keepInline(body);

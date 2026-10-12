@@ -67,7 +67,9 @@ selected studio's connection and honors its `whoIsBooked` visibility setting.
 Names and photo URLs are not stored in SQLite or browser storage; closing the
 dialog discards them. Public photos load from Arbox’s Cloudinary account without
 a page referrer, with initials for missing or failed images. The dialog becomes
-a bottom sheet on phones.
+a bottom sheet on phones. The same list is available in the Home Assistant
+panel (integration 3.6.0+), using HA view permissions and a studio-bound read
+without exposing the Arbox API key.
 Registration uses the opening time directly, without occupancy-based waiting or
 background learning. Upgrading to 1.63.0 removes the retired learning records and
 timing preferences while preserving automations, planned workouts and the journal.

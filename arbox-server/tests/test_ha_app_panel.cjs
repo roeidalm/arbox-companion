@@ -82,6 +82,26 @@ test("view-only and offline clients never send a mutation", async () => {
   await assert.rejects(panel.act("book", { schedule_id: 1 }, { studio_id: 7 }));
   assert.equal(calls.length, 0);
 });
+test('attendees use HA read transport with frozen workout and studio, including view-only users', async () => {
+  const {panel, calls} = harness();
+  panel._entry.can_write = false;
+  panel._currentContext = {studio_id: 7};
+  const roster = {studio_id: 7, schedule_id: 41, status: 'available', attendees: [{name: 'Member'}]};
+  panel._hass.callWS = async message => { calls.push(message); return {data: roster, context: {studio_id: 7}}; };
+  assert.equal(await panel.readAttendees(41, 7), roster);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{type: 'arbox/panel/read', entry_id: 'account-1',
+    resource: 'attendees', params: {schedule_id: 41, studio_id: 7}}]);
+  for (const change of ['entry', 'studio', 'response']) {
+    panel._entry.entry_id = 'account-1'; panel._currentContext = {studio_id: 7};
+    let finish;
+    panel._hass.callWS = () => new Promise(resolve => finish = resolve);
+    const pending = panel.readAttendees(41, 7);
+    if (change === 'entry') panel._entry.entry_id = 'account-2';
+    if (change === 'studio') panel._currentContext = {studio_id: 8};
+    finish({data: roster, context: {studio_id: change === 'response' ? 8 : 7}});
+    await assert.rejects(pending, /הסטודיו השתנה/);
+  }
+});
 test("uncertain mutation is never retried automatically", async () => {
   const { panel, calls } = harness();
   panel._hass.callWS = async (msg) => {

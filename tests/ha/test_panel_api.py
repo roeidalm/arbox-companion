@@ -98,6 +98,41 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             await api.ws_read.__wrapped__(self.hass, self.conn, msg)
             self.assertEqual(calls, [])
 
+    async def test_attendees_is_on_demand_view_read_bound_to_requested_studio(self):
+        self.entry.options[api.VIEW_USERS] = ['user']
+        calls = []
+        roster = {'studio_id': 8, 'schedule_id': 123, 'status': 'available',
+                  'attendees': [{'name': 'Member', 'image_url': 'https://res.cloudinary.com/arbox/image/upload/member.jpg'}]}
+        async def request(server, method, path, *args, **kwargs):
+            calls.append((method, path, args, kwargs))
+            return {'studio_id': 8} if path == '/panel/context' else roster
+        msg = {'id': 1, 'entry_id': 'one', 'resource': 'attendees',
+               'params': {'schedule_id': 123, 'studio_id': 8}}
+        with patch.object(api, 'request', request):
+            for _ in range(2):
+                await api.ws_read.__wrapped__(self.hass, self.conn, msg)
+                self.assertEqual(calls[-1], ('GET', '/schedule/123/attendees', (8,), {'params': {}}))
+                self.assertEqual(self.conn.send_result.call_args.args[1]['data'], roster)
+                self.assertFalse(self.conn.send_result.call_args.args[1]['can_write'])
+            self.assertEqual(sum(path == '/schedule/123/attendees' for _, path, _, _ in calls), 2)
+            calls.clear()
+            await api.ws_read.__wrapped__(self.hass, self.conn,
+                {**msg, 'params': {'schedule_id': 123, 'studio_id': 9}})
+            self.assertEqual([call[1] for call in calls], ['/panel/context'])
+            self.assertEqual(self.conn.send_error.call_args.args[1], 'conflict')
+            calls.clear()
+            for params in [{}, {'schedule_id': 123}, {'schedule_id': True, 'studio_id': 8},
+                           {'schedule_id': '../../settings', 'studio_id': 8},
+                           {'schedule_id': 123, 'studio_id': 0},
+                           {'schedule_id': 123, 'studio_id': 8, 'url': 'https://example.test'}]:
+                await api.ws_read.__wrapped__(self.hass, self.conn, {**msg, 'params': params})
+                self.assertEqual(self.conn.send_error.call_args.args[1], 'invalid_input')
+            self.assertEqual(calls, [])
+            self.entry.options = {}
+            await api.ws_read.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls, [])
+            self.assertEqual(self.conn.send_error.call_args.args[1], 'forbidden')
+
     async def test_membership_editor_requires_action_access_and_uses_fixed_path(self):
         self.entry.options[api.VIEW_USERS] = ['user']
         msg = {'id':1, 'entry_id':'one', 'action':'membership_policy_save', 'studio_id':8,

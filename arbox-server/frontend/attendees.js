@@ -3,7 +3,7 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Attendees = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
-  function create({document, request, getStudio}) {
+  function create({document, request, getStudio, mount = document.body}) {
     const element = (tag, className, text) => {
       const el = document.createElement(tag);
       if (className) el.className = className;
@@ -11,6 +11,7 @@
       return el;
     };
     const dialog = element('dialog', 'attendees-dialog');
+    dialog.dir = 'rtl'; dialog.lang = 'he';
     dialog.setAttribute('aria-labelledby', 'attendeesTitle');
     dialog.setAttribute('aria-describedby', 'attendeesSession');
     const head = element('div', 'attendees-head');
@@ -42,7 +43,7 @@
       return row;
     }
     head.append(title, closeButton); dialog.append(head, subtitle, status, list, retry);
-    document.body.append(dialog);
+    mount.append(dialog);
     let generation = 0, controller = null, context = null;
     function invalidate() {
       generation++; controller?.abort(); controller = null;
@@ -97,7 +98,7 @@
       closeButton.focus();
       return load();
     }
-    return {open, close};
+    return {open, close, destroy() { close(); dialog.remove(); }};
   }
   return {create};
 });

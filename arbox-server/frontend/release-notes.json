@@ -1,19 +1,27 @@
 {
   "schema": 1,
   "current": {
-    "id": "attendee-profile-photos",
-    "after": "1.64.0",
+    "id": "ha-attendee-roster",
+    "after": "1.64.1",
     "notes": [
       {
-        "kind": "added",
-        "title": "תמונות הנרשמים לאימון",
-        "text": "רשימת הנרשמים בלוח וב״שלי״ מציגה גם תמונת פרופיל, כשזמינה בארבוקס. כשאין תמונה מופיעים ראשי תיבות לצד השם.",
-        "href": "/mine",
-        "link_label": "לאימונים שלי"
+        "kind": "fixed",
+        "title": "נרשמים ותמונות גם ב־Home Assistant",
+        "text": "רשימת הנרשמים זמינה גם בפאנל HA: ב״שלי״, בלוח ובפרטי האימון. יש לעדכן את אינטגרציית Arbox Companion דרך HACS ולהפעיל מחדש את Home Assistant."
       }
     ]
   },
   "releases": [
+    {
+      "version": "1.64.1",
+      "notes": [
+        {
+          "kind": "fixed",
+          "title": "נרשמים ותמונות גם ב־Home Assistant",
+          "text": "רשימת הנרשמים זמינה גם בפאנל HA: ב״שלי״, בלוח ובפרטי האימון. יש לעדכן את אינטגרציית Arbox Companion דרך HACS ולהפעיל מחדש את Home Assistant."
+        }
+      ]
+    },
     {
       "version": "1.64.0",
       "notes": [

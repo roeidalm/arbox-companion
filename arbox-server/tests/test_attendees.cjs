@@ -9,6 +9,7 @@ class Element {
   showModal() { this.open = true; }
   close() { this.open = false; this.events.close?.(); }
   focus() {}
+  remove() { this.removed = true; }
 }
 function widget(request) {
   let studio = 10;
@@ -84,4 +85,18 @@ test('photos load on demand with initials until loaded and recover on error', as
   const noPhoto = w.list.children[1].children[0];
   assert.equal(noPhoto.children.length, 1); assert.equal(noPhoto.children[0].textContent, 'י');
   w.ui.close(); assert.equal(w.list.children.length, 0);
+});
+
+test('HA can mount in a shadow root and destroy the roster while a request is pending', async () => {
+  const mount = new Element('shadow-root'), document = {body: new Element('body'), createElement: tag => new Element(tag)};
+  const pendingRead = pending(); let signal;
+  const ui = create({document, mount, getStudio: () => 10, request: (_, studio, s) => {signal = s; return pendingRead.promise;}});
+  assert.equal(document.body.children.length, 0);
+  const dialog = mount.children[0];
+  assert.equal(dialog.dir, 'rtl');
+  const opening = ui.open({schedule_id: 42}, 10, 'Class');
+  ui.destroy();
+  assert.equal(signal.aborted, true); assert.equal(dialog.removed, true);
+  pendingRead.resolve(result()); await opening;
+  assert.equal(dialog.children[3].children.length, 0);
 });

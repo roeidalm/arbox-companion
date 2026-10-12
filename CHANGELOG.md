@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.64.3
+
+- Enlarge attendee profile photos on click in the website and Home Assistant; dismiss outside the photo or with Escape while keeping the roster open.
+- Update the Home Assistant integration to 3.6.1.
+
 ## 1.64.2
 
 - Add the attendee list and profile photos to the Home Assistant panel in Mine, the schedule and workout details; update the integration to 3.6.0.

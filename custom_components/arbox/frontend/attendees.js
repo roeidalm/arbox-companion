@@ -22,20 +22,47 @@
     const status = element('p', 'attendees-status'); status.setAttribute('role', 'status');
     const list = element('ul', 'attendees-list'); list.setAttribute('aria-label', 'רשימת הנרשמים');
     const retry = element('button', 'attendees-retry', 'ניסיון נוסף'); retry.type = 'button'; retry.hidden = true;
+    const photoDialog = element('dialog', 'attendees-photo-dialog');
+    photoDialog.dir = 'rtl'; photoDialog.lang = 'he';
+    photoDialog.setAttribute('aria-label', 'תמונת נרשם מוגדלת');
+    const largePhoto = element('img', 'attendees-photo-large');
+    largePhoto.referrerPolicy = 'no-referrer';
+    const photoClose = element('button', 'attendees-photo-close', '×');
+    photoClose.type = 'button'; photoClose.setAttribute('aria-label', 'סגירת התמונה');
+    photoDialog.append(largePhoto, photoClose);
+    function clearPhoto() { largePhoto.removeAttribute('src'); largePhoto.alt = ''; }
+    function closePhoto() {
+      if (photoDialog.open) photoDialog.close();
+      clearPhoto();
+    }
+    photoClose.onclick = closePhoto;
+    photoDialog.addEventListener('close', () => { if (!photoDialog.open) clearPhoto(); });
+    photoDialog.addEventListener('click', event => { if (event.target !== largePhoto) closePhoto(); });
+    largePhoto.onerror = closePhoto;
     function attendee(person) {
       const row = element('li');
-      const avatar = element('span', 'attendees-avatar'); avatar.setAttribute('aria-hidden', 'true');
+      const avatar = element(person.image_url ? 'button' : 'span', 'attendees-avatar');
+      if (person.image_url) {
+        avatar.type = 'button'; avatar.disabled = true;
+        avatar.setAttribute('aria-label', `הגדלת התמונה של ${person.name}`);
+        avatar.setAttribute('aria-haspopup', 'dialog');
+        avatar.onclick = () => {
+          if (avatar.disabled || !dialog.open || context?.studio !== getStudio()) return;
+          largePhoto.alt = person.name; largePhoto.src = person.image_url;
+          photoDialog.showModal(); photoClose.focus();
+        };
+      } else avatar.setAttribute('aria-hidden', 'true');
       const parts = person.name.trim().split(/\s+/);
       const initials = [parts[0], ...(parts.length > 1 ? [parts.at(-1)] : [])]
         .map(part => Array.from(part)[0]).join('');
-      const fallback = element('span', '', initials);
+      const fallback = element('span', '', initials); fallback.setAttribute('aria-hidden', 'true');
       avatar.append(fallback);
       if (person.image_url) {
         const img = element('img', 'attendees-photo');
         img.alt = ''; img.width = 44; img.height = 44;
         img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
-        img.onload = () => { fallback.hidden = true; img.className = 'attendees-photo is-loaded'; };
-        img.onerror = () => { fallback.hidden = false; avatar.replaceChildren(fallback); };
+        img.onload = () => { fallback.hidden = true; img.className = 'attendees-photo is-loaded'; avatar.disabled = false; };
+        img.onerror = () => { fallback.hidden = false; avatar.disabled = true; avatar.replaceChildren(fallback); };
         img.src = person.image_url;
         avatar.append(img);
       }
@@ -43,9 +70,10 @@
       return row;
     }
     head.append(title, closeButton); dialog.append(head, subtitle, status, list, retry);
-    mount.append(dialog);
+    mount.append(dialog, photoDialog);
     let generation = 0, controller = null, context = null;
     function invalidate() {
+      closePhoto();
       generation++; controller?.abort(); controller = null;
       list.replaceChildren(); status.textContent = ''; retry.hidden = true;
     }
@@ -98,7 +126,7 @@
       closeButton.focus();
       return load();
     }
-    return {open, close, destroy() { close(); dialog.remove(); }};
+    return {open, close, destroy() { close(); dialog.remove(); photoDialog.remove(); }};
   }
   return {create};
 });

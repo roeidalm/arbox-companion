@@ -6,7 +6,7 @@ import {quotaSummary, quotaRow, membershipDisclosure} from './membership-ui.js?v
 import {membershipChoice} from './membership-choice.js?v=2';
 import {calendarLinks} from './session-calendar.js?v=1';
 import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
-import './attendees.js?v=3';
+import './attendees.js?v=4';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
@@ -256,7 +256,7 @@ export class ArboxAppPanel extends HTMLElement {
     const membershipCSS = node('link'); membershipCSS.rel = 'stylesheet';
     membershipCSS.href = new URL('./membership-ui.css?v=4', import.meta.url).href;
     const attendeesCSS = node('link'); attendeesCSS.rel = 'stylesheet';
-    attendeesCSS.href = new URL('./attendees.css?v=1', import.meta.url).href;
+    attendeesCSS.href = new URL('./attendees.css?v=2', import.meta.url).href;
     this._attendees?.destroy();
     this.shadowRoot.replaceChildren(css, membershipCSS, attendeesCSS, this._shell);
     this._attendees = globalThis.Attendees.create({document, mount: this.shadowRoot,

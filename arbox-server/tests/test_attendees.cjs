@@ -5,6 +5,7 @@ class Element {
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   setAttribute(key, value) { this.attributes[key] = value; }
+  removeAttribute(key) { delete this.attributes[key]; delete this[key]; }
   addEventListener(key, fn) { this.events[key] = fn; }
   showModal() { this.open = true; }
   close() { this.open = false; this.events.close?.(); }
@@ -16,7 +17,7 @@ function widget(request) {
   const document = {body: new Element('body'), createElement: tag => new Element(tag)};
   const ui = create({document, request, getStudio: () => studio});
   const dialog = document.body.children[0];
-  return {ui, dialog, status: dialog.children[2], list: dialog.children[3], retry: dialog.children[4],
+  return {ui, dialog, photoDialog: document.body.children[1], status: dialog.children[2], list: dialog.children[3], retry: dialog.children[4],
     setStudio: value => { studio = value; }, open: (id = 42) => ui.open({schedule_id: id}, studio, 'Flex · שני 09:30')};
 }
 const result = (extra = {}) => ({status: 'available', studio_id: 10, schedule_id: 42,
@@ -75,16 +76,41 @@ test('photos load on demand with initials until loaded and recover on error', as
   await w.open();
   const avatar = w.list.children[0].children[0];
   const [initials, img] = avatar.children;
-  assert.equal(avatar.attributes['aria-hidden'], 'true');
+  assert.equal(avatar.tagName, 'button'); assert.equal(avatar.disabled, true);
+  assert.equal(avatar.attributes['aria-label'], 'הגדלת התמונה של דנה לוי');
   assert.equal(initials.textContent, 'דל');
   assert.equal(img.src, image_url); assert.equal(img.className, 'attendees-photo');
   assert.equal(img.alt, ''); assert.equal(img.referrerPolicy, 'no-referrer');
   assert.equal(img.loading, 'lazy');
   img.onload(); assert.equal(initials.hidden, true); assert.equal(img.className, 'attendees-photo is-loaded');
+  assert.equal(avatar.disabled, false);
   img.onerror(); assert.equal(initials.hidden, false); assert.deepEqual(avatar.children, [initials]);
+  assert.equal(avatar.disabled, true);
   const noPhoto = w.list.children[1].children[0];
   assert.equal(noPhoto.children.length, 1); assert.equal(noPhoto.children[0].textContent, 'י');
   w.ui.close(); assert.equal(w.list.children.length, 0);
+});
+
+test('photo preview dismisses independently and clears on roster changes or destroy', async () => {
+  const image_url = 'https://res.cloudinary.com/arbox/image/upload/member.jpg';
+  const w = widget(async () => result({attendees: [{name: 'דנה לוי', image_url}]}));
+  await w.open();
+  const avatar = w.list.children[0].children[0], thumbnail = avatar.children[1];
+  const [photo, close] = w.photoDialog.children;
+  avatar.onclick(); assert.equal(w.photoDialog.open, false);
+  thumbnail.onload(); avatar.onclick();
+  assert.equal(w.photoDialog.open, true); assert.equal(photo.src, image_url); assert.equal(photo.alt, 'דנה לוי');
+  w.photoDialog.events.click({target: photo}); assert.equal(w.photoDialog.open, true);
+  w.photoDialog.events.click({target: w.photoDialog});
+  assert.equal(w.photoDialog.open, false); assert.equal(photo.src, undefined);
+  assert.equal(w.dialog.open, true); assert.equal(w.list.children.length, 1);
+  avatar.onclick(); close.onclick(); assert.equal(w.photoDialog.open, false);
+  avatar.onclick(); w.photoDialog.close(); assert.equal(photo.src, undefined);
+  avatar.onclick(); photo.onerror(); assert.equal(w.photoDialog.open, false);
+  w.setStudio(20); avatar.onclick(); assert.equal(w.photoDialog.open, false);
+  w.setStudio(10); avatar.onclick(); w.ui.close(); assert.equal(w.photoDialog.open, false);
+  avatar.onclick(); assert.equal(w.photoDialog.open, false);
+  w.ui.destroy(); assert.equal(w.photoDialog.removed, true);
 });
 
 test('HA can mount in a shadow root and destroy the roster while a request is pending', async () => {

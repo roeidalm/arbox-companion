@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.62.0
+
+- Open the workout's registered members from the existing schedule count or the new “נרשמים” action in Mine; use a dialog on desktop and a bottom sheet on phones.
+- Fetch names only on demand through the selected studio's connection, respect roster visibility settings, and discard names when the dialog closes. Empty, hidden and unavailable lists have distinct messages.
+
 ## 1.61.2
 
 - Share the existing Google Calendar connection and preferences across the account's studios without reconnecting or duplicating existing events; reconcile each studio independently.

@@ -51,6 +51,27 @@ const REASON_LABELS = {
   plans_changed: "שינוי תוכניות", other: "אחר", none: "ללא סיבה",
 };
 
+const attendees = Attendees.create({document, getStudio: () => state.selectedStudioId,
+  request: (id, studio, signal) => api(`/api/schedule/${id}/attendees`, {
+    headers: {'X-Arbox-Studio-Id': String(studio)}, signal,
+  }),
+});
+
+function attendeesButton(s, label = '👥 נרשמים') {
+  const studio = state.selectedStudioId;
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'attendees-trigger';
+  button.textContent = label;
+  button.setAttribute('aria-haspopup', 'dialog');
+  button.setAttribute('aria-label', `הצגת נרשמים · ${s.category_name || 'אימון'} · ${s.date} ${s.start_time}`);
+  button.onclick = () => {
+    if (studio !== state.selectedStudioId) { toast('הסטודיו השתנה. פתחו את האימון מחדש'); return; }
+    const day = new Date(`${s.date}T00:00`);
+    attendees.open(s, studio, `${s.category_name || 'אימון'}${s.coach_name ? ' · ' + s.coach_name : ''}\n${WEEKDAYS_HE[day.getDay()]} ${fmtDate(day)} · \u2066${s.start_time}–${s.end_time || ''}\u2069`);
+  };
+  return button;
+}
+
 function confirmSchedule(message) {
   const dialog = $("#scheduleConfirmDialog");
   const [title, ...body] = String(message || "").split("\n");
@@ -146,6 +167,7 @@ async function loadStudioSwitch({useDefault = false} = {}) {
     if (select.disabled) select.classList.add("studio-fixed-select");
     select.onchange = async () => {
       const previous = state.selectedStudioId;
+      attendees.close();
       select.disabled = true;
       try {
         await api("/api/studios/select", {
@@ -512,6 +534,7 @@ function initScheduleFromURL(restoreDate = false) {
 }
 
 function showView(name, push = true) {
+  attendees.close();
   state.view = name;
   $$(".view").forEach((v) => { v.hidden = true; });
   $(`#view-${name}`).hidden = false;
@@ -1050,8 +1073,10 @@ function renderSession(s) {
   row2.className = "row";
   const cap = document.createElement("span");
   cap.className = "cap";
-  cap.textContent = `${s.registered ?? "?"}/${s.max_users ?? "?"} רשומים` +
-    (s.free > 0 ? ` · ${s.free} פנויים` : "");
+  const capacity = `${s.registered ?? "?"}/${s.max_users ?? "?"} רשומים`;
+  if (state.apiKey) cap.append(attendeesButton(s, `👥 ${capacity} ›`));
+  else cap.textContent = capacity;
+  if (s.free > 0) cap.append(` · ${s.free} פנויים`);
   row2.appendChild(cap);
   const btns = document.createElement("span");
   btns.style.cssText = "display:flex; gap:4px;";
@@ -1537,6 +1562,7 @@ async function renderMineData(data, studio, quotaLoad) {
     c.appendChild(grow);
     const badge = statusBadge(s);
     if (badge) c.appendChild(badge);
+    if (state.apiKey) c.appendChild(attendeesButton(s));
     if (!s.automation_skipped) c.appendChild(calendarLinks(s.schedule_id));
     const uncertain = s.planning?.state === 'uncertain';
     const act = uncertain ? null : s.planning_source === "autobook" ? occurrenceSkipButton(s) : actionButton(s);

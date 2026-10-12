@@ -60,7 +60,12 @@ DATA_DIR=/path/to/data TZ=Asia/Jerusalem uvicorn app.main:app --app-dir arbox-se
 
 ### Sync model
 
-The UI and HA read SQLite only — opening the week view costs zero Arbox calls.
+The timetable and HA read SQLite — opening the week view costs zero Arbox calls.
+Click the registered count in the schedule or **נרשמים** in Mine to load the
+workout's current attendee names. This authenticated, on-demand read uses the
+selected studio's connection and honors its `whoIsBooked` visibility setting.
+Names are not stored in SQLite or browser storage; closing the dialog discards
+them. The dialog becomes a bottom sheet on phones.
 Upstream refresh is tiered by how fast each thing actually changes:
 
 - full 14-day window: 2×/day (one `betweenDates` range call), plus a nightly
@@ -322,6 +327,9 @@ cannot carry an `X-Api-Key` header.
 ### API
 
 `GET /api/health` · `GET /api/schedule?date_from&date_to&coach&category&mine`
+· `GET /api/schedule/{schedule_id}/attendees` (requires `X-Api-Key`; send
+`X-Arbox-Studio-Id` to guard the selected studio; returns `status`
+`available|hidden|unavailable`, `registered`, and `attendees: [{name}]`)
 · `POST /api/refresh {date_from?, date_to?}` (on-demand sync from Arbox —
 awaits completion; omitted range = full window; clamped to [today, +31d];
 debounced 10s per range) · `GET /api/facets` · `GET /api/me` ·

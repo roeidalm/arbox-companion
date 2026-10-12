@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from .rules import PlanningBlocked
 from .arbox_client import ArboxAuthError, ArboxError
+from .attendees import load_attendees
 from .connections import ConnectionError
 from .studio_runtime import StudioUnavailable
 from .ical import build_calendar, google_calendar_url
@@ -222,6 +223,27 @@ async def reset_setup(request: Request, x_api_key: str | None = Header(None)):
 
 
 # -------------------------------------------------------------- schedule
+
+@router.get("/schedule/{schedule_id}/attendees")
+async def schedule_attendees(schedule_id: int, request: Request,
+                             response: Response, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    response.headers["Cache-Control"] = "no-store"
+    if not s.syncer.box_id or not s.syncer.location_id:
+        raise HTTPException(409, "יש לבחור סטודיו לפני הצגת נרשמים")
+    session = await s.store.get_session(schedule_id)
+    if not session or session.get("box_id") != s.syncer.box_id:
+        raise HTTPException(404, "האימון אינו זמין בסטודיו הנבחר")
+    try:
+        result = await load_attendees(s.client, studio_id=s.syncer.box_id,
+                                      location_id=s.syncer.location_id, session=session)
+    except (ArboxError, ConnectionError):
+        raise HTTPException(502, "לא ניתן לטעון נרשמים מארבוקס כרגע. נסו שוב") from None
+    if result is None:
+        raise HTTPException(404, "האימון כבר אינו מופיע בלוח של הסטודיו")
+    return result
+
 
 @router.get("/schedule")
 async def schedule(

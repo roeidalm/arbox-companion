@@ -2,10 +2,10 @@
   "schema": 1,
   "current": {
     "id": "ha-attendee-roster",
-    "after": "1.64.1",
+    "after": "1.64.2",
     "notes": [
       {
-        "kind": "fixed",
+        "kind": "added",
         "title": "נרשמים ותמונות גם ב־Home Assistant",
         "text": "רשימת הנרשמים זמינה גם בפאנל HA: ב״שלי״, בלוח ובפרטי האימון. יש לעדכן את אינטגרציית Arbox Companion דרך HACS ולהפעיל מחדש את Home Assistant."
       }
@@ -13,10 +13,10 @@
   },
   "releases": [
     {
-      "version": "1.64.1",
+      "version": "1.64.2",
       "notes": [
         {
-          "kind": "fixed",
+          "kind": "added",
           "title": "נרשמים ותמונות גם ב־Home Assistant",
           "text": "רשימת הנרשמים זמינה גם בפאנל HA: ב״שלי״, בלוח ובפרטי האימון. יש לעדכן את אינטגרציית Arbox Companion דרך HACS ולהפעיל מחדש את Home Assistant."
         }

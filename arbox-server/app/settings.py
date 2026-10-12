@@ -13,10 +13,7 @@ from contextlib import contextmanager
 
 SETTINGS_FILE = "settings.json"
 
-from .registration_learning import DEFAULTS as TIMING_DEFAULTS, validate as validate_timing
-
 DEFAULTS: dict = {
-    "registration_timing": TIMING_DEFAULTS,
     "view_key": None,             # separate, opt-in read-only credential
     "api_key": None,              # generated on first run
     "kinds_migrated": 0,          # see KINDS_MIGRATION
@@ -183,6 +180,10 @@ class Settings:
                     self._data[k] = v
         except (FileNotFoundError, json.JSONDecodeError):
             pass
+        # Retire occupancy-based waiting, including per-studio overrides.
+        if "registration_timing" in self._data:
+            self._data.pop("registration_timing")
+            self.save()
         # a stored kinds list replaces the default wholesale, so kinds added
         # after that file was written would stay off forever
         if int(self._data.get("kinds_migrated") or 0) < KINDS_MIGRATION:
@@ -651,7 +652,7 @@ class Settings:
         for config in (ha, discord):
             config["routes"] = {kind: {**route, "target": "***" if "://" in route.get("target", "") else route.get("target", "")}
                                 for kind, route in config.get("routes", {}).items()}
-        return {"registration_timing": self._data["registration_timing"], "discord": discord, "timezone": self.timezone,
+        return {"discord": discord, "timezone": self.timezone,
                 "retention": self.retention,
                 "blocked_categories": self.blocked_categories,
                 "late_cancel_warning_minutes": self.late_cancel_warning_minutes,
@@ -718,9 +719,7 @@ class Settings:
                 cleaned[kind] = {"target": target, "copy": route.get("copy", False)}
             config["routes"] = cleaned
         if "registration_timing" in patch:
-            if not isinstance(patch["registration_timing"], dict):
-                raise ValueError("הגדרות הרשמה אינן תקינות")
-            validate_timing(patch["registration_timing"])
+            raise ValueError("הלמידה וההמתנה לפי תפוסה הוסרו. רעננו את האפליקציה")
         discord_patch = patch.get("discord") or {}
         for field in ("channel_id", "guild_id", "allowed_user_id"):
             if field in discord_patch and (not isinstance(discord_patch[field], str) or (discord_patch[field] and not discord_patch[field].isdigit())):
@@ -847,7 +846,7 @@ class Settings:
                     if str(x) in allowed
                 ]
                 self._data["exercise_packs_by_studio"] = scoped
-        for section in ("telegram", "ha", "discord", "notify", "retention", "journal", "registration_timing"):
+        for section in ("telegram", "ha", "discord", "notify", "retention", "journal"):
             if section in patch and isinstance(patch[section], dict):
                 for k, v in patch[section].items():
                     if v == "***":

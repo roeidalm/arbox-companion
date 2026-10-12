@@ -14,7 +14,7 @@
        style attributes, and blocking them breaks the date and quota rows. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Arbox Companion — לוח שיעורים</title>
-<link rel="stylesheet" href="/static/style.css?v=2.74.0">
+<link rel="stylesheet" href="/static/style.css?v=2.75.0">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
 <link rel="stylesheet" href="/static/google-calendar.css?v=9">
@@ -251,10 +251,6 @@
         <label>שבוע התחלה לספירה <input id="ruleAnchor" type="date"></label>
       </div>
       <p class="hint">המחזוריות משמשת לבדיקה שלא חסר אימון. היא אינה משנה את תנאי ההרשמה. תאריך ריק ייקבע לפי ההתאמה הראשונה.</p>
-      <div id="ruleTimingFields" hidden>
-        <div id="ruleTimingPreview"></div>
-        <label>הרשמה עבור אוטומציה זו <select id="ruleTimingMode"><option value="keep">השאר את ההעדפה הקיימת</option><option value="inherit">לפי ברירת המחדל</option><option value="immediate">מיידי לאוטומציה הזו</option></select></label>
-      </div>
       <button id="ruleSave" class="primary">שמור אוטומציה</button>
       <button id="ruleDraft" type="button">שמור כטיוטה מושבתת</button>
       <button id="ruleCancelEdit" hidden>בטל עריכה</button>
@@ -356,7 +352,6 @@
       <button class="subtab active" data-pane="profile">👤 פרופיל</button>
       <button class="subtab" data-pane="notify">🔔 התראות</button>
       <button class="subtab" data-pane="calendar">📅 לוח שנה</button>
-      <button class="subtab" data-pane="registration">⏱️ הרשמה ולמידה</button>
       <button class="subtab" data-pane="tracking">🏋️ מעקב</button>
       <button class="subtab" data-pane="studio">🏠 סטודיו</button>
       <button class="subtab" data-pane="cleanup">🧹 ניקוי</button>
@@ -540,40 +535,6 @@
       </div>
       <div id="googleCalendarPanel" class="card gc-panel"></div>
       </div>
-    </div>
-
-    <div class="pane" data-pane="registration" hidden>
-      <div class="card">
-        <h2>למידת קצב ההרשמה</h2>
-        <label><input type="checkbox" id="registrationLearning"> למידה לכל השיעורים בסטודיו הפעיל</label>
-        <p class="hint">דגימה במרווח אקראי של 20–40 שניות במשך החלון שנבחר מפתיחת ההרשמה, ועוד דגימת סיום לאחריו. אם השיעור התמלא, האיסוף עבורו נעצר מיד. כל דגימה נשמרת בנפרד ללא מחיקה אוטומטית. הלמידה אינה משנה את ההרשמה. כשהלמידה כבויה, נדגמים רק שיעורים עם תזמון או אוטומציה פעילים. שיעורים ללא מועד פתיחה ידוע אינם נמדדים.</p>
-        <label>חלון למידה מפתיחת ההרשמה (דקות) <input id="registrationWindow" type="number" min="1" max="120" value="30"></label>
-        <p class="hint">חלון הלמידה עצמאי מזמן ההמתנה: ממשיכים ללמוד גם אחרי שהושג הסף או שבוצעה הרשמה, עד שהשיעור מלא או שהחלון מסתיים. שינוי החלון יחול על פתיחות חדשות.</p>
-        <p id="registrationWarning" class="hint"></p>
-        <p id="registrationHealth" class="hint"></p>
-      </div>
-      <div class="card">
-        <h2>ברירת המחדל לתזמונים ולאוטומציות</h2>
-        <label><input type="checkbox" id="registrationWaiting"> הפעלת הרשמה בהמתנה לפי תפוסה</label>
-        <p class="hint">כבוי = הרשמה מיידית כמו היום, גם אם הוגדרו חריגות. פעיל = המתנה עד הסף או עד תום הזמן, המוקדם מביניהם. מידע חסר או ישן מחזיר להרשמה מיידית. ההמתנה עלולה לגרום לפספוס מקום.</p>
-        <div class="field-row">
-          <label>אחוז תפוסה להרשמה <input id="registrationPercent" type="number" min="1" max="50" value="30"></label>
-          <label>זמן המתנה מרבי מפתיחת ההרשמה (דקות) <input id="registrationTimeout" type="number" min="1" max="10" value="10"></label>
-        </div>
-        <button id="registrationSave" class="primary" type="button">שמור למידה וברירת מחדל</button>
-      </div>
-      <div class="card">
-        <h2>חריגה לשיעור או לאוטומציה</h2>
-        <p class="hint">אין צורך להגדיר כל שיעור. כולם יורשים את ברירת המחדל; החריגות נשמרות רק אם תבחרו אחרת. חריגה לשיעור קודמת לחריגה לאוטומציה. בחפיפה בין אוטומציות, החריגה בעלת המזהה הנמוך קודמת.</p>
-        <label>שיעור / אוטומציה <select id="registrationTarget"></select></label>
-        <div class="field-row">
-          <label>מצב <select id="registrationMode"><option value="inherit">לפי ברירת המחדל</option><option value="immediate">מיידי</option><option value="wait">המתנה מותאמת</option></select></label>
-          <label>אחוז <input id="registrationOverridePercent" type="number" min="1" max="50" value="30"></label>
-          <label>דקות <input id="registrationOverrideTimeout" type="number" min="1" max="10" value="10"></label>
-        </div>
-        <button id="registrationOverrideSave" type="button">שמור חריגה</button>
-      </div>
-      <div class="card"><h2>מה למדנו על השיעורים</h2><button id="registrationRefresh" type="button">עדכון התצוגה</button><div id="registrationStats"></div></div>
     </div>
 
     <div class="pane" data-pane="tracking" hidden>
@@ -908,14 +869,6 @@
   </form>
 </dialog>
 
-<dialog id="timingScheduleDialog" aria-labelledby="timingScheduleTitle">
-  <form method="dialog">
-    <h2 id="timingScheduleTitle">תזמון שיעור</h2>
-    <div id="timingScheduleContent"></div>
-    <label>העדפת הרשמה לשיעור הזה <select id="timingScheduleMode"><option value="keep">השאר את ההעדפה המוצגת</option><option value="immediate">מיידי לשיעור הזה</option><option value="inherit">לפי ברירת המחדל</option></select></label>
-    <div class="dialog-actions"><button value="cancel">ביטול</button><button value="confirm" class="primary">תזמן שיעור</button></div>
-  </form>
-</dialog>
 <dialog id="logJumpDialog">
   <form method="dialog">
     <h3>מעבר לתקופה אחרת</h3>
@@ -931,8 +884,6 @@
 <script src="/static/studio-navigation.js?v=1"></script>
 <script src="/static/notification-routes.js?v=1"></script>
 <script src="/static/attendees.js?v=1"></script>
-<script src="/static/app.js?v=2.74.0"></script>
-<script src="/static/registration-learning.js?v=4"></script>
-<script src="/static/registration-guidance.js?v=2"></script>
+<script src="/static/app.js?v=2.75.0"></script>
 </body>
 </html>

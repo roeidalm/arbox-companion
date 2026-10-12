@@ -268,11 +268,9 @@ async function toggleWatch(s, btn) {
       toast("הסימון בוטל");
     } else {
       const studio = state.selectedStudioId;
-      const timingMode = await chooseTimingForSchedule(s, studio);
-      if(timingMode===null){btn.disabled=false;return;}
       const membershipId = state.membershipOverrides.get(s.schedule_id) || null;
       const request = { schedule_id: s.schedule_id, allow_standby: true,
-                        membership_user_id: membershipId, timing_mode:timingMode==='keep'?null:timingMode };
+                        membership_user_id: membershipId };
       let r;
       // Vacation and quota are independent gates. A class can need both
       // confirmations, and neither preflight is allowed to store the pin.
@@ -1451,8 +1449,6 @@ async function loadMine() {
   if (data.memberships) state.memberships = data.memberships;
   if (state.memberships.length > 1) await loadWatchlist();
   if (studio !== state.selectedStudioId) return;
-  data.timing = await fetchTimingContext(studio);
-  if(studio!==state.selectedStudioId)return;
   loadMessages(); // non-blocking; fills its own card
 
   if(state.mineFilterStudio!==studio){state.mineFilters={};state.mineFilterStudio=studio;state.mineSummaryOpen=false;}
@@ -1530,7 +1526,6 @@ async function renderMineData(data, studio, quotaLoad) {
       t2.append(label);
     }
     grow.append(t1, t2);
-    grow.append(timingCard(data.timing?.sessions[String(s.schedule_id)],{kind:'session',id:s.schedule_id,session:s,studio,refresh:loadMine}));
     if (s.planning && s.planning.state !== 'ready') {
       const note = document.createElement('p');
       note.textContent = [s.planning.reason, s.planning.state === 'session_changed' ? '' : membershipName(s.planning.membership_user_id)].filter(Boolean).join(' · ');
@@ -2766,7 +2761,6 @@ function currentRuleDraft() {
 }
 
 function refreshSuggestedName() {
-  refreshTimingRuleDraft();
   if (!nameIsAuto) return;
   $("#ruleName").value = suggestRuleName(currentRuleDraft());
 }
@@ -2774,7 +2768,6 @@ function refreshSuggestedName() {
 function resetRuleForm() {
   $('#ruleRecurrence').value = 1;
   $('#ruleAnchor').value = '';
-  $('#ruleTimingMode').value='inherit';
   editingRuleId = null;
   editingEnabled = true;
   nameIsAuto = true;
@@ -2812,7 +2805,6 @@ async function startAutomationFromSession(s) {
 function startEditRule(r) {
   $('#ruleRecurrence').value = r.recurrence_weeks || 1;
   $('#ruleAnchor').value = r.recurrence_anchor || r.monitor?.anchor || '';
-  $('#ruleTimingMode').value='keep';
   editingRuleId = r.id;
   editingEnabled = r.enabled;
   // a hand-written name is the user's; a generated one keeps tracking edits
@@ -2830,7 +2822,6 @@ function startEditRule(r) {
   $("#ruleCancelEdit").hidden = false;
   $("#ruleMsg").textContent = "";
   renderRuleChips();
-  refreshTimingRuleDraft();
   $("#ruleName").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -2970,9 +2961,7 @@ async function loadRules() {
 
   let data;
   try { data = await api("/api/rules"); } catch (e) { return; }
-  ruleTimingContext=await fetchTimingContext(studio);
   if(studio!==state.selectedStudioId)return;
-  refreshTimingRuleDraft();
   const list = $("#rulesList");
   list.innerHTML = "";
   for (const r of data.rules) {
@@ -3006,7 +2995,6 @@ async function loadRules() {
       };
       grow.append(skip);
     }
-    if(r.mode==='autobook')grow.append(timingCard(ruleTimingContext?.rules[String(r.id)],{kind:'rule',id:r.id,studio,refresh:loadRules}));
     const tag = document.createElement("span");
     tag.className = "mode-tag" + (r.mode === "autobook" ? " autobook" : "");
     tag.textContent = r.mode === "autobook" ? "🤖 אוטומטי" : "🔔 התראה";
@@ -3085,7 +3073,6 @@ async function saveRuleForm(draft) {
       mode: $("#ruleMode").value,
       recurrence_weeks: Number($('#ruleRecurrence').value),
       recurrence_anchor: $('#ruleAnchor').value || null,
-      timing_mode: $("#ruleTimingMode").value==='keep'?null:$("#ruleTimingMode").value,
     };
     // an id turns the same endpoint into an update instead of an insert
     if (editingRuleId) {
@@ -3114,7 +3101,6 @@ function showPane(name) {
   $$(".pane").forEach((p) => { p.hidden = p.dataset.pane !== name; });
   $$(".subtab[data-pane]").forEach(
     (b) => b.classList.toggle("active", b.dataset.pane === name));
-  if (name === "registration" && typeof loadRegistrationLearning === "function") loadRegistrationLearning();
   if (name === "profile" || name === "studio") loadProfile();
   if (name === "studio") loadStudioConnections();
   if (name === "calendar") {

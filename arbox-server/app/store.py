@@ -406,6 +406,11 @@ class Store:
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA)
+        # Removed in 1.63.0: only occupancy-learning data, across all studios.
+        # Booking attempts, rules, watchlist and workout history are separate.
+        for table in ("registration_samples", "registration_windows",
+                      "registration_decisions", "registration_sample_runs"):
+            await self._db.execute(f"DROP TABLE IF EXISTS {table}")
         # additive migrations for DBs created before a column existed
         for table, col, ddl in (
             ("rules", "recurrence_weeks", "ALTER TABLE rules ADD COLUMN recurrence_weeks INTEGER NOT NULL DEFAULT 1"),

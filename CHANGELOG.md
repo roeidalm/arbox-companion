@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.63.0
+
+- Remove occupancy learning, waiting thresholds and per-workout timing overrides from settings, Mine, automations and scheduling. Automatic and pinned workouts register when booking opens, subject to the existing eligibility checks.
+- Stop the background sampler and remove its historical samples, observation windows, decisions and run records across studios on upgrade. Bookings, automations, planned workouts and the personal journal remain intact.
+
 ## 1.62.0
 
 - Open the workout's registered members from the existing schedule count or the new “נרשמים” action in Mine; use a dialog on desktop and a bottom sheet on phones.

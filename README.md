@@ -66,6 +66,9 @@ workout's current attendee names. This authenticated, on-demand read uses the
 selected studio's connection and honors its `whoIsBooked` visibility setting.
 Names are not stored in SQLite or browser storage; closing the dialog discards
 them. The dialog becomes a bottom sheet on phones.
+Registration uses the opening time directly, without occupancy-based waiting or
+background learning. Upgrading to 1.63.0 removes the retired learning records and
+timing preferences while preserving automations, planned workouts and the journal.
 Upstream refresh is tiered by how fast each thing actually changes:
 
 - full 14-day window: 2×/day (one `betweenDates` range call), plus a nightly

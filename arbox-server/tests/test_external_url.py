@@ -20,12 +20,14 @@ def test_redirect_migration_preserves_calendar_and_tokens(client):
     state.client.legacy.email='test@example.com'
     g=state.google_calendar
     p=g.profile()
+    events={'same-event':{'schedule_id':'42','studio_id':73,
+                         'end':'2099-01-01T09:00:00+02:00','digest':'unchanged'}}
     p.update(credentials={'client_id':'123.apps.googleusercontent.com','redirect_uri':REDIRECT},
-             refresh_token='existing',calendar_id='same-calendar',events={'42':'same-event'})
+             refresh_token='existing',calendar_id='same-calendar',events=events)
     headers={'X-Api-Key':api_key(client)}
     path='/api/calendar/google/redirect'
     assert client.post(path,json={'redirect_uri':'https://evil.example/api/calendar/google/callback'},headers=headers).status_code==422
     response=client.post(path,json={'redirect_uri':'https://public.example/api/calendar/google/callback'},headers=headers)
     assert response.status_code==200
-    assert p['refresh_token']=='existing' and p['calendar_id']=='same-calendar' and p['events']=={'42':'same-event'}
+    assert p['refresh_token']=='existing' and p['calendar_id']=='same-calendar' and p['events']==events
     assert client.post(path,json={}).status_code==401

@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import re
 import time
@@ -48,7 +49,7 @@ def test_status_storage_isolation(calendar):
     assert 'test-secret' not in result and 'test-refresh' not in result
     assert GoogleCalendar(calendar.path.parent,calendar.engine).profile()['calendar_id']=='test-calendar'
     calendar.engine.store.active_box_id=74
-    assert not calendar.status()['connected']
+    assert calendar.status()['connected']
     calendar.engine.store.active_box_id=73;calendar.engine.client.email='other@example.test'
     assert not calendar.status()['connected']
 
@@ -64,9 +65,120 @@ async def test_oauth_binding_replay_and_context(calendar):
     calendar.request=AsyncMock()
     with pytest.raises(ValueError):await calendar.callback(q['state'][0],'code','wrong')
     with pytest.raises(ValueError):await calendar.callback(q['state'][0],'code',cookie)
-    q,cookie=begin(calendar);calendar.engine.store.active_box_id=74
+    q,cookie=begin(calendar);calendar.engine.client.email='other@example.test'
     with pytest.raises(ValueError):await calendar.callback(q['state'][0],'code',cookie)
     calendar.request.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_oauth_survives_studio_switch_for_same_account(calendar):
+    q,cookie=begin(calendar)
+    calendar.engine.store.active_box_id=74
+    calendar.request=AsyncMock(side_effect=[
+        {'access_token':'access','refresh_token':'new','scope':SCOPE},
+        {'sub':'same','email':'google@example.test'}])
+    assert await calendar.callback(q['state'][0],'code',cookie)=='http://server.example:8177/settings'
+    assert calendar.profile()['refresh_token']=='new'
+
+def test_migrate_existing_calendar_from_secondary_panel_without_reconnecting(calendar):
+    original = copy.deepcopy(calendar.profile())
+    original.pop('origin_studio_id')
+    original['events'] = {'existing': {'schedule_id':'42', 'end':'2099-01-01T09:00:00+02:00', 'digest':'same'}}
+    original['generations'] = {'42': 2}
+    calendar.data = {'profiles': {
+        calendar.legacy_context(73): original,
+        calendar.legacy_context(74): {'preferences':copy.deepcopy(DEFAULTS), 'enabled':False,
+                                     'events':{}, 'owner':'unused'},
+    }}
+    calendar.save()
+    calendar.engine.settings.preferred_studio_id=73
+    calendar.engine.store.active_box_id=74
+    migrated = GoogleCalendar(calendar.path.parent, calendar.engine)
+    p=migrated.profile()
+    assert p['calendar_id']=='test-calendar' and p['refresh_token']=='test-refresh'
+    assert p['owner']==original['owner'] and p['generations']=={'42':2}
+    assert p['events']['existing']['studio_id']==73
+    assert migrated.generation_key(p,73,42)=='42'
+    assert migrated.generation_key(p,74,42)=='74:42'
+    p['enabled']=False; migrated.save()
+    calendar.engine.store.active_box_id=73
+    assert not GoogleCalendar(calendar.path.parent,calendar.engine).profile()['enabled']
+
+def test_existing_distinct_legacy_calendar_is_preserved(calendar):
+    first=copy.deepcopy(calendar.profile());first.pop('origin_studio_id')
+    second=copy.deepcopy(first);second.update(calendar_id='second-calendar',owner='second-owner')
+    calendar.data={'profiles':{calendar.legacy_context(73):first,calendar.legacy_context(74):second}}
+    calendar.engine.settings.preferred_studio_id=73
+    assert calendar.profile()['calendar_id']=='test-calendar'
+    calendar.engine.store.active_box_id=74
+    assert calendar.profile()['calendar_id']=='second-calendar'
+    calendar.engine.store.active_box_id=75
+    assert calendar.profile()['calendar_id']=='test-calendar'
+
+def test_unfinished_studio_setup_inherits_the_connected_account(calendar):
+    shared=calendar.profile()
+    calendar.data['profiles'][calendar.legacy_context(74)]={
+        'credentials':copy.deepcopy(shared['credentials']), 'enabled':False,
+        'events':{}, 'owner':'unfinished', 'preferences':copy.deepcopy(DEFAULTS)}
+    calendar.engine.store.active_box_id=74
+    assert calendar.profile() is shared
+
+@pytest.mark.asyncio
+async def test_shared_calendar_reconciles_each_studio_without_deleting_the_other(calendar):
+    remote={};writes=[]
+    async def google(p,method,path,**kw):
+        eid=path.rsplit('/',1)[-1]
+        assert path.startswith('/calendars/test-calendar/events')
+        if method=='POST':
+            eid=kw['json']['id']
+            if eid in remote: raise CalendarError('conflict',409)
+            remote[eid]=copy.deepcopy(kw['json'])
+        elif method=='GET': return remote[eid]
+        elif method=='PATCH': remote[eid].update(kw['json'])
+        elif method=='DELETE': remote[eid]={'status':'cancelled'}
+        writes.append((method,eid))
+        return {}
+    calendar.google=google
+    p=calendar.profile()
+    await calendar.sync()
+    first=next(iter(remote))
+    assert first=='ab'+hashlib.sha256(f"{p['owner']}:42:0".encode()).hexdigest()[:40]
+    calendar.engine.store.active_box_id=74
+    calendar.engine.store.get_meta.return_value={'studio_name':'Second', 'address':'Street 2'}
+    # Even overlapping upstream IDs remain distinct across studios.
+    await calendar.sync()
+    second=next(eid for eid in remote if eid!=first)
+    assert len(p['events'])==2
+    assert remote[second]['location']=='Second, Street 2'
+    assert remote[second]['extendedProperties']['private']['studio_id']=='74'
+    assert [method for method,_ in writes]==['POST','POST']
+    plans=calendar.engine._planned_sessions.return_value
+    calendar.engine._planned_sessions.return_value=[]
+    await calendar.sync()
+    assert remote[second]=={'status':'cancelled'}
+    assert 'summary' in remote[first] and list(p['events'])==[first]
+    calendar.engine._planned_sessions.return_value=plans
+    await calendar.sync()
+    replacement=next(eid for eid in p['events'] if eid!=first)
+    assert replacement!=second
+    calendar.engine.store.active_box_id=73
+    await calendar.sync()
+    assert len(p['events'])==2 and list(remote).count(first)==1
+    p['enabled']=False
+    calendar.engine.store.active_box_id=74
+    before=len(writes);await calendar.sync()
+    assert len(writes)==before
+
+@pytest.mark.asyncio
+async def test_another_studio_success_does_not_hide_sync_failure(calendar):
+    calendar.google=AsyncMock(side_effect=CalendarError('temporary failure'))
+    await calendar.sync()
+    calendar.engine.store.active_box_id=74
+    calendar.google=AsyncMock(return_value={})
+    await calendar.sync()
+    assert calendar.status()['error']=='temporary failure'
+    calendar.engine.store.active_box_id=73
+    await calendar.sync()
+    assert calendar.status()['error'] is None
 
 @pytest.mark.asyncio
 async def test_oauth_account_change(calendar):

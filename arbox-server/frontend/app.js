@@ -121,11 +121,11 @@ async function ensureMemberships() {
   } catch (e) { /* booking still works with the server-side default */ }
 }
 
-async function loadStudioSwitch() {
+async function loadStudioSwitch({useDefault = false} = {}) {
   if (!state.apiKey) return;
   const host = $("#studioSwitch");
   try {
-    const d = await api("/api/studios");
+    const d = await StudioNavigation.load(api, {useDefault});
     state.studios = d.studios || [];
     state.selectedStudioId = Number(d.selected_studio_id);
     host.innerHTML = "";
@@ -639,12 +639,23 @@ async function boot() {
     $("#view-key").hidden = false;
     return;
   }
-  loadFacets(); // fills the chips when it lands; schedule doesn't wait on it
-  await loadStudioSwitch(); // Establish the studio before starting context-bound reads.
+  // A fresh page starts at the user's default, never another tab's last choice.
+  if (!await loadStudioSwitch({useDefault: true})) {
+    showBootError(new Error('לא ניתן לפתוח את סטודיו ברירת המחדל'));
+    return;
+  }
+  state.memberships = [];
+  state.membershipOverrides.clear();
+  state.watchlist.clear();
+  loadFacets(); // Only after the default studio has been established.
   initScheduleFromURL();   // retain the view mode, start at studio today
   showView(viewFromPath(), false);
   window.dispatchEvent(new CustomEvent("arbox:ready", { detail: health }));
 }
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) boot(); // Restored browser pages do not rerun the script.
+});
 
 $("#setupBtn").addEventListener("click", async () => {
   const msg = $("#setupMsg");

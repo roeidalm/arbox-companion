@@ -1,4 +1,4 @@
-"""Opt-in Google calendar projection, isolated by Arbox account and studio.
+"""One opt-in Google connection per Arbox account, with studio-scoped events.
 
 Secrets are kept outside SQLite in a mode-0600 atomic file. Google IO never
 performs Arbox writes. Event ids are deterministic so uncertain inserts can be
@@ -125,20 +125,79 @@ class GoogleCalendar:
         os.replace(tmp, self.path)
         os.chmod(self.path, 0o600)
 
-    def context(self):
+    def account(self):
         e = self.engine
         account = e.client.email or str(e.client.user_id or '')
-        studio = e.store.active_box_id
-        if not account or not studio:
-            raise ValueError('יש להתחבר ל־Arbox ולבחור סטודיו לפני חיבור היומן')
-        return hashlib.sha256(f'{account}:{studio}'.encode()).hexdigest()
+        if not account:
+            raise ValueError('יש להתחבר ל־Arbox לפני חיבור היומן')
+        return account
+
+    def context(self):
+        return 'account:' + hashlib.sha256(self.account().encode()).hexdigest()
+
+    def legacy_context(self, studio):
+        return hashlib.sha256(f'{self.account()}:{studio}'.encode()).hexdigest()
 
     def profile(self):
-        profile = self.data['profiles'].setdefault(self.context(), {
-            'preferences': copy.deepcopy(DEFAULTS), 'enabled': False, 'events': {},
-            'owner': secrets.token_hex(16)})
+        studio = self.engine.store.active_box_id
+        if not studio:
+            raise ValueError('יש לבחור סטודיו לפני חיבור היומן')
+        profiles = self.data['profiles']
+        bindings = self.data.setdefault('account_profiles', {})
+        account = self.context()
+        changed = False
+        if account not in bindings:
+            # Adopt an existing connection before the first background studio
+            # runs, even when the panel currently shows an unconnected studio.
+            ids = [getattr(self.engine.settings, 'preferred_studio_id', None), studio]
+            public = getattr(self.engine.client, 'public', None)
+            if public:
+                ids.extend(s['id'] for c in public()['connections'] for s in c['studios'])
+            ids = list(dict.fromkeys(i for i in ids if type(i) is int and i > 0))
+            candidates = [(i, profiles[self.legacy_context(i)]) for i in ids
+                          if self.legacy_context(i) in profiles]
+            def configured(p):
+                return bool(p.get('credentials') or p.get('refresh_token') or p.get('calendar_id'))
+            candidates = [(i, p) for i, p in candidates if configured(p)]
+            candidates.sort(key=lambda item: (bool(item[1].get('calendar_id')),
+                                              bool(item[1].get('refresh_token'))), reverse=True)
+            if candidates:
+                origin, profile = candidates[0]
+                source = self.legacy_context(origin)
+            else:
+                origin, source = studio, account
+                profile = profiles.setdefault(source, {
+                    'preferences': copy.deepcopy(DEFAULTS), 'enabled': False,
+                    'events': {}, 'owner': secrets.token_hex(16)})
+            profile.setdefault('origin_studio_id', origin)
+            bindings[account] = source
+            changed = True
+        source = bindings[account]
+        # Preserve deliberately configured legacy calendars. Empty studio
+        # placeholders inherit the shared connection, including pause/disconnect.
+        legacy = self.legacy_context(studio)
+        previous = profiles.get(legacy, {})
+        if legacy != source and any(previous.get(k) for k in ('refresh_token', 'calendar_id')):
+            source = legacy
+        profile = profiles[source]
+        if 'origin_studio_id' not in profile:
+            profile['origin_studio_id'] = studio
+            changed = True
+        for event in profile['events'].values():
+            if 'studio_id' not in event:
+                event['studio_id'] = profile['origin_studio_id']
+                changed = True
         profile['preferences'].setdefault('cancelled', copy.deepcopy(DEFAULTS['cancelled']))
+        if changed:
+            self.save()
         return profile
+
+    def oauth_context(self):
+        # A studio switch is safe when it still uses the same account connection.
+        return self.context() + ':' + self.profile()['owner']
+
+    def generation_key(self, p, studio, sid):
+        return str(sid) if studio == p['origin_studio_id'] else f'{studio}:{sid}'
 
     def status(self):
         try:
@@ -221,14 +280,14 @@ class GoogleCalendar:
         now = time.time()
         self.pending = {k: v for k, v in self.pending.items() if v['expires'] > now}
         ticket = secrets.token_urlsafe(32)
-        self.pending[ticket] = {'context': self.context(), 'expires': now + 600,
+        self.pending[ticket] = {'context': self.oauth_context(), 'expires': now + 600,
                                 'return': return_url, 'stage': 'start'}
         base = p['credentials']['redirect_uri'].removesuffix(CALLBACK)
         return base + '/api/calendar/google/start?ticket=' + ticket
 
     def start(self, ticket):
         item = self.pending.pop(ticket, None)
-        if not item or item['expires'] < time.time() or item['stage'] != 'start' or item['context'] != self.context():
+        if not item or item['expires'] < time.time() or item['stage'] != 'start' or item['context'] != self.oauth_context():
             raise ValueError('קישור החיבור פג. חזרו להגדרות והתחברו שוב')
         state, cookie, verifier = (secrets.token_urlsafe(32) for _ in range(3))
         c = self.profile()['credentials']
@@ -244,7 +303,7 @@ class GoogleCalendar:
     async def callback(self, state, code, cookie):
         item = self.pending.pop(state, None)
         if (not item or item['expires'] < time.time() or item['stage'] != 'callback'
-                or item['context'] != self.context() or not secrets.compare_digest(
+                or item['context'] != self.oauth_context() or not secrets.compare_digest(
                     item['cookie'], hashlib.sha256(cookie.encode()).hexdigest())):
             raise ValueError('לא ניתן לאמת את החיבור. התחילו שוב מתוך הגדרות היומן')
         p = self.profile()
@@ -267,6 +326,8 @@ class GoogleCalendar:
             p.pop('calendar_id', None)
             p.pop('creation_pending', None)
             p['events'] = {}
+            p['generations'] = {}
+            p['sync_status'] = {}
             p['owner'] = secrets.token_hex(16)
         p.update(google_sub=who['sub'], email=who.get('email'), refresh_token=d['refresh_token'],
                  access_token=d['access_token'], expires_at=time.time()+d.get('expires_in', 3600), error=None,
@@ -285,7 +346,7 @@ class GoogleCalendar:
             self.save()
             try:
                 d = await self.google(p, 'POST', '/calendars', json={
-                    'summary': 'אימוני Arbox Companion · ' + (self.engine.syncer.studio_name or 'הסטודיו שלי'),
+                    'summary': 'אימוני Arbox Companion',
                     'description': 'Arbox Companion connection ' + p['owner'],
                     'timeZone': self.engine.settings.timezone})
             except CalendarError as err:
@@ -356,6 +417,7 @@ class GoogleCalendar:
             if cancellation:
                 prefs.update(busy=False, reminders=[])
             body = event_body(row, kind, prefs, e.settings.timezone, location, p['owner'])
+            body['extendedProperties']['private']['studio_id'] = str(e.store.active_box_id)
             if cancellation:
                 fee = ('ביטול מאוחר · כניסה נוצלה' if row['status'] == 'cancelled_late'
                        else 'החיוב בבירור' if row['status'] == 'cancelled_unknown' else 'בוטל בזמן')
@@ -364,8 +426,9 @@ class GoogleCalendar:
                 body['description'] += '\n' + fee + '\nסיבת הביטול: ' + (reason or 'טרם נמסרה')
             if not cancellation and datetime.fromisoformat(body['end']['dateTime']) <= now:
                 continue
-            generation = p.get('generations', {}).get(str(sid), 0)
-            eid = 'ab' + hashlib.sha256(f"{p['owner']}:{sid}:{generation}".encode()).hexdigest()[:40]
+            key = self.generation_key(p, e.store.active_box_id, sid)
+            generation = p.get('generations', {}).get(key, 0)
+            eid = 'ab' + hashlib.sha256(f"{p['owner']}:{key}:{generation}".encode()).hexdigest()[:40]
             desired[eid] = body
         return desired
 
@@ -379,6 +442,8 @@ class GoogleCalendar:
                     return
                 if not p.get('enabled') or not p.get('refresh_token'):
                     return
+                studio = self.engine.store.active_box_id
+                result = p.setdefault('sync_status', {}).setdefault(str(studio), {})
                 try:
                     await self.refresh_palette(p)
                     desired = await self.desired(p)
@@ -390,6 +455,7 @@ class GoogleCalendar:
                             continue
                         # Persist ownership before IO so a lost response is recoverable.
                         p['events'][eid] = {'end': body['end']['dateTime'], 'digest': None,
+                                            'studio_id': studio,
                                             'schedule_id': body['extendedProperties']['private']['schedule_id']}
                         self.save()
                         try:
@@ -417,6 +483,8 @@ class GoogleCalendar:
                         self.save()
                     now = datetime.now(ZoneInfo(self.engine.settings.timezone))
                     for eid, saved in list(p['events'].items()):
+                        if saved['studio_id'] != studio:
+                            continue
                         if eid in desired or datetime.fromisoformat(saved['end']) <= now:
                             continue
                         try:
@@ -429,14 +497,36 @@ class GoogleCalendar:
                             if err.status not in (404, 410):
                                 raise
                         self.retire_event(p, eid)
-                    p.update(last_sync=now.isoformat(), error=None)
+                    result.update(last_sync=now.isoformat(), error=None)
+                    p['last_sync'] = now.isoformat()
                 except (CalendarError, ValueError, KeyError) as err:
-                    p['error'] = str(err) if isinstance(err, CalendarError) else 'לא ניתן להשלים את הסנכרון. בדקו את הגדרות היומן'
+                    result['error'] = str(err) if isinstance(err, CalendarError) else 'לא ניתן להשלים את הסנכרון. בדקו את הגדרות היומן'
+                p['error'] = next((r['error'] for r in p['sync_status'].values() if r.get('error')), None)
                 self.save()
+
+    async def sync_all(self):
+        """Sync all studios sharing the connection selected in Settings."""
+        runtime = getattr(self.engine, 'studio_runtime', None)
+        if runtime is None:
+            await self.sync()
+            return
+        from .studio_context import _expected_context
+        async with self.engine.syncer.exclusive():
+            owner = self.profile()['owner']
+            async def connected_studio():
+                if self.profile()['owner'] == owner:
+                    await self.sync()
+            # This is an account-wide action. Runtime restores the panel
+            # selection before the surrounding request guard checks it again.
+            token = _expected_context.set(None)
+            try:
+                await runtime.run_all(connected_studio)
+            finally:
+                _expected_context.reset(token)
 
     def retire_event(self, p, eid):
         saved = p['events'].pop(eid)
-        sid = saved['schedule_id']
+        sid = self.generation_key(p, saved['studio_id'], saved['schedule_id'])
         generations = p.setdefault('generations', {})
         generations[sid] = generations.get(sid, 0) + 1
         self.save()

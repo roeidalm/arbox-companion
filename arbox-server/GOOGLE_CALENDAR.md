@@ -38,10 +38,14 @@ shows a reconnect message. Calendar creation is a separate explicit UI action.
 
 ## Behavior
 
-- Each Arbox account and selected studio has separate credentials/preferences,
-  Google account identity, secondary calendar and event mappings. This is the
-  existing single-account server model, not independent browser-user accounts.
-  The scheduler syncs the active Arbox account/studio only.
+- Each Arbox account shares one Google connection, calendar and preferences
+  across its enabled studios. Existing credentials, calendar and event IDs are
+  adopted automatically; no new consent or calendar is needed. Separately
+  configured legacy studio calendars are retained to avoid moving or duplicating
+  their events. This remains a single-account server, not browser-user accounts.
+- The scheduler processes every enabled studio, and manual sync processes all
+  studios sharing the current connection. Event ownership and reconciliation are
+  scoped per studio so one studio cannot delete another studio's events.
 - Future sessions in the next 30 days are projected every minute. Registered and
   waiting-list commitments take precedence over planned/automatic occurrences.
 - Event colors, free/busy and up to five popup reminders are configurable per
@@ -58,7 +62,7 @@ shows a reconnect message. Calendar creation is a separate explicit UI action.
 - Secrets live in `/data/google-calendar.json` (atomic writes, mode 0600), never
   in status responses, frontend assets or repository files. Include this file in
   private backups. OAuth state is one-use, expires after ten minutes, bound to a
-  secure HttpOnly browser cookie and account/studio context, and uses PKCE.
+  secure HttpOnly browser cookie and account/connection context, and uses PKCE.
 
 References: [Google OAuth web flow](https://developers.google.com/identity/protocols/oauth2/web-server),
 [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth),

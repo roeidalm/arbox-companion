@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.61.2
+
+- Share the existing Google Calendar connection and preferences across the account's studios without reconnecting or duplicating existing events; reconcile each studio independently.
+- Open fresh or restored pages at the default studio while preserving manual studio switching during the current visit.
+
 ## 1.61.1
 
 - Open and reload the schedule at today in the studio timezone while retaining day, week or month mode.

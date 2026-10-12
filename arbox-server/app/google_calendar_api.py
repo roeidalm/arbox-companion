@@ -71,7 +71,7 @@ async def upload(request: Request):
             if p.get('credentials', {}).get('client_id') != credentials['client_id']:
                 for key in ('calendar_id', 'creation_pending', 'google_sub', 'email', 'last_sync', 'error', 'palette', 'palette_checked_at'):
                     p.pop(key, None)
-                p.update(events={}, generations={}, owner=secrets.token_hex(16))
+                p.update(events={}, generations={}, sync_status={}, owner=secrets.token_hex(16))
             p['credentials'] = credentials
             g.save()
             return g.status()
@@ -168,7 +168,7 @@ async def enable(request: Request):
     try:
         async with g.engine.syncer.exclusive(), g.lock:
             await g.enable()
-        await g.sync()
+        await g.sync_all()
         return g.status()
     except (ValueError, CalendarError) as err:
         raise HTTPException(409, str(err))
@@ -181,7 +181,7 @@ async def recover(request: Request):
     try:
         async with g.engine.syncer.exclusive(), g.lock:
             await g.recover_calendar(body.get('calendar_id'))
-        await g.sync()
+        await g.sync_all()
         return g.status()
     except (ValueError, CalendarError) as err:
         raise HTTPException(409, str(err))
@@ -216,5 +216,5 @@ async def sync(request: Request):
         p = g.profile()
         if not p.get('enabled') or not p.get('refresh_token') or not p.get('calendar_id'):
             raise HTTPException(409, 'יש לחבר ולהפעיל סנכרון Google בהגדרות לוח השנה באתר')
-    await g.sync()
+    await g.sync_all()
     return g.status()

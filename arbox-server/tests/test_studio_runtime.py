@@ -98,6 +98,33 @@ async def test_all_studios_are_processed_with_their_own_memberships(runtime):
 
 
 @pytest.mark.asyncio
+async def test_manual_google_sync_visits_shared_studios_and_restores_request_context(runtime, tmp_path):
+    from app.google_calendar import GoogleCalendar
+    from app.studio_context import _expected_context
+    original = selected_snapshot(runtime)
+    runtime.syncer.client.email = 'same@example.test'
+    runtime.syncer.client.user_id = 1
+    engine = SimpleNamespace(client=runtime.syncer.client, store=runtime.store,
+                             settings=runtime.settings, syncer=runtime.syncer,
+                             studio_runtime=runtime)
+    calendar = GoogleCalendar(tmp_path, engine)
+    owner = calendar.profile()['owner']
+    seen = []
+    async def sync():
+        seen.append((runtime.store.active_box_id, calendar.profile()['owner']))
+    calendar.sync = sync
+    request_context = (runtime.syncer, 10, asyncio.current_task())
+    token = _expected_context.set(request_context)
+    try:
+        await calendar.sync_all()
+        assert _expected_context.get() == request_context
+    finally:
+        _expected_context.reset(token)
+    assert seen == [(10, owner), (20, owner)]
+    assert selected_snapshot(runtime) == original
+
+
+@pytest.mark.asyncio
 async def test_failed_studio_does_not_block_others_and_selection_is_restored(runtime, caplog):
     original = selected_snapshot(runtime)
     seen = []

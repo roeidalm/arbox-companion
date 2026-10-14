@@ -19,7 +19,8 @@ async def save_reason(engine, sid, code, text=None):
 async def notify_pending(engine):
     timeline = await engine.store.training_events()
     for row in await engine.store.training_history():
-        if row.get('source') != 'external_sync':
+        studio_cancelled = row['status'] == 'cancelled_studio'
+        if row.get('source') not in ('external_sync', 'external_studio'):
             continue
         # Historical imports remain visible, without flooding the user.
         if row['date'] < (date.today() - timedelta(days=7)).isoformat():
@@ -30,6 +31,15 @@ async def notify_pending(engine):
         key = f"external_cancel_notice:{sid}:{row['status']}:{event_id}"
         delivery = await engine.store.get_meta(key) or {}
         if delivery is True or delivery.get('delivered'):
+            continue
+        if studio_cancelled:
+            delivered = await engine.notifier.send(
+                f"ℹ️ האימון בוטל/הוסר על ידי הסטודיו\n{row['date']} · {row['start_time']} · {row['category_name']}\n"
+                f"{row.get('reason_text') or 'סיבת הביטול לא נמסרה'}\n"
+                'ההרשמה והתכנון למועד הזה נסגרו. אין צורך בפעולה; האוטומציה למועדים הבאים ממשיכה כרגיל.',
+                kind='studio')
+            if delivered:
+                await engine.store.set_meta(key, {'delivered': True})
             continue
         cid = delivery.get('cid') or secrets.token_urlsafe(8)
         if not delivery:

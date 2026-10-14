@@ -391,7 +391,7 @@ class GoogleCalendar:
                 kind = 'review'
             indexed[sid] = (row, kind)
         for outcome in await e.store.training_history():
-            if outcome['status'] not in ('cancelled_late', 'cancelled_safe', 'cancelled_unknown'):
+            if outcome['status'] not in ('cancelled_late', 'cancelled_safe', 'cancelled_unknown', 'cancelled_studio'):
                 continue
             if outcome['date'] < (today - timedelta(days=30)).isoformat():
                 continue
@@ -419,10 +419,11 @@ class GoogleCalendar:
             body = event_body(row, kind, prefs, e.settings.timezone, location, p['owner'])
             body['extendedProperties']['private']['studio_id'] = str(e.store.active_box_id)
             if cancellation:
-                fee = ('ביטול מאוחר · כניסה נוצלה' if row['status'] == 'cancelled_late'
+                fee = ('בוטל/הוסר על ידי הסטודיו · אין הרשמה במנוי' if row['status'] == 'cancelled_studio'
+                       else 'ביטול מאוחר · כניסה נוצלה' if row['status'] == 'cancelled_late'
                        else 'החיוב בבירור' if row['status'] == 'cancelled_unknown' else 'בוטל בזמן')
                 from .rules import RulesEngine
-                reason = row.get('reason_text') if row.get('reason_code') == 'other' else RulesEngine.REASON_LABELS.get(row.get('reason_code'))
+                reason = row.get('reason_text') if row.get('reason_code') in ('other', 'studio_removed', 'studio_cancelled') else RulesEngine.REASON_LABELS.get(row.get('reason_code'))
                 body['description'] += '\n' + fee + '\nסיבת הביטול: ' + (reason or 'טרם נמסרה')
             if not cancellation and datetime.fromisoformat(body['end']['dateTime']) <= now:
                 continue

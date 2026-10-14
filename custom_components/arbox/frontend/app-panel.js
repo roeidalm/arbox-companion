@@ -30,6 +30,8 @@ const STATUS = {
   missed: "לא הגעתי",
   pending: "ממתין לאישור הגעה",
   cancelled_safe: "בוטל",
+  cancelled_unknown: "שינוי בהרשמה — בבירור",
+  cancelled_studio: "בוטל/הוסר על ידי הסטודיו",
   cancelled_late: "ביטול מאוחר",
   standby_cancelled: "המתנה שבוטלה",
   standby: "המתנה ללא הרשמה",
@@ -1164,7 +1166,7 @@ export class ArboxAppPanel extends HTMLElement {
     }
     const body = inlineHost ? node('section', null, 'mine-inline') : this.dialog(s.category_name || "פרטי האימון"),
       context = { ...this.context() };
-    if (!inlineHost) body.append(this.attendeesButton(s));
+    if (!inlineHost && s.status !== 'cancelled_studio') body.append(this.attendeesButton(s));
     if (inlineHost) {
       body.append(button('סגירה', () => {this.closeInline(); this.render();}));
       inlineHost.append(body); this.keepInline(body);
@@ -1184,6 +1186,11 @@ export class ArboxAppPanel extends HTMLElement {
       node("span", sessionStatus(s)[0], "badge"),
       node("p", s.category_bio || "הסטודיו לא הוסיף תיאור לשיעור הזה."),
     );
+    if (s.status === 'cancelled_studio') {
+      body.append(node('p', s.reason_text || 'האימון הוסר מהלוח על ידי הסטודיו'));
+      body.append(node('p', 'אין צורך בפעולה. האוטומציות למועדים הבאים ממשיכות כרגיל.'));
+      return;
+    }
     const planning = s.planning || this._data.summary?.quota?.plan_states?.[String(s.schedule_id)];
     const past =
       this._tab === "journal" ||

@@ -420,6 +420,7 @@ class RulesEngine:
         claimed, because a class we already know will be skipped is not a plan.
         """
         skipped = await self.store.automation_skip_ids()
+        cancelled = await self.store.studio_cancelled_ids()
         plans: list[dict] = []
         seen: set[int] = set()
         stored = await self.store.planned_sessions(start, end)
@@ -427,7 +428,7 @@ class RulesEngine:
         for raw in [*(extra_plans or []), *stored]:
             plan = dict(raw)
             sid = int(plan["schedule_id"])
-            if sid in seen or not start <= plan.get("date", "") <= end:
+            if sid in cancelled or sid in seen or not start <= plan.get("date", "") <= end:
                 continue
             current_session = await self.store.get_session(sid) or plan
             if self._blocked(current_session):
@@ -477,7 +478,7 @@ class RulesEngine:
         # review even if its new details no longer match the original rule.
         for record in await self.store.list_auto_intents():
             sid = record['schedule_id']
-            if sid in seen or sid in skipped:
+            if sid in cancelled or sid in seen or sid in skipped:
                 continue
             original = json.loads(record['snapshot'])
             signature = self._intent_rule_signature(rules, original)
@@ -565,8 +566,11 @@ class RulesEngine:
         Keep past sessions visible until their outcome is resolved too.
         """
         pending = await self.store.get_meta(self.membership_policy.key(0) + ':uncertain') or {}
+        cancelled = await self.store.studio_cancelled_ids()
         rows = []
         for sid, operation in pending.items():
+            if int(sid) in cancelled:
+                continue
             session = await self.store.get_session(int(sid)) or operation.get('session')
             if session and session.get('user_booked') is None and session.get('user_in_standby') is None:
                 rows.append({**{k:v for k,v in session.items() if k != 'raw_json'}, 'membership_user_id': operation['membership_user_id'],
@@ -578,9 +582,12 @@ class RulesEngine:
         commitments = await self.store.quota_commitments(
             '0001-01-01', '9999-12-31', datetime.now().strftime('%Y-%m-%d %H:%M'))
         indexed = {r['schedule_id']: r for r in commitments}
+        cancelled = await self.store.studio_cancelled_ids()
         for member in members:
             history = await self.store.get_meta(self.membership_policy.key(member['id']) + ':history') or {}
             for row in history.get('charges', []):
+                if row['schedule_id'] in cancelled:
+                    continue  # Superseded by newer, corroborated upstream reads.
                 if row['schedule_id'] not in indexed:
                     indexed[row['schedule_id']] = row
                 elif (indexed[row['schedule_id']].get('status') == 'cancelled_late'
@@ -671,6 +678,8 @@ class RulesEngine:
         async with self._membership_lock:
             await self.migrate_learned_blocks()
             await self.refresh_planning_evidence()
+            from .studio_cancellations import reconcile_recent
+            await reconcile_recent(self)
             from .external_cancellations import notify_pending
             await notify_pending(self)
             await self.preflight_plans()
@@ -867,6 +876,8 @@ class RulesEngine:
         await self.refresh_planning_evidence(force_history=True)
         sid = session["schedule_id"]
         outcome = await self.store.get_training_outcome(sid)
+        if outcome and outcome['status'] == 'cancelled_studio':
+            raise PlanningBlocked('האימון בוטל/הוסר על ידי הסטודיו — לא תבוצע הרשמה מחדש')
         if outcome and outcome['status'] == 'cancelled_unknown':
             raise PlanningBlocked('הרשמה קודמת נעלמה — נדרש בירור לפני הרשמה נוספת')
         fresh = await self._guard_booking_identity(session)

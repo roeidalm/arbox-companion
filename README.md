@@ -82,6 +82,15 @@ Upstream refresh is tiered by how fast each thing actually changes:
   booking; selection follows verified class eligibility and available capacity
 - `⟳` in the UI / `?refresh=1` on the API: stale-while-revalidate background sync
 
+Studio cancellations are separate from missing personal bookings. When a booked
+class disappears, two nonempty reads of that studio's day and fresh history for
+every known membership must agree that the occurrence is gone and uncharged.
+The occurrence is then closed with an informational studio notice; its recurring
+rule remains active. Empty/unavailable days, conflicting bookings, and late fees
+stay unresolved. History retains the detection time and original audit trail;
+no cancellation reason is inferred from attendance counts. Google Calendar and
+the HA panel (3.6.2+) display the cancellation without attendance prompts.
+
 ### Rules & notifications
 
 Rules match on coach / category / weekday / time window, in two modes:

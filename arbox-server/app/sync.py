@@ -340,6 +340,11 @@ class Syncer:
                 if (old.get('user_booked') is not None
                         and f"{old['date']}T{old['start_time']}" > datetime.now().isoformat()
                         and not fresh.get(sid, {}).get('user_booked')):
+                    if sid not in fresh:
+                        from .studio_cancellations import confirm_removed
+                        day_rows = [r for r in sessions if r.get('date') == old['date']]
+                        if await confirm_removed(self, old, day_rows):
+                            continue
                     await self.store.record_external_cancellation(sid, old['user_booked'])
         # The resync-delete is clamped to today: with history retained, a
         # range that reaches into the past must never prune it — one empty

@@ -1620,6 +1620,7 @@ const OUTCOMES = {
   pending:   { label: "❔ הגעת?", cls: "o-pending" },
   missed:    { label: "❌ לא הגעתי", cls: "o-failed" },
   cancelled_unknown: { label: "⚠ שינוי בהרשמה — בבירור", cls: "o-skipped" },
+  cancelled_studio: { label: "ℹ️ בוטל/הוסר על ידי הסטודיו", cls: "o-cancelled" },
   cancelled_safe: { label: "🟢 בוטל בזמן", cls: "o-cancelled" },
   cancelled_late: { label: "🟠 ביטול מאוחר", cls: "o-skipped" },
   standby_cancelled: { label: "⚪ יצאתי מהמתנה", cls: "o-cancelled" },
@@ -1691,6 +1692,7 @@ const EVENT_LABELS = {
   standby_joined: "נכנס להמתנה",
   standby_rejoined: "נכנס שוב להמתנה",
   cancelled_unknown: "זוהתה הרשמה שנעלמה",
+  cancelled_studio: "הסטודיו ביטל/הסיר את האימון",
   cancelled_safe: "בוטל בזמן",
   cancelled_late: "ביטול מאוחר",
   standby_cancelled: "יצא מהמתנה",
@@ -1714,6 +1716,7 @@ function eventStamp(value) {
 function eventReason(e) {
   if (!e.reason_code || e.reason_code === "none") return "";
   if (e.reason_code === 'workout_changed') return ` · ${e.reason_text || 'פרטי האימון השתנו'}`;
+  if (['studio_removed', 'studio_cancelled'].includes(e.reason_code)) return ` · ${e.reason_text || 'סיבת הביטול לא נמסרה'}`;
   const value = e.reason_code === "other"
     ? (e.reason_text || "אחר") : (REASON_LABELS[e.reason_code] || e.reason_code);
   return ` · סיבה: ${value}`;
@@ -1726,7 +1729,7 @@ function eventEntry(e) {
 }
 
 function eventLead(e) {
-  if (e.source === "external_sync" || e.source === "external_confirmed") return " · מועד הביטול אינו ידוע";
+  if (['external_sync', 'external_confirmed', 'external_studio'].includes(e.source)) return " · מועד הביטול אינו ידוע";
   if (!e.date || !e.start_time || !e.occurred_at) return "";
   const start = new Date(`${e.date}T${e.start_time}`);
   const happened = new Date(e.occurred_at.replace(" ", "T"));
@@ -1906,7 +1909,7 @@ function renderHistory() {
         line.className = "hist-event";
         const clock = document.createElement("span");
         clock.className = "hist-event-time";
-        clock.textContent = (e.source === "external_sync" ? "זוהה ב־" : "") + eventStamp(e.occurred_at);
+        clock.textContent = (['external_sync', 'external_studio'].includes(e.source) ? "זוהה ב־" : "") + eventStamp(e.occurred_at);
         line.append(clock,
           ` · ${EVENT_LABELS[e.event_type] || e.event_type}`
           + (e.event_type.startsWith("cancelled") ? eventLead(e) : "")

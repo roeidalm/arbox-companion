@@ -522,6 +522,7 @@ class DigestStore:
         return rows
 
     async def automation_skip_ids(self): return set()
+    async def studio_cancelled_ids(self): return set()
     async def get_session(self, schedule_id):
         return next((s for s in await self.get_sessions() if s['schedule_id'] == schedule_id), None)
     async def planned_sessions(self, start, end):

@@ -560,6 +560,9 @@ class Store:
         return [dict(row) for row in await cur.fetchall()]
 
     async def intent_change(self, session: dict, *, read_only: bool = False) -> dict | None:
+        outcome = await self.get_training_outcome(session['schedule_id'])
+        if outcome and outcome['status'] == 'cancelled_studio':
+            return None
         record = await self.get_intent(session['schedule_id'])
         result = change(record, session)
         if read_only:
@@ -620,7 +623,8 @@ class Store:
     async def planning_history(self) -> list[dict]:
         cur = await self.db.execute(
             "SELECT * FROM training_events WHERE id IN (SELECT MAX(id) FROM training_events "
-            "WHERE change_json IS NOT NULL AND (? IS NULL OR box_id=?) GROUP BY schedule_id,box_id)",
+            "WHERE change_json IS NOT NULL AND (? IS NULL OR box_id=?) GROUP BY schedule_id,box_id) "
+            "AND schedule_id NOT IN (SELECT schedule_id FROM training_outcomes WHERE status='cancelled_studio')",
             (self.active_box_id, self.active_box_id))
         rows = [dict(r) for r in await cur.fetchall()]
         return [{**{k:v for k,v in e.items() if k != 'change_json'}, 'status': e['event_type'],
@@ -769,7 +773,8 @@ class Store:
              "FROM sessions s "
              "LEFT JOIN watchlist w "
              "  ON w.schedule_id = s.schedule_id AND w.result IS NULL "
-             "WHERE 1=1")
+             "WHERE NOT EXISTS (SELECT 1 FROM training_outcomes o "
+             "WHERE o.schedule_id=s.schedule_id AND o.status='cancelled_studio')")
         args: list[Any] = []
         if self.active_box_id is not None:
             q += " AND s.box_id = ?"; args.append(self.active_box_id)
@@ -1030,7 +1035,7 @@ class Store:
                     # even when the calendar row has since been removed.
                     cur = await self.db.execute(
                         "SELECT 1 FROM training_events WHERE schedule_id=? AND booking_id=? "
-                        "AND event_type IN ('cancelled_safe','cancelled_late') LIMIT 1",
+                        "AND event_type IN ('cancelled_safe','cancelled_late','cancelled_studio') LIMIT 1",
                         (row['id'], booking_id))
                     if await cur.fetchone():
                         continue
@@ -1069,6 +1074,8 @@ class Store:
         prior = await self.get_training_outcome(sid)
         if prior and prior['status'] in ('cancelled_late', 'cancelled_safe', 'standby_cancelled'):
             return
+        if prior and prior['status'] == 'cancelled_studio' and not confirmed_late:
+            return
         if not confirmed_late and prior:
             return
         if booking_id is None:
@@ -1086,6 +1093,42 @@ class Store:
         await self.log_event('warn', 'booking',
             'זוהה ביטול מאוחר ב־Arbox' if confirmed_late else 'הרשמה נעלמה — נדרש בירור',
             'מועד הגילוי בלבד; מבצע הביטול ומועד הביטול אינם ידועים', sid)
+
+    async def record_studio_cancellation(self, sid: int, booking_id: int | None,
+                                         *, reason: str | None = None) -> bool:
+        """Close the occurrence only; preserve rules, other dates and the audit trail."""
+        session = await self.get_session(sid)
+        if not session or session.get('box_id') != self.active_box_id:
+            return False
+        current = session.get('user_booked')
+        if current is not None and current != booking_id:
+            return False
+        prior = await self.get_training_outcome(sid)
+        if prior and prior['status'] not in ('cancelled_unknown', 'cancelled_studio'):
+            return False
+        if prior and prior['status'] == 'cancelled_studio' and not reason:
+            return True
+        if booking_id is None:
+            cur = await self.db.execute(
+                "SELECT booking_id FROM training_events WHERE schedule_id=? "
+                "AND event_type IN ('booked','rebooked') ORDER BY id DESC LIMIT 1", (sid,))
+            receipt = await cur.fetchone()
+            booking_id = receipt['booking_id'] if receipt else None
+        await self.db.execute(
+            "UPDATE sessions SET user_booked=NULL,user_in_standby=NULL,booking_option='cancelled' WHERE schedule_id=?", (sid,))
+        await self.set_training_outcome(sid, 'cancelled_studio', 'external_studio',
+            'studio_cancelled' if reason else 'studio_removed',
+            reason or 'האימון הוסר מלוח הסטודיו ומהרשמות המנוי; סיבת הביטול לא נמסרה',
+            booking_id=booking_id, counts_entry=False)
+        await self.db.execute('DELETE FROM planning_intents WHERE schedule_id=? AND box_id=?', (sid, self.active_box_id))
+        await self.db.execute("UPDATE watchlist SET result='cancelled — studio removed class' WHERE schedule_id=? AND result IS NULL", (sid,))
+        # Close every obsolete prompt for this occurrence, including attendance and booking.
+        await self.db.execute("UPDATE pending_prompts SET answered_at=datetime('now') WHERE schedule_id=? AND answered_at IS NULL", (sid,))
+        await self.db.commit()
+        await self.set_meta('quota_cache', None)
+        await self.log_event('info', 'studio', 'האימון בוטל/הוסר על ידי הסטודיו',
+                             reason or 'אומת מול לוח הסטודיו והרשמות המנוי; אין צורך בפעולה', sid)
+        return True
 
     async def training_history(self, now: Any | None = None) -> list[dict]:
         """Completed commitments and cancellations, newest first.
@@ -1447,6 +1490,12 @@ class Store:
         row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def studio_cancelled_ids(self) -> set[int]:
+        cur = await self.db.execute(
+            "SELECT schedule_id FROM training_outcomes WHERE status='cancelled_studio' "
+            "AND (? IS NULL OR box_id=?)", (self.active_box_id, self.active_box_id))
+        return {row[0] for row in await cur.fetchall()}
+
     async def live_prompt_for(self, schedule_id: int, action: str) -> bool:
         cur = await self.db.execute(
             "SELECT 1 FROM pending_prompts WHERE schedule_id=? AND action=? "
@@ -1476,7 +1525,7 @@ class Store:
             "  s.date, s.start_time, s.end_time, s.category_name, s.coach_name "
             "FROM watchlist w LEFT JOIN sessions s ON s.schedule_id = w.schedule_id "
             "WHERE w.result IS NOT NULL "
-            "  AND w.result NOT IN ('booked', 'already booked') "
+            "  AND w.result NOT IN ('booked', 'already booked', 'cancelled — studio removed class') "
             "UNION ALL "
             "SELECT a.schedule_id, a.result, a.at, 'rule' AS source, "
             "  s.date, s.start_time, s.end_time, s.category_name, s.coach_name "

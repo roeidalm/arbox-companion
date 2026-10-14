@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.64.4
+
+- Distinguish a removed studio class from a missing personal registration using two scoped, nonempty day reads and fresh membership history. Ambiguous responses and confirmed late fees remain unresolved rather than being treated as free cancellations.
+- Close the cancelled occurrence, obsolete prompts and quota commitments; preserve recurring rules and all other dates. Reconcile recent unresolved cancellations after upgrade.
+- Show studio cancellations in web/HA history and Google Calendar without attendance actions or calendar reminders. Send one informational studio notice instead of asking whether the user cancelled.
+- Update the Home Assistant integration to 3.6.2.
+
 ## 1.64.3
 
 - Enlarge attendee profile photos on click in the website and Home Assistant; dismiss outside the photo or with Escape while keeping the roster open.

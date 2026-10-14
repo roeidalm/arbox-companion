@@ -94,7 +94,8 @@ def event_body(session, kind, prefs, tz, location, owner):
     title = session.get('category_name') or 'אימון'
     if session.get('coach_name'):
         title += ' · ' + session['coach_name']
-    return {'summary': f"{LABELS[kind]} · {title}", 'location': location,
+    label = 'בוטל על ידי הסטודיו' if kind == 'cancelled' and session.get('status') == 'cancelled_studio' else LABELS[kind]
+    return {'summary': f"{label} · {title}", 'location': location,
             'description': calendar_description(session, standby=kind == 'standby') + '\n\n'
                 + 'מנוהל על ידי Arbox Companion. שינוי הרשמה נעשה באפליקציית Arbox Companion.',
             'start': {'dateTime': start.isoformat(), 'timeZone': tz},

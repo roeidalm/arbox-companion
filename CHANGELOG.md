@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.64.5
+
+- Label confirmed studio cancellations as "בוטל על ידי הסטודיו" in the Google Calendar event title, so the cancellation source is visible without opening the event.
+
 ## 1.64.4
 
 - Distinguish a removed studio class from a missing personal registration using two scoped, nonempty day reads and fresh membership history. Ambiguous responses and confirmed late fees remain unresolved rather than being treated as free cancellations.

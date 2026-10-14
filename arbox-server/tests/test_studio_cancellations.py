@@ -126,6 +126,6 @@ async def test_calendar_projects_studio_cancellation_without_review_or_reminders
          'status':'cancelled_studio','reason_code':'studio_cancelled','reason_text':'מיעוט נרשמים — לפי הודעת המשתמש'}
     calendar.engine.store.training_history.return_value=[row]
     body=next(iter((await calendar.desired(calendar.profile())).values()))
-    assert body['summary'].startswith('בוטל') and 'דורש בדיקה' not in body['summary']
+    assert body['summary'].startswith('בוטל על ידי הסטודיו · ') and 'דורש בדיקה' not in body['summary']
     assert 'מיעוט נרשמים' in body['description'] and 'החיוב בבירור' not in body['description']
     assert body['transparency']=='transparent' and body['reminders']['overrides']==[]

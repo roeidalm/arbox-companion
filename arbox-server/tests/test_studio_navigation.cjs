@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {load} = require('../frontend/studio-navigation.js');
+const {load, options} = require('../frontend/studio-navigation.js');
 
 function server(selected = 20, defaultId = 10) {
   const calls = [];
@@ -51,4 +51,17 @@ test('concurrent selection change is reported instead of displaying mixed studio
   const s = server();
   await assert.rejects(load(async (url, options) => s.api('/api/studios'),
     {useDefault: true}), /השתנתה/);
+});
+
+test('inactive connected studios stay visible but disabled; removed studios stay hidden', () => {
+  const choices = options({studios: [{id: 10, name: 'Active'}, {id: 20, name: 'Joe'}], affiliations: [
+    {id: 10, name: 'Active', has_active_membership: true},
+    {id: 30, name: 'Rashty', has_active_membership: false},
+    {id: 40, name: 'Removed', ignored: true},
+    {id: 50, name: 'Offline', has_active_membership: null},
+  ]});
+  assert.deepEqual(choices.map(s => s.id), [10, 20, 30, 50]);
+  assert.deepEqual(choices.map(s => s.available), [true, true, false, false]);
+  assert.equal(choices[2].unavailableReason, 'ללא מנוי פעיל');
+  assert.equal(choices[3].unavailableReason, 'החיבור אינו זמין');
 });

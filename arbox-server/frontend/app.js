@@ -148,22 +148,22 @@ async function loadStudioSwitch({useDefault = false} = {}) {
   try {
     const d = await StudioNavigation.load(api, {useDefault});
     state.studios = d.studios || [];
+    const choices = StudioNavigation.options(d);
     state.selectedStudioId = Number(d.selected_studio_id);
     host.innerHTML = "";
     if (!state.studios.length) { host.hidden = true; return; }
     const select = document.createElement("select");
     select.setAttribute("aria-label", "סטודיו נבחר");
-    select.title = state.studios.length === 1
-      ? "זה הסטודיו הפעיל היחיד שלך"
-      : "החלפת סטודיו";
-    for (const studio of state.studios) {
+    select.title = "החלפת סטודיו — ניהול והסרה בהגדרות › סטודיו";
+    for (const studio of choices) {
       const option = document.createElement("option");
       option.value = studio.id;
-      option.textContent = `${studio.id === Number(d.default_studio_id) ? "⭐" : "📍"} ${studio.name}`;
+      option.textContent = `${studio.id === Number(d.default_studio_id) ? "⭐" : "📍"} ${studio.name}${studio.available ? '' : ' · ' + studio.unavailableReason}`;
+      option.disabled = !studio.available;
       select.appendChild(option);
     }
     select.value = String(state.selectedStudioId);
-    select.disabled = state.studios.length === 1;
+    select.disabled = choices.length === 1;
     if (select.disabled) select.classList.add("studio-fixed-select");
     select.onchange = async () => {
       const previous = state.selectedStudioId;
@@ -185,7 +185,7 @@ async function loadStudioSwitch({useDefault = false} = {}) {
         select.value = String(previous);
         toast("החלפת הסטודיו נכשלה: " + e.message);
       } finally {
-        select.disabled = state.studios.length === 1;
+        select.disabled = choices.length === 1;
       }
     };
     host.appendChild(select);
@@ -3118,7 +3118,7 @@ async function loadStudioConnections() {
   const host = $('#studioConnections');
   try {
     if (!studioConnectionsPanel) {
-      const ui = await import('/static/studio-connections.js?v=1');
+      const ui = await import('/static/studio-connections.js?v=2');
       if (!studioConnectionsPanel) studioConnectionsPanel = ui.mountConnections(host, api, {
         afterEnable: async () => {
           if (!await loadStudioSwitch()) throw new Error('studio selector refresh failed');
@@ -3162,101 +3162,17 @@ function cardExpiryWarning(exp) {
 }
 
 function renderStudioPreferences(data, host) {
-  const affiliations = data.studio_affiliations || [];
-  const available = data.studios || [];
-  if (!available.length) return;
-  const canManage = affiliations.length > 1;
-
-  const manage = document.createElement("div");
-  manage.className = "studio-manage";
-  const heading = document.createElement("h3");
-  heading.textContent = "בחירה וסינון";
-  manage.appendChild(heading);
-
-  const defaultLabel = document.createElement("label");
-  defaultLabel.textContent = "סטודיו ברירת מחדל";
-  const select = document.createElement("select");
-  select.id = "defaultStudio";
-  // An ignored studio has unknown membership state because we deliberately
-  // do not query it. Keep it selectable so restoring it + making it default
-  // stays one action; the server verifies the membership before saving.
-  const defaultChoices = (canManage ? affiliations : available).filter(
-    (studio) => studio.has_active_membership !== false);
-  for (const studio of defaultChoices) {
-    const option = document.createElement("option");
-    option.value = studio.id;
-    option.textContent = studio.name + (studio.ignored ? " · הפעל מחדש" : "");
-    select.appendChild(option);
-  }
-  select.value = String(data.default_studio_id || data.selected_studio_id);
-  select.disabled = !canManage;
-  if (!canManage) select.classList.add("studio-fixed-select");
-  defaultLabel.appendChild(select);
-  manage.appendChild(defaultLabel);
-
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.textContent = "זה הסטודיו שייפתח בכל כניסה. מעבר מהכותרת הוא זמני." +
-    (canManage ? "" : " זה הסטודיו הפעיל היחיד שלך ולכן הוא נבחר אוטומטית.");
-  manage.appendChild(hint);
-
-  const ignored = new Set((data.ignored_studio_ids || []).map(Number));
-  const list = document.createElement("div");
-  list.className = "studio-ignore-list";
-  const checkboxes = [];
-  for (const studio of affiliations) {
-    const label = document.createElement("label");
-    label.className = "studio-ignore";
-    const check = document.createElement("input");
-    check.type = "checkbox";
-    check.value = studio.id;
-    check.checked = ignored.has(Number(studio.id));
-    checkboxes.push(check);
-    const text = document.createElement("span");
-    text.textContent = `התעלם מ-${studio.name}`;
-    const note = document.createElement("small");
-    note.textContent = studio.ignored ? "לא נמשך ממנו מידע" :
-      studio.has_active_membership === false ? "לא נמצא מנוי פעיל" : "";
-    label.append(check, text, note);
-    list.appendChild(label);
-  }
-  const guardDefault = () => {
-    for (const check of checkboxes) {
-      check.disabled = Number(check.value) === Number(select.value);
-      if (check.disabled) check.checked = false;
-    }
-  };
-  select.onchange = guardDefault;
-  guardDefault();
-  manage.appendChild(list);
-
-  const save = document.createElement("button");
-  save.className = "primary";
-  save.textContent = "שמור בחירת סטודיו";
-  save.disabled = !canManage;
-  save.onclick = async () => {
-    save.disabled = true;
-    try {
-      await api("/api/studios/preferences", {
-        method: "POST",
-        body: JSON.stringify({
-          default_studio_id: Number(select.value),
-          ignored_studio_ids: checkboxes.filter((x) => x.checked)
-            .map((x) => Number(x.value)),
-        }),
-      });
-      state.memberships = [];
-      state.facets = { coaches: [], categories: [] };
-      await Promise.all([loadStudioSwitch(), loadFacets(), ensureMemberships()]);
-      await loadProfile();
-      toast("בחירת הסטודיו נשמרה");
-    } catch (e) {
-      toast("השמירה נכשלה: " + e.message);
-      save.disabled = false;
-    }
-  };
-  manage.appendChild(save);
-  host.appendChild(manage);
+  StudioManagement.mount(host, data, api, async () => {
+    attendees.close();
+    state.memberships = [];
+    state.membershipOverrides.clear();
+    state.watchlist.clear();
+    state.facets = { coaches: [], categories: [] };
+    if (!await loadStudioSwitch()) throw new Error('לא ניתן לרענן את בורר הסטודיו. רעננו את העמוד');
+    await Promise.all([loadFacets(), ensureMemberships()]);
+    await loadProfile();
+    await loadStudioConnections();
+  });
 }
 
 async function loadProfile() {

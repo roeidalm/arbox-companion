@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.65.0
+
+- Keep connected studios without active memberships visible as disabled entries in the website studio picker, with an availability explanation.
+- Add confirmed studio removal and explicit restoration in Settings, with a replacement picker when removing the default. Keep at least one active studio; preserve history, upstream memberships and existing bookings.
+- Stop background work and pending opening jobs for removed studios, preserve temporary selection when removing another studio, and roll back failed identity validation. Preferences no longer trigger registration preflights.
+
 ## 1.64.5
 
 - Label confirmed studio cancellations as "בוטל על ידי הסטודיו" in the Google Calendar event title, so the cancellation source is visible without opening the event.

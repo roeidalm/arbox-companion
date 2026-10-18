@@ -89,13 +89,19 @@ export function mountConnections(host, api, {afterEnable = async () => {}} = {})
         const details = node('div', 'sc-identity');
         const name = node('strong', '', studio.name); name.dir = 'auto';
         const alreadyEnabled = studio.duplicate || enabledIds.has(id);
-        details.append(name, node('small', 'hint', alreadyEnabled
-          ? 'נוסף לבורר הסטודיואים למעלה'
+        details.append(name, node('small', 'hint', studio.ignored
+          ? 'הוסר מהרשימה · אפשר להחזיר דרך ״הסטודיואים שלי״ למעלה'
+          : alreadyEnabled && studio.has_active_membership === false
+          ? 'ללא מנוי פעיל · מוצג באפור בבורר'
+          : alreadyEnabled && studio.has_active_membership !== true
+          ? 'מחובר · לא ניתן לאמת את המנוי כרגע'
+          : alreadyEnabled ? 'נוסף לבורר הסטודיואים למעלה'
           : studio.has_active_membership === true ? 'נמצא בחשבון שלך'
           : studio.has_active_membership === false ? 'לא נמצא מנוי פעיל'
           : 'לא ניתן לאמת את המנוי כרגע. רעננו את החיבור.'));
         row.append(details);
-        if (alreadyEnabled) row.append(node('span', 'sc-added', '✓ נוסף'));
+        if (studio.ignored) row.append(node('span', 'hint', 'הוסר'));
+        else if (alreadyEnabled) row.append(node('span', 'sc-added', '✓ מחובר'));
         else if (offeredIds.has(id)) row.append(node('span', 'hint', 'מופיע גם בחיבור שלמעלה'));
         else {
           const add = button('הוסף לסטודיואים שלי', () => run(

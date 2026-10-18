@@ -557,7 +557,8 @@ class Syncer:
             await self._store_profile(profile)
             return await self.store.get_meta("memberships") or []
 
-    async def select_studio(self, box_id: int, make_default: bool = False) -> dict:
+    async def select_studio(self, box_id: int, make_default: bool = False,
+                            sync_schedule: bool = True) -> dict:
         """Validate a target completely before committing the panel selection."""
         async with self._lock:
             fields = ("box_id", "location_id", "membership_user_id", "memberships",
@@ -625,7 +626,8 @@ class Syncer:
                 raise
             # The identity is now valid and committed. A schedule outage may
             # leave its cached calendar visible, but must not undo selection.
-            await self.window_sync()
+            if sync_schedule:
+                await self.window_sync()
             return selected
 
     async def refresh_profile(self) -> dict:

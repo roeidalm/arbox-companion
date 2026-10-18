@@ -67,7 +67,7 @@ test('failed discovery keeps existing studios and never refreshes or changes sel
   await click(h.root, 'חיפוש סטודיואים נוספים');
   assert.match(text(h.root), /Moveom/);
   assert.match(text(h.root), /החיבור אינו זמין/);
-  assert.equal(walk(h.root).filter(el => el.textContent === '✓ נוסף').length, 1);
+  assert.equal(walk(h.root).filter(el => el.textContent === '✓ מחובר').length, 1);
   assert.equal(walk(h.root).find(el => el.textContent === 'חיפוש סטודיואים נוספים').disabled, false);
 });
 
@@ -131,4 +131,14 @@ test('unknown or inactive membership does not offer an enabled add button', asyn
   assert.ok(add.every(el => el.disabled));
   assert.match(text(h.root), /לא ניתן לאמת את המנוי כרגע/);
   assert.match(text(h.root), /לא נמצא מנוי פעיל/);
+});
+
+test('connected inactive and removed studios explain why they cannot be selected', async () => {
+  const h = await harness([{connections: [conn('Arbox', [
+    studio(1, 'Rashty', true, {has_active_membership: false}),
+    studio(2, 'Removed', true, {ignored: true}),
+  ])]}]);
+  assert.match(text(h.root), /ללא מנוי פעיל · מוצג באפור/);
+  assert.match(text(h.root), /הוסר מהרשימה/);
+  assert.doesNotMatch(text(h.root), /נוסף לבורר הסטודיואים למעלה/);
 });

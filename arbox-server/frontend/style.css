@@ -64,13 +64,10 @@ header h1 { font-size: 1.2em; margin: 0; }
   color: var(--muted); background: var(--bg); border-color: var(--line);
   cursor: default; opacity: .82;
 }
-.studio-ignore-list { margin: 8px 0 12px; }
-.studio-ignore {
-  display: grid; grid-template-columns: auto 1fr; column-gap: 8px;
-  align-items: center; margin: 5px 0;
-}
-.studio-ignore input { width: auto; margin: 0; }
-.studio-ignore small { grid-column: 2; color: var(--muted); }
+.studio-manage-list { margin: 16px 0 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.studio-manage-list .sc-studio:first-child { border-top: 0; }
+.studio-manage button { min-height: 44px; }
+button.studio-remove { color: var(--bad); background: transparent; border: 1px solid currentColor; }
 .sc-list { display: grid; gap: 12px; margin-top: 16px; }
 .sc-connection { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .sc-head, .sc-studio { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px; }

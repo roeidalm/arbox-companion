@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app.arbox_client import ArboxError
 from app.connections import ConnectionError
+from app.studio_runtime import StudioUnavailable
 from test_connections import FakeClient, affiliation
+from test_store import raw_session
 
 
 @pytest.fixture
@@ -147,3 +149,113 @@ def test_manual_refresh_debounce_is_scoped_to_studio(client):
     third = client.post("/api/refresh", headers=headers(client), json={})
     assert third.json()["skipped"] == "debounced"
     assert state.syncer.sync_range.await_count == 2
+
+
+def enable_second(client):
+    candidate = discover(client)
+    response = client.post("/api/connections/enable", headers=headers(client), json={
+        "connection_id": candidate["id"], "studio_id": 2})
+    assert response.status_code == 200
+    client.app.state.syncer.window_sync = AsyncMock()
+
+
+def preferences(client, default, ignored, **kwargs):
+    return client.post("/api/studios/preferences", headers=headers(client, **kwargs), json={
+        "default_studio_id": default, "ignored_studio_ids": ignored})
+
+
+def test_remove_default_preserves_history_and_stops_only_its_background_work(client):
+    from datetime import datetime, timedelta
+
+    enable_second(client)
+    state = client.app.state
+    client.portal.call(state.store.upsert_sessions, [raw_session(100, "2026-10-18", user_booked=99)])
+    rule_id = client.portal.call(state.store.save_rule, {"name": "Original rule", "mode": "autobook"})
+
+    async def add_jobs():
+        for box_id in (1, 2):
+            state.scheduler.add_job(AsyncMock(), "date", id=f"open_{box_id}_100",
+                                    run_date=datetime.now() + timedelta(hours=1))
+
+    client.portal.call(add_jobs)
+    response = preferences(client, 2, [1])
+    assert response.status_code == 200, response.text
+    assert state.syncer.box_id == state.store.active_box_id == state.settings.preferred_studio_id == 2
+    assert state.settings.ignored_studio_ids == [1]
+    assert state.scheduler.get_job("open_1_100") is None
+    assert state.scheduler.get_job("open_2_100") is not None
+    state.syncer.window_sync.assert_not_awaited()
+    state.rules_engine.review_plans.assert_not_awaited()
+    work = AsyncMock()
+    with pytest.raises(StudioUnavailable):
+        client.portal.call(state.studio_runtime.run_for, 1, work)
+    work.assert_not_awaited()
+    studios = client.get("/api/studios", headers=headers(client)).json()
+    assert [s["id"] for s in studios["studios"]] == [2]
+    assert next(s for s in studios["affiliations"] if s["id"] == 1)["ignored"]
+    connections = client.get("/api/connections", headers=headers(client)).json()
+    assert connections["connections"][0]["studios"][0]["ignored"]
+
+    # Restore through the same public action, without changing the new default.
+    assert preferences(client, 2, []).status_code == 200
+    assert state.settings.preferred_studio_id == state.syncer.box_id == 2
+    async def read_original():
+        return await state.store.get_session(100), await state.store.list_rules()
+    session, rules = client.portal.call(state.studio_runtime.run_for, 1, read_original)
+    assert session["user_booked"] == 99
+    assert any(r["id"] == rule_id and r["enabled"] for r in rules)
+
+
+def test_remove_nonselected_studio_preserves_temporary_selection(client):
+    enable_second(client)
+    state = client.app.state
+    # The ignored studio may already be inactive. Removing it must not change
+    # a user's deliberate browsing of a different, non-default studio.
+    state.client.legacy.profile.return_value["users_boxes"].append(affiliation(3, "Old studio"))
+    client.portal.call(state.syncer.select_studio, 2)
+    state.syncer.window_sync.reset_mock()
+    assert preferences(client, 1, [3]).status_code == 200
+    assert state.syncer.box_id == 2
+    assert state.settings.preferred_studio_id == 1
+    state.syncer.window_sync.assert_not_awaited()
+
+
+@pytest.mark.parametrize("default,ignored", [(1, [1]), (2, [1, 2]), (999, [1])])
+def test_invalid_removal_leaves_preferences_and_identity_unchanged(client, default, ignored):
+    enable_second(client)
+    response = preferences(client, default, ignored)
+    assert response.status_code == 422
+    state = client.app.state
+    assert state.settings.ignored_studio_ids == []
+    assert state.syncer.box_id == state.store.active_box_id == state.settings.preferred_studio_id == 1
+
+
+def test_guarded_removal_cannot_change_the_callers_studio(client):
+    enable_second(client)
+    assert preferences(client, 2, [1], guard=True).status_code == 409
+    state = client.app.state
+    assert state.settings.ignored_studio_ids == []
+    assert state.syncer.box_id == state.settings.preferred_studio_id == 1
+
+
+def test_removal_failed_membership_validation_rolls_back(client):
+    enable_second(client)
+    state = client.app.state
+    state.syncer._store_membership = AsyncMock(side_effect=ArboxError("inventory unavailable"))
+    assert preferences(client, 2, [1]).status_code == 422
+    assert state.settings.ignored_studio_ids == []
+    assert state.syncer.box_id == state.store.active_box_id == state.settings.preferred_studio_id == 1
+    assert [s["id"] for s in client.get("/api/studios", headers=headers(client)).json()["studios"]] == [1, 2]
+
+
+def test_restoring_inactive_studio_keeps_it_visible_without_enabling_bookings(client):
+    enable_second(client)
+    assert preferences(client, 1, [2]).status_code == 200
+    FakeClient.inactive.add(2)
+    assert preferences(client, 1, []).status_code == 200
+    data = client.get("/api/studios", headers=headers(client)).json()
+    assert [s["id"] for s in data["studios"]] == [1]
+    restored = next(s for s in data["affiliations"] if s["id"] == 2)
+    assert restored["ignored"] is False
+    assert restored["has_active_membership"] is False
+    assert client.app.state.syncer.box_id == 1

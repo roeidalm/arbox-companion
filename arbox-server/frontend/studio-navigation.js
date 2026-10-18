@@ -17,7 +17,15 @@
     }
     return studios;
   }
-  const api = {load};
+  function options(data) {
+    const active = (data.studios || []).filter(s => !s.ignored);
+    const ids = new Set(active.map(s => Number(s.id)));
+    return [...active.map(s => ({...s, available: true})),
+      ...(data.affiliations || []).filter(s => !s.ignored && !ids.has(Number(s.id)))
+        .map(s => ({...s, available: false,
+          unavailableReason: s.has_active_membership === false ? 'ללא מנוי פעיל' : 'החיבור אינו זמין'}))];
+  }
+  const api = {load, options};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.StudioNavigation = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

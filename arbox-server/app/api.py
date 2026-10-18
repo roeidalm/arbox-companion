@@ -1576,7 +1576,16 @@ async def studios(request: Request, x_api_key: str | None = Header(None)):
 @router.get("/connections")
 async def connections(request: Request, x_api_key: str | None = Header(None)):
     require_key(request, x_api_key)
-    return ctx(request).connections.public()
+    return _connections_public(ctx(request))
+
+
+def _connections_public(s):
+    result = s.connections.public()
+    ignored = set(s.settings.ignored_studio_ids)
+    for connection in result["connections"]:
+        for studio in connection["studios"]:
+            studio["ignored"] = studio["id"] in ignored
+    return result
 
 
 @router.post("/connections/discover")
@@ -1586,7 +1595,8 @@ async def discover_connections(request: Request, body: ConnectionDiscoveryBody |
     s = ctx(request)
     async with s.syncer.exclusive():
         try:
-            result = await s.connections.discover(body.whitelabel if body else None)
+            await s.connections.discover(body.whitelabel if body else None)
+            result = _connections_public(s)
         except ConnectionError as err:
             raise HTTPException(422, str(err)) from None
         except (ArboxError, OSError, TimeoutError):
@@ -1641,7 +1651,7 @@ async def enable_connection(request: Request, body: ConnectionEnableBody,
                     _expected_context.reset(token)
         except (ArboxError, OSError, TimeoutError, StudioUnavailable):
             pending = True
-        result = s.connections.public()
+        result = _connections_public(s)
         if pending:
             result.update(sync_pending=True,
                           warning="הסטודיו נוסף; הסנכרון הראשוני טרם הושלם. אפשר לרענן שוב בהמשך.")
@@ -1670,24 +1680,41 @@ async def studio_preferences(request: Request, body: StudioPreferences,
     s = ctx(request)
     ignored = list(dict.fromkeys(int(x) for x in body.ignored_studio_ids))
     if body.default_studio_id in ignored:
-        raise HTTPException(422, "default studio cannot be ignored")
+        raise HTTPException(422, "יש לבחור סטודיו ברירת מחדל חלופי לפני ההסרה")
     previous_ignored = s.settings.ignored_studio_ids
     s.settings.set_ignored_studios(ignored)
     try:
         studios = await s.syncer.discover_studios()
         if not studios:
-            raise ArboxError("At least one studio with an active membership is required")
+            raise ArboxError("צריך להשאיר לפחות סטודיו אחד עם מנוי פעיל")
         if not any(x["id"] == body.default_studio_id for x in studios):
-            raise ArboxError("Default studio has no active membership")
-        selected = await s.syncer.select_studio(
-            body.default_studio_id, make_default=True)
-        await s.store.set_meta("quota_cache", None)
-        await s.store.set_meta("effective_membership_id", None)
-        await s.rules_engine.schedule_openings()
-    except ArboxError as err:
+            raise ArboxError("לסטודיו ברירת המחדל אין מנוי פעיל")
+        default_changed = body.default_studio_id != s.settings.preferred_studio_id
+        current_available = any(x["id"] == s.syncer.box_id for x in studios)
+        if default_changed or not current_available:
+            # Preference changes validate identity but never run registration
+            # preflights as a side effect of removing/restoring a studio.
+            selected = await s.syncer.select_studio(
+                body.default_studio_id, make_default=True, sync_schedule=False)
+        else:
+            selected = next(x for x in studios if x["id"] == s.syncer.box_id)
+    except BaseException as err:
         s.settings.set_ignored_studios(previous_ignored)
-        await s.syncer.discover_studios()
-        raise HTTPException(422, str(err))
+        try:
+            await s.syncer.discover_studios()
+        except (ArboxError, OSError, TimeoutError):
+            _LOGGER.warning("Could not refresh studios after reverting preferences")
+        if isinstance(err, ArboxError):
+            raise HTTPException(422, str(err)) from None
+        raise
+    # Runtime also rejects ignored studios, including already-dispatched jobs.
+    # Removing pending jobs keeps the scheduler free of dormant registrations.
+    for job in s.scheduler.get_jobs():
+        if any(job.id.startswith(f"open_{box_id}_") for box_id in ignored):
+            s.scheduler.remove_job(job.id)
+    await s.store.set_meta("quota_cache", None)
+    await s.store.set_meta("effective_membership_id", None)
+    await s.rules_engine.schedule_openings()
     return {"ok": True, "studio": selected,
             "ignored_studio_ids": s.settings.ignored_studio_ids}
 

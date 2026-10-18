@@ -3162,6 +3162,7 @@ function cardExpiryWarning(exp) {
 }
 
 function renderStudioPreferences(data, host) {
+  host.replaceChildren();
   StudioManagement.mount(host, data, api, async () => {
     attendees.close();
     state.memberships = [];
@@ -3238,7 +3239,7 @@ async function loadProfile() {
     link("https://maps.google.com/?q=" + encodeURIComponent(s.address), s.address));
   if (s.phone) kvRow(st, "טלפון", link("tel:" + s.phone, s.phone));
   if (s.email) kvRow(st, "אימייל", link("mailto:" + s.email, s.email));
-  renderStudioPreferences(d, st);
+  renderStudioPreferences(d, $('#studioManagement'));
 }
 
 // A short list beats a free-text field: a typo here silently moves every

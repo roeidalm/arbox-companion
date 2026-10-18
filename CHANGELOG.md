@@ -3,6 +3,10 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.65.1
+
+- Place studio management at the top of Settings › Studio so removal and restoration controls are visible before connection and membership details.
+
 ## 1.65.0
 
 - Keep connected studios without active memberships visible as disabled entries in the website studio picker, with an availability explanation.

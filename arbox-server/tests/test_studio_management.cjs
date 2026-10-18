@@ -15,7 +15,7 @@ class Element {
 }
 const walk = node => [node, ...node.children.flatMap(walk)];
 const find = (root, text) => walk(root).find(el => el.textContent === text);
-const data = () => ({default_studio_id: 1, selected_studio_id: 1, ignored_studio_ids: [],
+const data = () => ({default_studio_id: 1, selected_studio_id: 1, ignored_studio_ids: [], removed_studio_ids: [],
   studios: [{id: 1, name: 'Moveom'}, {id: 2, name: 'Joe'}],
   studio_affiliations: [{id: 1, name: 'Moveom', has_active_membership: true},
     {id: 2, name: 'Joe', has_active_membership: true},
@@ -62,18 +62,18 @@ test('removing default requires explicit replacement and then refreshes', async 
   assert.equal(confirm.disabled, false);
   dialog.close('confirm'); await pending;
   assert.deepEqual(h.calls, [{url: '/api/studios/preferences', body: {
-    default_studio_id: 2, ignored_studio_ids: [1]}}]);
+    default_studio_id: 2, ignored_studio_ids: [], removed_studio_ids: [1]}}]);
   assert.equal(h.refreshed(), 1);
 });
 
 test('nondefault removal preserves default and existing removals; restoring is explicit', async () => {
-  const d = data(); d.ignored_studio_ids = [3];
+  const d = data(); d.removed_studio_ids = [3];
   const h = harness(d, {confirm: async () => ({replacement: null})});
   await h.remove(1).onclick();
-  assert.deepEqual(h.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [3, 2]});
+  assert.deepEqual(h.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [], removed_studio_ids: [3, 2]});
   const restored = harness(d);
   await find(restored.host, 'החזר לרשימה').onclick();
-  assert.deepEqual(restored.calls[0].body, {default_studio_id: 1, ignored_studio_ids: []});
+  assert.deepEqual(restored.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [], removed_studio_ids: []});
 });
 
 test('failed save leaves controls retryable and never claims removal', async () => {
@@ -89,4 +89,39 @@ test('last active studio is protected while inactive studios can still be remove
   const h = harness(d);
   assert.equal(h.remove(0).disabled, true);
   assert.equal(h.remove(2).disabled, false);
+});
+
+test('ignore and cancel ignore only change monitoring, preserving separate removals', async () => {
+  const d = data(); d.removed_studio_ids = [3];
+  const h = harness(d);
+  const ignoreJoe = walk(h.host).filter(el => el.textContent === 'התעלם מסטודיו')[1];
+  await ignoreJoe.onclick();
+  assert.deepEqual(h.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [2], removed_studio_ids: [3]});
+  d.ignored_studio_ids = [2];
+  const ignored = harness(d);
+  assert.ok(find(ignored.host, 'בהתעלמות · נשאר ברשימה, המעקב מושהה'));
+  await find(ignored.host, 'ביטול התעלמות').onclick();
+  assert.deepEqual(ignored.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [], removed_studio_ids: [3]});
+});
+
+test('ignoring default asks for a replacement without removing it', async () => {
+  const h = harness();
+  const pending = find(h.host, 'התעלם מסטודיו').onclick();
+  const dialog = walk(h.body).find(el => el.tagName === 'dialog');
+  assert.ok(find(dialog, 'להתעלם מ־Moveom?'));
+  const select = walk(dialog).find(el => el.tagName === 'select');
+  select.value = '2'; select.onchange();
+  dialog.close('confirm'); await pending;
+  assert.deepEqual(h.calls[0].body, {default_studio_id: 2, ignored_studio_ids: [1], removed_studio_ids: []});
+});
+
+test('removing and restoring an ignored studio never resumes its monitoring implicitly', async () => {
+  const d = data(); d.ignored_studio_ids = [2];
+  const h = harness(d, {confirm: async () => ({replacement: null})});
+  await h.remove(1).onclick();
+  assert.deepEqual(h.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [2], removed_studio_ids: [2]});
+  d.removed_studio_ids = [2];
+  const restored = harness(d);
+  await find(restored.host, 'החזר לרשימה').onclick();
+  assert.deepEqual(restored.calls[0].body, {default_studio_id: 1, ignored_studio_ids: [2], removed_studio_ids: []});
 });

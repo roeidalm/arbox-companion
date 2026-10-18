@@ -161,11 +161,13 @@ async def test_run_for_restores_context_on_exception_and_cancellation(runtime):
 
 @pytest.mark.asyncio
 async def test_run_for_rejects_ignored_and_unknown_studios(runtime):
+    runtime.settings.set_studio_visibility([30], [20])
     job = AsyncMock()
-    for box_id in (30, 99):
+    for box_id in (20, 30, 99):
         with pytest.raises(StudioUnavailable):
             await runtime.run_for(box_id, job)
     job.assert_not_awaited()
+    assert [s["id"] for s in await runtime._studios()] == [10]
 
 
 @pytest.mark.asyncio

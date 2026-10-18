@@ -204,6 +204,28 @@ def test_ignored_studios_are_normalized(tmp_path):
     assert settings.ignored_studio_ids == [20, 30]
 
 
+def test_ignore_and_removal_are_persisted_independently(tmp_path):
+    settings = Settings(str(tmp_path))
+    settings.set_studio_visibility([20, 20, "30"], [30, 40, "40"])
+    loaded = Settings(str(tmp_path))
+    assert loaded.ignored_studio_ids == [20, 30]
+    assert loaded.removed_studio_ids == [30, 40]
+    assert loaded.excluded_studio_ids == [20, 30, 40]
+    loaded.set_ignored_studios([])
+    assert Settings(str(tmp_path)).removed_studio_ids == [30, 40]
+    assert loaded.public_view()["removed_studio_ids"] == [30, 40]
+
+
+def test_legacy_ignore_is_not_converted_to_removal(tmp_path):
+    settings = Settings(str(tmp_path))
+    settings.set_ignored_studios([20])
+    settings._data.pop("removed_studio_ids", None)
+    settings.save()
+    loaded = Settings(str(tmp_path))
+    assert loaded.ignored_studio_ids == [20]
+    assert loaded.removed_studio_ids == []
+
+
 def test_blocked_categories_are_scoped_per_studio(tmp_path):
     settings = Settings(str(tmp_path))
     settings.select_studio(10)

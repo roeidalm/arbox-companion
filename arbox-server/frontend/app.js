@@ -3118,7 +3118,7 @@ async function loadStudioConnections() {
   const host = $('#studioConnections');
   try {
     if (!studioConnectionsPanel) {
-      const ui = await import('/static/studio-connections.js?v=2');
+      const ui = await import('/static/studio-connections.js?v=3');
       if (!studioConnectionsPanel) studioConnectionsPanel = ui.mountConnections(host, api, {
         afterEnable: async () => {
           if (!await loadStudioSwitch()) throw new Error('studio selector refresh failed');

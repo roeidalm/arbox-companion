@@ -136,9 +136,11 @@ test('unknown or inactive membership does not offer an enabled add button', asyn
 test('connected inactive and removed studios explain why they cannot be selected', async () => {
   const h = await harness([{connections: [conn('Arbox', [
     studio(1, 'Rashty', true, {has_active_membership: false}),
-    studio(2, 'Removed', true, {ignored: true}),
+    studio(2, 'Removed', true, {removed: true}),
+    studio(3, 'Ignored', true, {ignored: true}),
   ])]}]);
   assert.match(text(h.root), /ללא מנוי פעיל · מוצג באפור/);
   assert.match(text(h.root), /הוסר מהרשימה/);
+  assert.match(text(h.root), /בהתעלמות · נשאר ברשימה/);
   assert.doesNotMatch(text(h.root), /נוסף לבורר הסטודיואים למעלה/);
 });

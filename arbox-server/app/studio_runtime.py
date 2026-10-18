@@ -37,14 +37,14 @@ class StudioRuntime:
         self.store = store
 
     async def _studios(self):
-        ignored = set(self.settings.ignored_studio_ids if self.settings else [])
+        excluded = set(self.settings.excluded_studio_ids if self.settings else [])
         studios = []
         seen = set()
         for studio in await self.store.get_meta("studios") or []:
             box_id = studio.get("id")
             if (not isinstance(box_id, int) or isinstance(box_id, bool)
-                    or box_id <= 0 or box_id in seen or box_id in ignored
-                    or studio.get("ignored")):
+                    or box_id <= 0 or box_id in seen or box_id in excluded
+                    or studio.get("ignored") or studio.get("removed")):
                 continue
             seen.add(box_id)
             studios.append(studio)

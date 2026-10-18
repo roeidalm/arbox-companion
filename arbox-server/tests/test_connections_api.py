@@ -159,12 +159,16 @@ def enable_second(client):
     client.app.state.syncer.window_sync = AsyncMock()
 
 
-def preferences(client, default, ignored, **kwargs):
+def preferences(client, default, ignored, removed=None, **kwargs):
+    body = {"default_studio_id": default, "ignored_studio_ids": ignored}
+    if removed is not None:
+        body["removed_studio_ids"] = removed
     return client.post("/api/studios/preferences", headers=headers(client, **kwargs), json={
-        "default_studio_id": default, "ignored_studio_ids": ignored})
+        **body})
 
 
-def test_remove_default_preserves_history_and_stops_only_its_background_work(client):
+@pytest.mark.parametrize("mode", ["ignored", "removed"])
+def test_exclude_default_preserves_history_and_stops_only_its_background_work(client, mode):
     from datetime import datetime, timedelta
 
     enable_second(client)
@@ -178,10 +182,12 @@ def test_remove_default_preserves_history_and_stops_only_its_background_work(cli
                                     run_date=datetime.now() + timedelta(hours=1))
 
     client.portal.call(add_jobs)
-    response = preferences(client, 2, [1])
+    response = preferences(client, 2, [1] if mode == "ignored" else [],
+                           [1] if mode == "removed" else [])
     assert response.status_code == 200, response.text
     assert state.syncer.box_id == state.store.active_box_id == state.settings.preferred_studio_id == 2
-    assert state.settings.ignored_studio_ids == [1]
+    assert state.settings.ignored_studio_ids == ([1] if mode == "ignored" else [])
+    assert state.settings.removed_studio_ids == ([1] if mode == "removed" else [])
     assert state.scheduler.get_job("open_1_100") is None
     assert state.scheduler.get_job("open_2_100") is not None
     state.syncer.window_sync.assert_not_awaited()
@@ -192,12 +198,12 @@ def test_remove_default_preserves_history_and_stops_only_its_background_work(cli
     work.assert_not_awaited()
     studios = client.get("/api/studios", headers=headers(client)).json()
     assert [s["id"] for s in studios["studios"]] == [2]
-    assert next(s for s in studios["affiliations"] if s["id"] == 1)["ignored"]
+    assert next(s for s in studios["affiliations"] if s["id"] == 1)[mode]
     connections = client.get("/api/connections", headers=headers(client)).json()
-    assert connections["connections"][0]["studios"][0]["ignored"]
+    assert connections["connections"][0]["studios"][0][mode]
 
     # Restore through the same public action, without changing the new default.
-    assert preferences(client, 2, []).status_code == 200
+    assert preferences(client, 2, [], []).status_code == 200
     assert state.settings.preferred_studio_id == state.syncer.box_id == 2
     async def read_original():
         return await state.store.get_session(100), await state.store.list_rules()
@@ -206,7 +212,7 @@ def test_remove_default_preserves_history_and_stops_only_its_background_work(cli
     assert any(r["id"] == rule_id and r["enabled"] for r in rules)
 
 
-def test_remove_nonselected_studio_preserves_temporary_selection(client):
+def test_ignore_nonselected_studio_preserves_temporary_selection(client):
     enable_second(client)
     state = client.app.state
     # The ignored studio may already be inactive. Removing it must not change
@@ -220,13 +226,16 @@ def test_remove_nonselected_studio_preserves_temporary_selection(client):
     state.syncer.window_sync.assert_not_awaited()
 
 
-@pytest.mark.parametrize("default,ignored", [(1, [1]), (2, [1, 2]), (999, [1])])
-def test_invalid_removal_leaves_preferences_and_identity_unchanged(client, default, ignored):
+@pytest.mark.parametrize("mode", ["ignored", "removed"])
+@pytest.mark.parametrize("default,excluded", [(1, [1]), (2, [1, 2]), (999, [1])])
+def test_invalid_exclusion_leaves_preferences_and_identity_unchanged(client, default, excluded, mode):
     enable_second(client)
-    response = preferences(client, default, ignored)
+    response = preferences(client, default, excluded if mode == "ignored" else [],
+                           excluded if mode == "removed" else [])
     assert response.status_code == 422
     state = client.app.state
     assert state.settings.ignored_studio_ids == []
+    assert state.settings.removed_studio_ids == []
     assert state.syncer.box_id == state.store.active_box_id == state.settings.preferred_studio_id == 1
 
 
@@ -238,12 +247,15 @@ def test_guarded_removal_cannot_change_the_callers_studio(client):
     assert state.syncer.box_id == state.settings.preferred_studio_id == 1
 
 
-def test_removal_failed_membership_validation_rolls_back(client):
+@pytest.mark.parametrize("mode", ["ignored", "removed"])
+def test_exclusion_failed_membership_validation_rolls_back(client, mode):
     enable_second(client)
     state = client.app.state
     state.syncer._store_membership = AsyncMock(side_effect=ArboxError("inventory unavailable"))
-    assert preferences(client, 2, [1]).status_code == 422
+    assert preferences(client, 2, [1] if mode == "ignored" else [],
+                       [1] if mode == "removed" else []).status_code == 422
     assert state.settings.ignored_studio_ids == []
+    assert state.settings.removed_studio_ids == []
     assert state.syncer.box_id == state.store.active_box_id == state.settings.preferred_studio_id == 1
     assert [s["id"] for s in client.get("/api/studios", headers=headers(client)).json()["studios"]] == [1, 2]
 
@@ -259,3 +271,28 @@ def test_restoring_inactive_studio_keeps_it_visible_without_enabling_bookings(cl
     assert restored["ignored"] is False
     assert restored["has_active_membership"] is False
     assert client.app.state.syncer.box_id == 1
+
+
+def test_ignored_studio_can_be_removed_and_restored_without_resuming_it(client):
+    enable_second(client)
+    state = client.app.state
+    assert preferences(client, 1, [2], []).status_code == 200
+    assert preferences(client, 1, [2], [2]).status_code == 200
+    assert preferences(client, 1, [2], []).status_code == 200
+    assert state.settings.ignored_studio_ids == [2]
+    assert state.settings.removed_studio_ids == []
+    data = client.get("/api/studios", headers=headers(client)).json()
+    paused = next(s for s in data["affiliations"] if s["id"] == 2)
+    assert paused["ignored"] is True and paused["removed"] is False
+    job = AsyncMock()
+    with pytest.raises(StudioUnavailable):
+        client.portal.call(state.studio_runtime.run_for, 2, job)
+    assert preferences(client, 1, [], []).status_code == 200
+    assert [s["id"] for s in client.get("/api/studios", headers=headers(client)).json()["studios"]] == [1, 2]
+
+
+def test_older_preferences_client_does_not_restore_removed_studios(client):
+    enable_second(client)
+    assert preferences(client, 1, [], [2]).status_code == 200
+    assert preferences(client, 1, []).status_code == 200
+    assert client.app.state.settings.removed_studio_ids == [2]

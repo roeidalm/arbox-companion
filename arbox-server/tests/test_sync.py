@@ -80,19 +80,22 @@ async def test_identity_skips_coach_only_affiliation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ignored_affiliation_is_not_queried(tmp_path):
+@pytest.mark.parametrize("mode", ["ignored", "removed"])
+async def test_excluded_affiliation_is_not_queried(tmp_path, mode):
     store = Store(str(tmp_path / "arbox.db"))
     await store.open()
     try:
         settings = Settings(str(tmp_path))
-        settings.set_ignored_studios([1])
+        settings.set_studio_visibility([1] if mode == "ignored" else [],
+                                       [1] if mode == "removed" else [])
         client = MultiStudioClient()
         syncer = Syncer(client, store, settings=settings)
         studios = await syncer.discover_studios()
         assert client.membership_calls == [2]
         assert [s["id"] for s in studios] == [2]
         affiliations = await store.get_meta("studio_affiliations")
-        assert affiliations[0]["ignored"] is True
+        assert affiliations[0][mode] is True
+        assert affiliations[0]["ignored" if mode == "removed" else "removed"] is False
         assert affiliations[0]["has_active_membership"] is None
     finally:
         await store.close()

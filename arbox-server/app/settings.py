@@ -59,6 +59,7 @@ DEFAULTS: dict = {
     # that actually has an active membership — never merely users_boxes[0].
     "preferred_studio_id": None,
     "ignored_studio_ids": [],
+    "removed_studio_ids": [],
     "studio_membership_preferences": {},
     # How long the local copy keeps rows, in days. Attended classes are the
     # user's own history and worth a year; strangers' past classes only need
@@ -355,8 +356,19 @@ class Settings:
 
     @property
     def ignored_studio_ids(self) -> list[int]:
+        return self._studio_ids("ignored_studio_ids")
+
+    @property
+    def removed_studio_ids(self) -> list[int]:
+        return self._studio_ids("removed_studio_ids")
+
+    @property
+    def excluded_studio_ids(self) -> list[int]:
+        return list(dict.fromkeys(self.ignored_studio_ids + self.removed_studio_ids))
+
+    def _studio_ids(self, key: str) -> list[int]:
         out = []
-        for raw in self._data.get("ignored_studio_ids") or []:
+        for raw in self._data.get(key) or []:
             try:
                 value = int(raw)
             except (TypeError, ValueError):
@@ -366,7 +378,11 @@ class Settings:
         return out
 
     def set_ignored_studios(self, box_ids: list[int]) -> None:
-        self._data["ignored_studio_ids"] = list(dict.fromkeys(int(x) for x in box_ids))
+        self.set_studio_visibility(box_ids, self.removed_studio_ids)
+
+    def set_studio_visibility(self, ignored: list[int], removed: list[int]) -> None:
+        self._data["ignored_studio_ids"] = list(dict.fromkeys(int(x) for x in ignored))
+        self._data["removed_studio_ids"] = list(dict.fromkeys(int(x) for x in removed))
         self.save()
 
     def activate_studio(self, box_id: int, previous_box_id: int | None = None,
@@ -662,6 +678,7 @@ class Settings:
                 "preferred_membership_id": self._data.get("preferred_membership_id"),
                 "preferred_studio_id": self._data.get("preferred_studio_id"),
                 "ignored_studio_ids": self.ignored_studio_ids,
+                "removed_studio_ids": self.removed_studio_ids,
                 "quota_override": self.quota_override, "telegram": tg,
                 "ha": ha,
                 "notify": dict(self._data["notify"]),

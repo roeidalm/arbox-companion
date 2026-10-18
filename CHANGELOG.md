@@ -3,6 +3,12 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.65.2
+
+- Restore “Ignore studio” separately from removal. Ignored studios remain visible in grey with a cancel-ignore action; removal hides them from the picker and still requires confirmation.
+- Persist monitoring and removal independently. Both stop background work and pending registration jobs, while restoring a previously ignored studio keeps monitoring paused until explicitly resumed.
+- Preserve existing ignored preferences, history, memberships and bookings. Require an active replacement before ignoring the default studio.
+
 ## 1.65.1
 
 - Place studio management at the top of Settings › Studio so removal and restoration controls are visible before connection and membership details.

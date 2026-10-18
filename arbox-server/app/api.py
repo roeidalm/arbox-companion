@@ -97,7 +97,8 @@ class ConnectionEnableBody(BaseModel):
 
 class StudioPreferences(BaseModel):
     default_studio_id: int
-    ignored_studio_ids: list[int] = []
+    ignored_studio_ids: list[int] | None = None
+    removed_studio_ids: list[int] | None = None
 
 
 REASON_CODES = {
@@ -886,6 +887,7 @@ async def profile(request: Request, x_api_key: str | None = Header(None)):
             "selected_studio_id": s.syncer.box_id,
             "default_studio_id": s.settings.preferred_studio_id,
             "ignored_studio_ids": s.settings.ignored_studio_ids,
+            "removed_studio_ids": s.settings.removed_studio_ids,
             "activity": activity,
             "quota": await s.rules_engine.quota_status()}
 
@@ -1582,9 +1584,11 @@ async def connections(request: Request, x_api_key: str | None = Header(None)):
 def _connections_public(s):
     result = s.connections.public()
     ignored = set(s.settings.ignored_studio_ids)
+    removed = set(s.settings.removed_studio_ids)
     for connection in result["connections"]:
         for studio in connection["studios"]:
             studio["ignored"] = studio["id"] in ignored
+            studio["removed"] = studio["id"] in removed
     return result
 
 
@@ -1678,11 +1682,14 @@ async def studio_preferences(request: Request, body: StudioPreferences,
                              x_api_key: str | None = Header(None)):
     require_key(request, x_api_key)
     s = ctx(request)
-    ignored = list(dict.fromkeys(int(x) for x in body.ignored_studio_ids))
-    if body.default_studio_id in ignored:
-        raise HTTPException(422, "יש לבחור סטודיו ברירת מחדל חלופי לפני ההסרה")
     previous_ignored = s.settings.ignored_studio_ids
-    s.settings.set_ignored_studios(ignored)
+    previous_removed = s.settings.removed_studio_ids
+    ignored = list(dict.fromkeys(body.ignored_studio_ids if body.ignored_studio_ids is not None else previous_ignored))
+    removed = list(dict.fromkeys(body.removed_studio_ids if body.removed_studio_ids is not None else previous_removed))
+    excluded = set(ignored) | set(removed)
+    if body.default_studio_id in excluded:
+        raise HTTPException(422, "יש לבחור סטודיו ברירת מחדל חלופי לפני התעלמות או הסרה")
+    s.settings.set_studio_visibility(ignored, removed)
     try:
         studios = await s.syncer.discover_studios()
         if not studios:
@@ -1699,7 +1706,7 @@ async def studio_preferences(request: Request, body: StudioPreferences,
         else:
             selected = next(x for x in studios if x["id"] == s.syncer.box_id)
     except BaseException as err:
-        s.settings.set_ignored_studios(previous_ignored)
+        s.settings.set_studio_visibility(previous_ignored, previous_removed)
         try:
             await s.syncer.discover_studios()
         except (ArboxError, OSError, TimeoutError):
@@ -1707,16 +1714,17 @@ async def studio_preferences(request: Request, body: StudioPreferences,
         if isinstance(err, ArboxError):
             raise HTTPException(422, str(err)) from None
         raise
-    # Runtime also rejects ignored studios, including already-dispatched jobs.
+    # Runtime also rejects ignored/removed studios, including dispatched jobs.
     # Removing pending jobs keeps the scheduler free of dormant registrations.
     for job in s.scheduler.get_jobs():
-        if any(job.id.startswith(f"open_{box_id}_") for box_id in ignored):
+        if any(job.id.startswith(f"open_{box_id}_") for box_id in excluded):
             s.scheduler.remove_job(job.id)
     await s.store.set_meta("quota_cache", None)
     await s.store.set_meta("effective_membership_id", None)
     await s.rules_engine.schedule_openings()
     return {"ok": True, "studio": selected,
-            "ignored_studio_ids": s.settings.ignored_studio_ids}
+            "ignored_studio_ids": s.settings.ignored_studio_ids,
+            "removed_studio_ids": s.settings.removed_studio_ids}
 
 
 # hour/minute of every cron job, so a timezone change can rebuild them

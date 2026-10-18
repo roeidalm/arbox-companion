@@ -57,11 +57,13 @@ test('inactive connected studios stay visible but disabled; removed studios stay
   const choices = options({studios: [{id: 10, name: 'Active'}, {id: 20, name: 'Joe'}], affiliations: [
     {id: 10, name: 'Active', has_active_membership: true},
     {id: 30, name: 'Rashty', has_active_membership: false},
-    {id: 40, name: 'Removed', ignored: true},
+    {id: 40, name: 'Removed', removed: true},
     {id: 50, name: 'Offline', has_active_membership: null},
+    {id: 60, name: 'Ignored', ignored: true, has_active_membership: null},
   ]});
-  assert.deepEqual(choices.map(s => s.id), [10, 20, 30, 50]);
-  assert.deepEqual(choices.map(s => s.available), [true, true, false, false]);
+  assert.deepEqual(choices.map(s => s.id), [10, 20, 30, 50, 60]);
+  assert.deepEqual(choices.map(s => s.available), [true, true, false, false, false]);
   assert.equal(choices[2].unavailableReason, 'ללא מנוי פעיל');
   assert.equal(choices[3].unavailableReason, 'החיבור אינו זמין');
+  assert.equal(choices[4].unavailableReason, 'בהתעלמות · המעקב מושהה');
 });

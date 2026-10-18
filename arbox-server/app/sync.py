@@ -101,6 +101,7 @@ class Syncer:
         previous_studios = {s['id']: s for s in await self.store.get_meta('studios') or []}
         seen = set()
         ignored = set(self.settings.ignored_studio_ids if self.settings else [])
+        removed = set(self.settings.removed_studio_ids if self.settings else [])
         for ub in profile.get("users_boxes") or []:
             box_id = ub.get("box_fk")
             if not box_id or box_id in seen:
@@ -115,11 +116,12 @@ class Syncer:
                 "address": box.get("address") or loc.get("address") or loc.get("location"),
                 "roles": ub.get("rolesArray") or [],
                 "ignored": box_id in ignored,
+                "removed": box_id in removed,
             }
-            if box_id in ignored:
+            if box_id in ignored or box_id in removed:
                 # Keep only the identity already present in the profile so it
                 # can be restored later. No membership, schedule or feed call
-                # is made for an ignored studio.
+                # is made for an ignored or removed studio.
                 affiliations.append({**base, "has_active_membership": None})
                 continue
             try:
@@ -178,9 +180,9 @@ class Syncer:
             # "address" arrived after the first release — re-derive once so an
             # existing install fills it without anyone clearing the DB
             preferred = self.settings.preferred_studio_id if self.settings else None
-            ignored = set(self.settings.ignored_studio_ids if self.settings else [])
+            excluded = set(self.settings.excluded_studio_ids if self.settings else [])
             if (self.box_id and self.membership_user_id and "address" in cached
-                    and cached_studios and self.box_id not in ignored
+                    and cached_studios and self.box_id not in excluded
                     and (preferred is None or preferred == self.box_id)):
                 return
 

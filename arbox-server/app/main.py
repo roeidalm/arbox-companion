@@ -364,7 +364,7 @@ async def index():
 # Path-per-page so a refresh keeps you where you were; the SPA reads the path.
 # Must stay in step with VIEW_PATHS in frontend/app.js — a view added there and
 # not here loads fine by tab click and 404s on refresh.
-SPA_PAGES = ("schedule", "mine", "automations", "journal", "system", "settings")
+SPA_PAGES = ("schedule", "mine", "friends", "automations", "journal", "system", "settings")
 
 
 @app.get("/{page}")

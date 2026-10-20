@@ -7,11 +7,13 @@ import {membershipChoice} from './membership-choice.js?v=2';
 import {calendarLinks} from './session-calendar.js?v=1';
 import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
 import './attendees.js?v=4';
+import './friends.js?v=1';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
   ["schedule", "▦", "לוח"],
   ["mine", "♡", "שלי"],
+  ["friends", "👥", "חברים"],
   ["journal", "▤", "יומן"],
   ["automations", "↻", "אוטומציות"],
 ];
@@ -260,7 +262,9 @@ export class ArboxAppPanel extends HTMLElement {
     const attendeesCSS = node('link'); attendeesCSS.rel = 'stylesheet';
     attendeesCSS.href = new URL('./attendees.css?v=2', import.meta.url).href;
     this._attendees?.destroy();
-    this.shadowRoot.replaceChildren(css, membershipCSS, attendeesCSS, this._shell);
+    const friendsCSS = node('link'); friendsCSS.rel = 'stylesheet';
+    friendsCSS.href = new URL('./friends.css?v=1', import.meta.url).href;
+    this.shadowRoot.replaceChildren(css, membershipCSS, attendeesCSS, friendsCSS, this._shell);
     this._attendees = globalThis.Attendees.create({document, mount: this.shadowRoot,
       getStudio: () => this.context().studio_id,
       request: (id, studio) => this.readAttendees(id, studio),
@@ -284,6 +288,7 @@ export class ArboxAppPanel extends HTMLElement {
         `${s.category_name || 'אימון'}${s.coach_name ? ' · ' + s.coach_name : ''}\n${fmtDate(s.date)} · \u2066${s.start_time}–${s.end_time || ''}\u2069`);
     }, 'attendees-trigger');
     trigger.setAttribute('aria-haspopup', 'dialog');
+    trigger.dataset.socialSchedule = String(s.schedule_id);
     trigger.setAttribute('aria-label', `הצגת נרשמים · ${s.category_name || 'אימון'} · ${s.date} ${s.start_time}`);
     return trigger;
   }
@@ -381,6 +386,7 @@ export class ArboxAppPanel extends HTMLElement {
       overview: ["summary", "me", "journal", "membership_policies", "watchlist"],
       schedule: ["summary", "schedule", "facets", "watchlist"],
       mine: ["summary", "me", "membership_policies", "watchlist", ...(this._mineHistoryOpen ? ['history'] : [])],
+      friends: ["summary", "friends"],
       studio: ["summary", "membership_policies"],
       journal: ["summary", "history", "journal"],
       automations: ["summary", "rules", "vacations", "facets"],
@@ -515,6 +521,7 @@ export class ArboxAppPanel extends HTMLElement {
       overview: "נעים לחזור לתנועה",
       schedule: "לוח האימונים",
       mine: "האימונים שלי",
+      friends: "חברים",
       journal: "יומן האימונים",
       automations: "התכנון שלי",
       studio: "המנויים בסטודיו",
@@ -524,6 +531,7 @@ export class ArboxAppPanel extends HTMLElement {
       node("h1", title),
     );
     this[`render_${this._tab}`]();
+    if (['schedule', 'mine'].includes(this._tab)) this.decorateSocial();
     if (restoreFocus) {
       const candidate = Array.from(
         this._content.querySelectorAll("button,input,select,summary,a"),
@@ -543,6 +551,29 @@ export class ArboxAppPanel extends HTMLElement {
       this._shell.scrollTop = 0;
       this._resetScroll = false;
     }
+  }
+  async decorateSocial() {
+    const studio = this.context().studio_id, entry = this._entry.entry_id, tab = this._tab;
+    try {
+      let cache = this._social;
+      if (!cache || cache.studio !== studio || cache.entry !== entry || Date.now() - cache.time > 60000) {
+        cache = {studio, entry, time: Date.now(), promise: this.read('friends')};
+        this._social = cache;
+      }
+      const result = await cache.promise;
+      if (entry !== this._entry.entry_id || studio !== this.context().studio_id || tab !== this._tab ||
+          result.context?.studio_id !== studio || result.data?.studio_id !== studio) return;
+      globalThis.ArboxFriends.decorate(this._content, result.data);
+    } catch { this._social = null; }
+  }
+  render_friends() {
+    const studio = this.context().studio_id, entry = this._entry.entry_id;
+    const host = node('div'); this._content.append(host);
+    globalThis.ArboxFriends.render({document, host, data: this._data.friends, openSession: s => {
+      if (studio !== this.context().studio_id || entry !== this._entry.entry_id) return;
+      this._date = s.date; this._view = 'day';
+      this.navigate(`schedule/${s.schedule_id}`);
+    }});
   }
   list(rows, parent = this._content) {
     if (!rows.length) {

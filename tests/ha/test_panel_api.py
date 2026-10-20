@@ -40,6 +40,25 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.conn.send_result.call_args.args[1], {"entries": [
             {"entry_id": "one", "title": "My Arbox", "can_write": False}]})
 
+    async def test_friends_read_is_authenticated_and_studio_scoped_without_write_routes(self):
+        calls = []
+        async def request(server, method, path, *args, **kwargs):
+            calls.append((method, path, args, kwargs))
+            return {"studio_id": 8} if path == "/panel/context" else {"people": []}
+        msg = {"id": 1, "entry_id": "one", "resource": "friends", "params": {}}
+        with patch.object(api, "request", request):
+            await api.ws_read.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls, [])
+            self.entry.options[api.VIEW_USERS] = ["user"]
+            await api.ws_read.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls[-1], ("GET", "/friends", (8,), {"params": {}}))
+            self.assertFalse(self.conn.send_result.call_args.args[1]["can_write"])
+            calls.clear()
+            await api.ws_read.__wrapped__(self.hass, self.conn,
+                                         {**msg, "params": {"user_id": 999}})
+            self.assertEqual(calls, [])
+        self.assertFalse(any("friend" in action for action in api.ACTIONS))
+
     async def test_google_sync_requires_action_permission_and_frozen_studio(self):
         msg = {'id':1, 'entry_id':'one', 'action':'google_calendar_sync', 'studio_id':8, 'data':{}}
         self.entry.options[api.VIEW_USERS] = ['user']

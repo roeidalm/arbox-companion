@@ -11,6 +11,7 @@ import logging
 import secrets
 from typing import Literal
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 from .rules import PlanningBlocked
 from .arbox_client import ArboxAuthError, ArboxError
 from .attendees import load_attendees
+from .friends import load_friends
 from .connections import ConnectionError
 from .studio_runtime import StudioUnavailable
 from .ical import build_calendar, google_calendar_url
@@ -223,6 +225,30 @@ async def reset_setup(request: Request, x_api_key: str | None = Header(None)):
 
 
 # -------------------------------------------------------------- schedule
+
+@router.get("/friends")
+async def friends(request: Request, response: Response,
+                  date_from: date | None = None, date_to: date | None = None,
+                  x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    response.headers["Cache-Control"] = "no-store"
+    if not s.syncer.box_id or not s.syncer.location_id:
+        raise HTTPException(409, "יש לבחור סטודיו לפני הצגת חברים")
+    today = datetime.now(ZoneInfo(s.settings.timezone)).date()
+    start = date_from or today
+    if start < today or start > today + timedelta(days=62):
+        raise HTTPException(422, "יש לבחור תאריך בטווח 62 הימים הקרובים")
+    end = date_to or start + timedelta(days=14)
+    if end < start or (end - start).days > 42 or end > today + timedelta(days=62):
+        raise HTTPException(422, "יש לבחור טווח עתידי של עד 42 ימים")
+    try:
+        return await load_friends(s.client, s.store, studio_id=s.syncer.box_id,
+                                  location_id=s.syncer.location_id,
+                                  start=start.isoformat(), end=end.isoformat())
+    except (ArboxError, ConnectionError):
+        raise HTTPException(502, "לא ניתן לטעון חברים מארבוקס כרגע. נסו שוב") from None
+
 
 @router.get("/schedule/{schedule_id}/attendees")
 async def schedule_attendees(schedule_id: int, request: Request,

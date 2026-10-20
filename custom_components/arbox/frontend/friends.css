@@ -1,0 +1,9 @@
+.friends-list { display: grid; gap: .8rem; margin-top: 1rem; }
+.friend-card { border: 1px solid var(--border, #ddd); border-radius: 12px; padding: 1rem; }
+.friend-card summary { cursor: pointer; display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; }
+.friend-card summary small { opacity: .7; font-size: .8rem; }
+.friend-avatar { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 50%; overflow: hidden; background: #e8eaf0; color: #242c43; }
+.friend-avatar > * { grid-area: 1 / 1; }
+.friend-avatar img { width: 44px; height: 44px; object-fit: cover; }
+.friend-session { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding-top: 1rem; flex-wrap: wrap; }
+.friend-session button { white-space: normal; }

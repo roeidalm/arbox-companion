@@ -16,6 +16,7 @@
 <title>Arbox Companion — לוח שיעורים</title>
 <link rel="stylesheet" href="/static/style.css?v=2.77.2">
 <link rel="stylesheet" href="/static/attendees.css?v=2">
+<link rel="stylesheet" href="/static/friends.css?v=1">
 <link rel="stylesheet" href="/static/release-notes.css?v=1">
 <link rel="stylesheet" href="/static/membership-ui.css?v=4">
 <link rel="stylesheet" href="/static/google-calendar.css?v=9">
@@ -33,6 +34,7 @@
   <nav>
     <button data-view="schedule" class="tab active">לוח</button>
     <button data-view="mine" class="tab">שלי</button>
+    <button data-view="friends" class="tab">חברים</button>
     <button data-view="rules" class="tab">אוטומציות</button>
     <button data-view="journal" class="tab">יומן</button>
     <button data-view="system" class="tab">מערכת</button>
@@ -164,6 +166,11 @@
   </section>
 
   <!-- rules -->
+  <section id="view-friends" class="view" hidden>
+    <h2>חברים</h2>
+    <button id="friendsRefresh" type="button">רענון חברים</button>
+    <div id="friendsContent" aria-live="polite"></div>
+  </section>
   <section id="view-rules" class="view" hidden>
     <div class="card explain">
       <h2>מה זה אוטומציה?</h2>
@@ -887,6 +894,7 @@
 <script src="/static/studio-management.js?v=2"></script>
 <script src="/static/notification-routes.js?v=1"></script>
 <script src="/static/attendees.js?v=4"></script>
-<script src="/static/app.js?v=2.77.2"></script>
+<script src="/static/friends.js?v=1"></script>
+<script src="/static/app.js?v=2.78.0"></script>
 </body>
 </html>

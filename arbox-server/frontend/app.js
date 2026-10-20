@@ -62,6 +62,7 @@ function attendeesButton(s, label = '👥 נרשמים') {
   const button = document.createElement('button');
   button.type = 'button'; button.className = 'attendees-trigger';
   button.textContent = label;
+  button.dataset.socialSchedule = String(s.schedule_id);
   button.setAttribute('aria-haspopup', 'dialog');
   button.setAttribute('aria-label', `הצגת נרשמים · ${s.category_name || 'אימון'} · ${s.date} ${s.start_time}`);
   button.onclick = () => {
@@ -516,7 +517,49 @@ function toast(text, ms = 3500) {
 
 /* ---------------------------------------------------------------- views */
 
-const VIEW_PATHS = { schedule: "/schedule", mine: "/mine", rules: "/automations",
+let socialCache = null;
+async function socialData(force = false) {
+  const studio = state.selectedStudioId;
+  if (!state.apiKey) throw new Error('יש להתחבר כדי לצפות בחברים');
+  if (!force && socialCache?.studio === studio && socialCache.auth === state.apiKey && Date.now() - socialCache.time < 60000)
+    return socialCache.promise;
+  const entry = {studio, auth: state.apiKey, time: Date.now()};
+  entry.promise = api('/api/friends', {headers: {'X-Arbox-Studio-Id': String(studio)}})
+    .then(data => {
+      if (data.studio_id !== studio || studio !== state.selectedStudioId || entry.auth !== state.apiKey)
+        throw new Error('הסטודיו השתנה. רעננו את החברים');
+      return data;
+    }).catch(error => { if (socialCache === entry) socialCache = null; throw error; });
+  socialCache = entry;
+  return entry.promise;
+}
+async function decorateSocial() {
+  if (!state.apiKey) return;
+  const studio = state.selectedStudioId, view = state.view;
+  try {
+    const data = await socialData();
+    if (studio === state.selectedStudioId && view === state.view)
+      ArboxFriends.decorate($(`#view-${view}`), data);
+  } catch { /* Optional social information must never block the calendar. */ }
+}
+async function loadFriends() {
+  const host = $("#friendsContent"), studio = state.selectedStudioId;
+  const seq = loadFriends.seq = (loadFriends.seq || 0) + 1;
+  host.textContent = 'טוען קשרים ושיעורים…';
+  try {
+    const data = await socialData(true);
+    if (seq !== loadFriends.seq || studio !== state.selectedStudioId || state.view !== 'friends') return;
+    ArboxFriends.render({document, host, data, openSession: s => {
+      if (studio !== state.selectedStudioId) return;
+      state.calMode = 'day'; state.weekStart = new Date(`${s.date}T12:00`);
+      setCalModeUI(); showView('schedule'); updateScheduleURL();
+    }});
+  } catch (error) {
+    if (seq === loadFriends.seq && studio === state.selectedStudioId) host.textContent = error.message;
+  }
+}
+
+const VIEW_PATHS = { schedule: "/schedule", mine: "/mine", friends: "/friends", rules: "/automations",
                      journal: "/journal", system: "/system", settings: "/settings" };
 
 function viewFromPath() {
@@ -545,6 +588,7 @@ function showView(name, push = true) {
   }
   if (name === "schedule") loadSchedule();
   if (name === "mine") loadMine();
+  if (name === "friends") loadFriends();
   if (name === "rules") loadRules();
   if (name === "journal") loadJournal();
   if (name === "system") loadLog();
@@ -552,6 +596,7 @@ function showView(name, push = true) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  $("#friendsRefresh").onclick = () => loadFriends();
   $$(".subtab").forEach((b) =>
     b.addEventListener("click", () => showPane(b.dataset.pane)));
   const addBlocked = () => {
@@ -962,6 +1007,7 @@ async function loadSchedule(refresh = false) {
 
 /** Paint the grid from the sessions already in hand. */
 function renderSchedule() {
+  queueMicrotask(decorateSocial);
   const data = state.lastSchedule;
   if (!data) return;
   const { from, to } = visibleRange(state.calMode, state.weekStart);
@@ -1579,6 +1625,7 @@ async function renderMineData(data, studio, quotaLoad) {
     }
     list.appendChild(c);
   }
+  decorateSocial();
 }
 
 function occurrenceSkipButton(s) {

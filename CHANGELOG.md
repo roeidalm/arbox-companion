@@ -3,7 +3,7 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
-## Unreleased
+## 1.65.3
 
 - Start recurring-rule monitoring at the validated anchor week instead of reporting missing classes before a new rule begins. Keep vacation exclusions and detection of later schedule gaps intact.
 - Let workout membership confirmations survive inventory refreshes when eligibility and usage limits are unchanged. Compare normalized permission and limit terms rather than timestamps or raw evidence, while rechecking current membership validity and remaining capacity before saving.

@@ -17,8 +17,28 @@ from .store import NO_SCHEDULE
 from .planning_intent import snapshot, token as intent_token
 
 
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+POLICY_DIGEST_VERSION = 'terms-v1:'
+
+
+def policy_digest(policy):
+    """Bind confirmation to eligibility terms, not evidence refresh metadata.
+
+    get() combines effective permissions with timestamps, raw shop sections and
+    booking evidence. Only the effective terms below govern eligibility/quota.
+    Balances and commitments are deliberately checked again by member_option().
+    The prefix invalidates prompts created with the old whole-record hash.
+    """
+    terms = {key: bool(policy.get(key)) for key in (
+        'categories_known', 'quota_known', 'contradiction')}
+    terms.update(state=policy.get('state'), manual=policy.get('source') == 'manual')
+    for key in ('category_ids', 'confirmed_category_ids', 'booked_category_ids',
+                'preflight_category_ids', 'denied_category_ids'):
+        terms[key] = sorted(set(policy.get(key) or []))
+    # Order and duplicate restrictions do not change the effective limits.
+    terms['limits'] = sorted({json.dumps(limit, sort_keys=True)
+                              for limit in policy.get('limits') or []})
+    return POLICY_DIGEST_VERSION + hashlib.sha256(
+        json.dumps(terms, sort_keys=True).encode()).hexdigest()
 
 
 def session_identity(session):
@@ -119,7 +139,7 @@ class PlanningActions:
                 if option['available']:
                     button = await self.button('אישור ושיוך', 'assign', context,
                         member_id=member['id'], fingerprint=fingerprint(member),
-                        policy_digest=digest(option['policy']),
+                        policy_digest=policy_digest(option['policy']),
                         requires_confirmation=bool(option.get('manual')))
                     choice['token'] = button['data'].split(':', 1)[1]
                 options.append(choice)
@@ -141,6 +161,9 @@ class PlanningActions:
                 raise ValueError('נדרש אישור מפורש שהמנוי כולל את סוג השיעור')
             if prompt.get('answered_at'):
                 raise ValueError('הבקשה כבר טופלה. רעננו את הרשימה')
+            if context.get('operation') == 'assign' and not str(
+                    context.get('policy_digest', '')).startswith(POLICY_DIGEST_VERSION):
+                raise ValueError('הבחירה נוצרה לפני עדכון המערכת. רעננו ובחרו שוב את המנוי')
             # Date/activation changes made in Arbox since opening the picker
             # must be checked before the explicit selection is saved.
             await self.e.refresh_membership_inventory(force=True)
@@ -295,7 +318,7 @@ class PlanningActions:
         for o in selectable[page:page + 2]:
             buttons.append([await self.button(o['member'].get('plan') or 'מנוי', 'member', c,
                 member_id=o['member']['id'], fingerprint=fingerprint(o['member']),
-                policy_digest=digest(o['policy']))])
+                policy_digest=policy_digest(o['policy']))])
         if len(selectable) > 2:
             buttons.append([await self.button('מנויים נוספים', 'members', c, page=(page + 2) % len(selectable))])
         else:
@@ -305,14 +328,18 @@ class PlanningActions:
         return self.reply(c, '\n'.join(lines), buttons)
 
     async def assign(self, c, session, cid, *, confirm):
+        if not str(c.get('policy_digest', '')).startswith(POLICY_DIGEST_VERSION):
+            return self.reply(c, 'הבחירה נוצרה לפני עדכון המערכת. פתחו מחדש את בחירת המנוי.',
+                              await self.actions(c))
         members = await self.e.store.get_meta('memberships') or []
         member = next((m for m in members if m['id'] == c.get('member_id')), None)
         if (not member or fingerprint(member) != c.get('fingerprint')
                 or not self.e._membership_valid_on(member, session['date'])):
             return self.reply(c, 'פרטי המנוי השתנו. בחרו מחדש.', await self.actions(c))
         option = await self.member_option(c, session, member)
-        if digest(option['policy']) != c.get('policy_digest'):
-            return self.reply(c, 'מידע ההתאמה השתנה. בחרו מחדש.', await self.actions(c))
+        if policy_digest(option['policy']) != c.get('policy_digest'):
+            return self.reply(c, 'תנאי הזכאות או מגבלות השימוש במנוי השתנו. רעננו ובחרו שוב את המנוי.',
+                              await self.actions(c))
         if not option['available']:
             return self.reply(c, f"לא ניתן לשייך: {option['reason']}\nהתכנון נשאר מושהה.", await self.actions(c))
         if not confirm:

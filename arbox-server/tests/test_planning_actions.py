@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from unittest.mock import AsyncMock
 
 from app.membership_policy import eligible
 from app.notification_reply import NotificationReply
@@ -61,6 +62,28 @@ async def test_assigns_only_the_occurrence_and_checks_capacity_again(engine):
     assert engine.syncer.membership_user_id == 10
     engine.client.book.assert_not_awaited()
     assert 'כבר טופלה' in (await press(engine, button(confirmation, 'מאשר ומשייך'))).text
+
+
+@pytest.mark.asyncio
+async def test_notification_confirmation_survives_real_refresh_and_reordered_equivalent_terms(engine):
+    key = engine.membership_policy.key(20)
+    saved = await engine.store.get_meta(key)
+    saved['limits'] = [{'period': 'month', 'count': 5}, {'period': 'day', 'count': 3}]
+    await engine.store.set_meta(key, saved)
+    buttons = await notice(engine)
+    choices = await press(engine, buttons[0][1])
+    confirmation = await press(engine, button(choices, 'Membership 20'))
+    engine.syncer.refresh_profile = AsyncMock()
+    await engine.refresh_membership_inventory(force=True)
+    saved = await engine.store.get_meta(key)
+    saved['limits'] = [saved['limits'][1], saved['limits'][0], saved['limits'][1]]
+    saved.update(verified_at=1234, read_error='previous temporary read failure',
+                 evidence=[{'header': 'Display text changed', 'values': []}])
+    await engine.store.set_meta(key, saved)
+    result = await press(engine, button(confirmation, 'מאשר ומשייך'))
+    assert result.result['ok'] and 'שויך' in result.text
+    assert (await engine.store.list_watchlist(pending_only=True))[0]['membership_user_id'] == 20
+    engine.client.book.assert_not_awaited()
 
 
 @pytest.mark.asyncio

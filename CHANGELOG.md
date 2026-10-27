@@ -3,6 +3,11 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## Unreleased
+
+- Let workout membership confirmations survive inventory refreshes when eligibility and usage limits are unchanged. Compare normalized permission and limit terms rather than timestamps or raw evidence, while rechecking current membership validity and remaining capacity before saving.
+- Ask users to reopen membership choices issued before this fix, and explain when actual eligibility or usage limits have changed. The existing shared website, Home Assistant and notification flows retain explicit category confirmation and one-use actions.
+
 ## 1.65.2
 
 - Restore “Ignore studio” separately from removal. Ignored studios remain visible in grey with a cancel-ignore action; removal hides them from the picker and still requires confirmation.

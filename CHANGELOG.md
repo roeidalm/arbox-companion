@@ -5,6 +5,7 @@ lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-compa
 
 ## Unreleased
 
+- Start recurring-rule monitoring at the validated anchor week instead of reporting missing classes before a new rule begins. Keep vacation exclusions and detection of later schedule gaps intact.
 - Let workout membership confirmations survive inventory refreshes when eligibility and usage limits are unchanged. Compare normalized permission and limit terms rather than timestamps or raw evidence, while rechecking current membership validity and remaining capacity before saving.
 - Ask users to reopen membership choices issued before this fix, and explain when actual eligibility or usage limits have changed. The existing shared website, Home Assistant and notification flows retain explicit category confirmation and one-use actions.
 

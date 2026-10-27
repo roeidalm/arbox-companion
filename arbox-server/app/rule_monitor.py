@@ -39,7 +39,10 @@ def evaluate(rule, sessions, today, published_through, *, excluded=(), verified=
     from .rules import rule_matches
     length = 7 * rule.get('recurrence_weeks', 1)
     anchor = monday(date.fromisoformat(rule.get('recurrence_anchor') or today.isoformat()))
-    start = anchor + timedelta(days=((today - anchor).days // length) * length)
+    # A newly validated rule may start at its first future matching week.
+    # Never invent missing periods before that baseline (negative floor division
+    # used to rewind a future anchor into this week's cancelled class).
+    start = anchor + timedelta(days=max(0, (today - anchor).days // length) * length)
     horizon = today + timedelta(days=HORIZON_DAYS)
     matches = [s for s in sessions if rule_matches(rule, s)]
     occupied = {s['date'] for s in sessions}

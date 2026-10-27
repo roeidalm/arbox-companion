@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import json
@@ -47,6 +47,53 @@ def test_closed_day_is_quiet_but_empty_unpublished_or_failed_response_is_not_clo
 def test_explicit_skip_or_vacation_is_quiet():
     assert evaluate(RULE, [session('2026-09-28', coach='Other')], TODAY, '2026-10-25',
                     excluded={'2026-09-28'})[0]['state'] == 'skipped'
+
+
+def test_future_anchor_does_not_invent_a_missing_week_before_monitoring_starts():
+    today = date(2026, 10, 27)
+    rule = {**RULE, 'weekdays': [1], 'recurrence_anchor': '2026-11-02'}
+    rows = [session('2026-10-27', category='Class Cancelled'),
+            session('2026-11-03'), session('2026-11-10')]
+    periods = evaluate(rule, rows, today, '2026-11-10',
+                       excluded={'2026-11-01', '2026-11-02', '2026-11-03'})
+    assert periods[0]['start'] == '2026-11-02'
+    assert periods[0]['state'] == 'skipped'
+    assert periods[1]['state'] == 'matched'
+    assert not any(p['state'] == 'missing' for p in periods)
+
+
+async def test_new_rule_ignores_prior_cancelled_week_and_still_detects_a_later_gap(monitor):
+    rule = (await monitor.e.store.list_rules())[0]
+    await monitor.e.store.save_rule({**rule, 'weekdays': [1], 'recurrence_anchor': '2026-11-02'})
+    await monitor.e.store.add_vacation('2026-11-01', '2026-11-03', True, True)
+    monitor.snapshot.return_value.update(
+        sessions=[session('2026-10-27', category='Class Cancelled'),
+                  session('2026-11-03'), session('2026-11-10')],
+        published_through='2026-11-10')
+    await monitor.check(date(2026, 10, 27))
+    monitor.e.notifier.send.assert_not_awaited()
+    periods = (await monitor.e.store.get_meta(monitor.key(1)))['periods']
+    assert [(p['start'], p['state']) for p in periods[:2]] == [
+        ('2026-11-02', 'skipped'), ('2026-11-09', 'matched')]
+    monitor.snapshot.return_value['sessions'][-1] = session('2026-11-10', coach='Other')
+    await monitor.check(date(2026, 10, 27))
+    assert monitor.e.notifier.send.await_count == 1
+    assert '2026-11-09' in monitor.e.notifier.send.await_args.args[0]
+    assert '2026-10-26' not in monitor.e.notifier.send.await_args.args[0]
+
+
+async def test_creation_starts_validation_at_first_future_matching_week(monitor):
+    today = date.today()
+    first = today + timedelta(days=7)
+    monitor.snapshot.return_value.update(
+        sessions=[session(today.isoformat(), category='Class Cancelled'), session(first.isoformat())],
+        published_through=first.isoformat(), date_from=today.isoformat(),
+        date_to=(today + timedelta(days=62)).isoformat())
+    result = await monitor.validate({**RULE, 'weekdays': [today.weekday()], 'recurrence_anchor': None}, today)
+    assert result['state'] == 'verified'
+    assert result['first_match'] == first.isoformat()
+    assert result['periods'][0]['next_expected'] == first.isoformat()
+    assert result['periods'][0]['state'] == 'matched'
 
 
 @pytest.fixture
@@ -174,7 +221,12 @@ async def test_unknown_schedule_warns_before_long_registration_window(monitor):
     assert 'טרם ניתן לאמת' in text
 
 
-async def test_creation_detects_incorrect_weekly_cadence(monitor):
+async def test_creation_detects_incorrect_weekly_cadence(monitor, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 28, 8)
+    monkeypatch.setattr('app.rule_monitor.datetime', FixedDateTime)
     monitor.snapshot.return_value.update(sessions=[session('2026-09-28', coach='Other'),
         session('2026-10-05'), session('2026-10-12', coach='Other'), session('2026-10-19')],
         published_through='2026-10-25', date_from='2026-09-28', date_to='2026-11-29')

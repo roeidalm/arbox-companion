@@ -32,6 +32,25 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.user.is_active = False
         self.assertFalse(api.authorized(self.hass, self.user, "one"))
 
+    async def test_cancellation_preview_and_confirmed_booking_use_fixed_scoped_transport(self):
+        calls = []
+        async def request(server, method, path, *args, **kwargs):
+            calls.append((method, path, args, kwargs))
+            return {'studio_id': 8} if path == '/panel/context' else {'ok': True}
+        self.entry.options[api.VIEW_USERS] = ['user']
+        with patch.object(api, 'request', request):
+            await api.ws_read.__wrapped__(self.hass, self.conn, {
+                'id': 1, 'entry_id': 'one', 'resource': 'cancellation_preview',
+                'params': {'schedule_id': 123, 'studio_id': 8}})
+            self.assertEqual(calls[-1], ('GET', '/schedule/123/cancellation', (8,), {'params': {}}))
+            calls.clear()
+            msg = {'id':2,'entry_id':'one','action':'cancel','studio_id':8,
+                   'data':{'schedule_id':123,'booking_id':456,'late_cancel':True,'reason_code':'work'}}
+            await api.ws_action.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls, [])
+            self.entry.options[api.ACTION_USERS] = ['user']
+            await api.ws_action.__wrapped__(self.hass, self.conn, msg)
+            self.assertEqual(calls[-1], ('POST', '/cancel', (8,), {'data': msg['data']}))
     async def test_entries_do_not_disclose_unauthorized_accounts(self):
         await api.ws_entries.__wrapped__(self.hass, self.conn, {"id": 1})
         self.assertEqual(self.conn.send_result.call_args.args[1], {"entries": []})

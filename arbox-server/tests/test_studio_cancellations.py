@@ -90,8 +90,11 @@ async def test_disappeared_personal_booking_on_existing_class_remains_unknown(en
 
 
 @pytest.mark.asyncio
-async def test_recent_unknown_is_resolved_and_stale_membership_cycle_cannot_revive_it(engine):
+@pytest.mark.parametrize('known_request', [False, True])
+async def test_recent_unknown_is_resolved_and_stale_membership_cycle_cannot_revive_it(engine, known_request):
     session, other = await seed(engine)
+    if known_request:
+        await engine.store.remember_cancellation_request(77, 123, 'work')
     await engine.store.record_external_cancellation(77, 123)
     await engine.store.set_meta(engine.membership_policy.key(20)+':history', {
         'charges':[{'schedule_id':77,'date':session['date'],'membership_user_id':20,'commitment':'reserved'}]})

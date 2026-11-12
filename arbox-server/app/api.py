@@ -681,6 +681,7 @@ async def _do_action(
     request: Request, schedule_id: int, kind: str, late_cancel: bool = False,
     reason_code: str | None = None, reason_text: str | None = None,
     membership_user_id: int | None = None,
+    expected_booking_id: int | None = None,
 ) -> dict:
     s = ctx(request)
     session = await s.store.get_session(schedule_id)
@@ -700,6 +701,8 @@ async def _do_action(
     cancel_reason = None
     if kind == "cancel":
         cancel_reason = _clean_reason(reason_code, reason_text)
+        if not booking_id or (expected_booking_id is not None and expected_booking_id != booking_id):
+            raise HTTPException(409, 'ההרשמה השתנתה. פתחו מחדש את האימון לפני ביטול')
     # a category the membership does not cover is refused here rather than
     # upstream: the answer is already known, so the call is pure waste
     if kind != "cancel" and s.rules_engine._blocked(session):
@@ -712,6 +715,8 @@ async def _do_action(
     # "my classes" and the HA sensor until the next sweep.
     async with s.syncer.exclusive():
         try:
+            if kind == 'cancel':
+                await s.store.remember_cancellation_request(schedule_id, booking_id, *cancel_reason)
             await s.syncer.ensure_identity()
             if kind == "book":
                 updated, membership_id = await s.rules_engine.perform_membership_action(
@@ -820,6 +825,7 @@ async def _do_action(
 
 class CancelAction(ScheduleAction):
     late_cancel: bool = False
+    booking_id: int | None = Field(None, gt=0)
     # Non-interactive clients from older releases cannot open the reason
     # dialog; they remain compatible and are recorded explicitly as no reason.
     reason_code: str = "none"
@@ -830,6 +836,29 @@ class AttendanceAction(BaseModel):
     status: str
     reason_code: str | None = None
     reason_text: str | None = None
+
+
+@router.get('/schedule/{schedule_id}/cancellation')
+async def cancellation_preview(request: Request, schedule_id: int,
+                               response: Response, x_api_key: str | None = Header(None)):
+    require_key(request, x_api_key)
+    s = ctx(request)
+    response.headers['Cache-Control'] = 'no-store'
+    if not s.syncer.box_id:
+        raise HTTPException(409, 'יש לבחור סטודיו לפני בדיקת תנאי הביטול')
+    session = await s.store.get_session(schedule_id)
+    if not session or session.get('box_id') != s.syncer.box_id:
+        raise HTTPException(404, 'האימון אינו זמין בסטודיו הפעיל')
+    standby = session.get('booking_option') == 'cancelWaitList'
+    booking = session.get('user_in_standby' if standby else 'user_booked')
+    if not booking or session.get('booking_option') not in ('cancelWaitList', 'cancelScheduleUser'):
+        raise HTTPException(409, 'אין הרשמה שניתן לבטל. רעננו את האימון')
+    try:
+        late = False if standby else not await s.client.check_late_cancel(schedule_id)
+    except (ArboxError, ConnectionError):
+        raise HTTPException(502, 'לא ניתן לבדוק כרגע את תנאי הביטול. לא בוצע ביטול') from None
+    return {'studio_id': s.syncer.box_id, 'schedule_id': schedule_id,
+            'booking_id': booking, 'late_cancel': late, 'standby': standby}
 
 
 @router.post("/book")
@@ -848,6 +877,7 @@ async def cancel(request: Request, body: CancelAction,
     return await _do_action(
         request, body.schedule_id, "cancel", late_cancel=body.late_cancel,
         reason_code=body.reason_code, reason_text=body.reason_text,
+        expected_booking_id=body.booking_id,
     )
 
 

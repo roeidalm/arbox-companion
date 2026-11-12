@@ -7,6 +7,7 @@ import {membershipChoice} from './membership-choice.js?v=2';
 import {calendarLinks} from './session-calendar.js?v=1';
 import {filterPicker, workoutSummary} from './filter-picker.js?v=2';
 import './attendees.js?v=4';
+import './cancel-confirmation.js?v=1';
 
 const TABS = [
   ["overview", "◈", "סקירה"],
@@ -1095,7 +1096,7 @@ export class ArboxAppPanel extends HTMLElement {
             "לא התקבל אישור מהשרת. בדקו את מצב האימון לפני ניסיון נוסף.";
       if (message.includes("late_cancel_required")) {
         this.confirm(
-          "זהו ביטול מאוחר ועלול להיחשב כניסה במנוי. לבטל בכל זאת?",
+          "תנאי הביטול השתנו: זהו כעת ביטול מאוחר שעלול להיחשב כניסה במנוי. לבטל בכל זאת?",
           () =>
             this.act(action, { ...data, late_cancel: true }, context, {
               close,
@@ -1108,6 +1109,23 @@ export class ArboxAppPanel extends HTMLElement {
     } finally {
       this._writing = false;
     }
+  }
+  async cancelSession(s, getReason, context) {
+    if (!this.canWrite() || this._cancelPreparing || this._writing) return;
+    this._cancelPreparing = true;
+    const entry = this._entry.entry_id;
+    try {
+      const reason = getReason();
+      const result = await this.read('cancellation_preview', {schedule_id:s.schedule_id, studio_id:context.studio_id});
+      if (entry !== this._entry.entry_id || context.studio_id !== this.context().studio_id ||
+          result.context?.studio_id !== context.studio_id) throw new Error('החיבור השתנה. פתחו את האימון מחדש');
+      const preview = globalThis.ArboxCancellation.validate(result.data, s, context.studio_id);
+      this.confirm(globalThis.ArboxCancellation.message(s, preview), () => this.act('cancel', {
+        schedule_id:s.schedule_id, booking_id:preview.booking_id,
+        late_cancel:preview.late_cancel, ...reason,
+      }, context));
+    } catch (error) { this.toast(error.message); }
+    finally { this._cancelPreparing = false; }
   }
   actionButton(label, action, data, context) {
     const b = button(
@@ -1353,14 +1371,7 @@ export class ArboxAppPanel extends HTMLElement {
       body.append(
         button(
           s.user_booked != null ? "ביטול הרשמה" : "יציאה מההמתנה",
-          () =>
-            this.confirm("לבטל את ההשתתפות באימון הזה?", () =>
-              this.act(
-                "cancel",
-                { schedule_id: s.schedule_id, ...getReason() },
-                context,
-              ),
-            ),
+          () => this.cancelSession(s, getReason, context),
           "danger",
         ),
       );

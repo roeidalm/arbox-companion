@@ -20,6 +20,8 @@ async def notify_pending(engine):
     timeline = await engine.store.training_events()
     for row in await engine.store.training_history():
         studio_cancelled = row['status'] == 'cancelled_studio'
+        # external_requested already has the authenticated user's cancellation
+        # intent and reason for this exact booking, even if delivery failed.
         if row.get('source') not in ('external_sync', 'external_studio'):
             continue
         # Historical imports remain visible, without flooding the user.

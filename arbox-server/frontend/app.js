@@ -1223,30 +1223,36 @@ function scheduledButton(s, what) {
 
 async function doAction(kind, s, btn, lateCancel = false, cancelReason = null) {
   if (!state.apiKey) { toast("צריך מפתח API כדי לבצע פעולות"); return; }
-  // cancelling is the one irreversible action here, so it does not get the
-  // same neutral one-liner as booking: it says what is actually lost
+  if (btn.disabled) return;
+  const studio = state.selectedStudioId;
   const when = `${s.category_name || "שיעור"} · ${s.date} ${s.start_time}`;
-  if (kind === "cancel" && !cancelReason) {
-    cancelReason = await chooseReason(
-      s.booking_option === "cancelWaitList" ? "למה לצאת מרשימת ההמתנה?" : "למה לבטל?",
-      "הסיבה נשמרת בהיסטוריה שלך בלבד ולא נשלחת ל-Arbox.");
-    if (!cancelReason) return;
-  }
-  const ask = kind === "cancel"
-    ? `לבטל את ${when}?\n\nהפעולה לא הפיכה — המקום משתחרר לאחרים, ואם השיעור מלא ייתכן שלא תוכל/י לחזור אליו.`
-    : `${kind === "book" ? "להזמין" : "להיכנס להמתנה"} — ${when}?`;
-  if (!lateCancel && !confirm(ask)) return;
   btn.disabled = true;
   try {
+    let preview;
+    if (kind === 'cancel') {
+      cancelReason ||= await chooseReason(
+        s.booking_option === 'cancelWaitList' ? 'למה לצאת מרשימת ההמתנה?' : 'למה לבטל?',
+        'הסיבה נשמרת בהיסטוריה שלך בלבד ולא נשלחת ל-Arbox.');
+      if (!cancelReason) return;
+      preview = ArboxCancellation.validate(await api(`/api/schedule/${s.schedule_id}/cancellation`, {
+        headers: {'X-Arbox-Studio-Id': String(studio)},
+      }), s, studio);
+      if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');
+      if (!confirm(ArboxCancellation.message(s, preview))) return;
+      lateCancel = preview.late_cancel;
+    } else if (!confirm(`${kind === 'book' ? 'להזמין' : 'להיכנס להמתנה'} — ${when}?`)) return;
+    if (studio !== state.selectedStudioId) throw new Error('הסטודיו השתנה. פתחו את האימון מחדש');
     const body = { schedule_id: s.schedule_id };
     if (kind !== "cancel" && state.membershipOverrides.has(s.schedule_id)) {
       body.membership_user_id = state.membershipOverrides.get(s.schedule_id);
     }
     if (kind === "cancel") {
       body.late_cancel = lateCancel;
+      body.booking_id = preview.booking_id;
       Object.assign(body, cancelReason);
     }
-    const res = await api(`/api/${kind}`, { method: "POST", body: JSON.stringify(body) });
+    const res = await api(`/api/${kind}`, { method: "POST", body: JSON.stringify(body),
+      headers: {'X-Arbox-Studio-Id': String(studio)} });
     if (res && res.calendar_url) {
       toastCalendar("הוזמן ✓" + (res.quota_note ? ` · ⚠️ ${res.quota_note}` : ""),
                     res.calendar_url, res.google_url);
@@ -1265,15 +1271,11 @@ async function doAction(kind, s, btn, lateCancel = false, cancelReason = null) {
     if (state.view === "mine") loadMine(); else loadSchedule();
   } catch (e) {
     if (String(e.message).startsWith("late_cancel_required")) {
-      btn.disabled = false;
-      if (confirm("שים לב: הביטול ייחשב ביטול מאוחר (בתוך חלון ה-12 שעות). לבטל בכל זאת?")) {
-        return doAction(kind, s, btn, true, cancelReason);
-      }
+      toast('תנאי הביטול השתנו מאז הבדיקה. פתחו שוב את הביטול כדי לראות את התנאים העדכניים.', 7000);
       return;
     }
     toast("נכשל: " + e.message, 6000);
-    btn.disabled = false;
-  }
+  } finally { btn.disabled = false; }
 }
 
 function navSchedule(dir) {
@@ -1729,7 +1731,7 @@ function eventEntry(e) {
 }
 
 function eventLead(e) {
-  if (['external_sync', 'external_confirmed', 'external_studio'].includes(e.source)) return " · מועד הביטול אינו ידוע";
+  if (['external_sync', 'external_confirmed', 'external_studio', 'external_requested'].includes(e.source)) return " · מועד הביטול אינו ידוע";
   if (!e.date || !e.start_time || !e.occurred_at) return "";
   const start = new Date(`${e.date}T${e.start_time}`);
   const happened = new Date(e.occurred_at.replace(" ", "T"));
@@ -1909,7 +1911,7 @@ function renderHistory() {
         line.className = "hist-event";
         const clock = document.createElement("span");
         clock.className = "hist-event-time";
-        clock.textContent = (['external_sync', 'external_studio'].includes(e.source) ? "זוהה ב־" : "") + eventStamp(e.occurred_at);
+        clock.textContent = (['external_sync', 'external_studio', 'external_requested'].includes(e.source) ? "זוהה ב־" : "") + eventStamp(e.occurred_at);
         line.append(clock,
           ` · ${EVENT_LABELS[e.event_type] || e.event_type}`
           + (e.event_type.startsWith("cancelled") ? eventLead(e) : "")

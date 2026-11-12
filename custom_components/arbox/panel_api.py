@@ -24,6 +24,7 @@ READS = {
     "membership_policies": ("/membership-policies", set()),
     "calendar_export": ("/calendar/export", {"schedule_id"}),
     "attendees": ("/schedule/{id}/attendees", {"schedule_id", "studio_id"}),
+    "cancellation_preview": ("/schedule/{id}/cancellation", {"schedule_id", "studio_id"}),
 }
 # Method, path, path identifier, permitted JSON fields. Identifiers must be integers.
 ACTIONS = {
@@ -36,7 +37,7 @@ ACTIONS = {
     "membership_policy_save": ("PUT", "/membership-policies/{id}", "membership_id", {"category_ids", "limits", "fingerprint"}),
     "book": ("POST", "/book", None, {"schedule_id", "membership_user_id"}),
     "standby": ("POST", "/standby", None, {"schedule_id", "membership_user_id"}),
-    "cancel": ("POST", "/cancel", None, {"schedule_id", "late_cancel", "reason_code", "reason_text"}),
+    "cancel": ("POST", "/cancel", None, {"schedule_id", "booking_id", "late_cancel", "reason_code", "reason_text"}),
     "refresh": ("POST", "/refresh", None, set()),
     "watch": ("POST", "/watchlist", None, {"schedule_id", "allow_standby", "ignore_vacation", "confirm_over_quota", "membership_user_id"}),
     "unwatch": ("DELETE", "/watchlist/{id}", "schedule_id", set()),
@@ -153,7 +154,7 @@ async def ws_read(hass, connection, msg):
                 or any(type(value) not in (str, bool, int) for value in params.values())):
             raise PanelError("invalid_input", "פרמטרים לא תקינים")
         expected_studio = None
-        if msg["resource"] == "attendees":
+        if msg["resource"] in ("attendees", "cancellation_preview"):
             if any(type(params.get(key)) is not int or params[key] < 1
                    for key in ("schedule_id", "studio_id")):
                 raise PanelError("invalid_input", "מזהה אימון או סטודיו לא תקין")
@@ -164,7 +165,7 @@ async def ws_read(hass, connection, msg):
         if not isinstance(context, dict) or not context.get("studio_id"):
             raise PanelError("studio_unavailable", "אין סטודיו פעיל בשרת")
         if expected_studio is not None and context["studio_id"] != expected_studio:
-            raise PanelError("conflict", "הסטודיו השתנה. רעננו ופתחו את רשימת הנרשמים מחדש")
+            raise PanelError("conflict", "הסטודיו השתנה. רעננו ופתחו את האימון מחדש")
         key = (msg["entry_id"], id(coordinator), path, context["studio_id"], json.dumps(params, sort_keys=True))
         data = context if path == "/panel/context" else await coalesced(
             hass, key, lambda: request(coordinator, "GET", path, context["studio_id"], params={key: str(value).lower() if isinstance(value, bool) else value

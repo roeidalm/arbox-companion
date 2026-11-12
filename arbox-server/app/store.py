@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import aiosqlite
@@ -1061,6 +1061,13 @@ class Store:
                             (membership_id, row["id"]))
         await self.db.commit()
 
+    async def remember_cancellation_request(self, sid, booking_id, reason_code, reason_text=None):
+        """User intent, not proof of cancellation or of a fee. Scope to one booking."""
+        await self.set_meta(f'cancel_request:{self.active_box_id}:{sid}:{booking_id}', {
+            'requested_at': datetime.now().isoformat(),
+            'reason_code': reason_code, 'reason_text': reason_text,
+        })
+
     async def record_external_cancellation(self, sid: int, booking_id: int | None,
                                            *, confirmed_late: bool = False) -> None:
         """Detection time is NOT cancellation time. Never infer actor or fee."""
@@ -1084,14 +1091,33 @@ class Store:
                 "AND event_type IN ('booked','rebooked') ORDER BY id DESC LIMIT 1", (sid,))
             receipt = await cur.fetchone()
             booking_id = receipt['booking_id'] if receipt else None
+        requested = await self.get_meta(f'cancel_request:{self.active_box_id}:{sid}:{booking_id}') or {}
+        try:
+            age = datetime.now() - datetime.fromisoformat(requested.get('requested_at', ''))
+            requested = requested if timedelta(0) <= age <= timedelta(hours=24) else {}
+        except (ValueError, TypeError):
+            requested = {}
+        if not requested and prior and prior.get('source') == 'external_requested':
+            # A fee can be confirmed after the initial disappearance. Retain an
+            # already reconciled intent for the same cycle even after its TTL.
+            cur = await self.db.execute(
+                'SELECT booking_id FROM training_events WHERE schedule_id=? AND event_type=? '
+                'ORDER BY id DESC LIMIT 1', (sid, prior['status']))
+            observed = await cur.fetchone()
+            if observed and observed['booking_id'] == booking_id:
+                requested = {'reason_code': prior.get('reason_code'),
+                             'reason_text': prior.get('reason_text')}
         await self.db.execute("UPDATE sessions SET user_booked=NULL WHERE schedule_id=?", (sid,))
         await self.set_training_outcome(
             sid, 'cancelled_late' if confirmed_late else 'cancelled_unknown',
-            'external_sync', (prior or {}).get('reason_code'), (prior or {}).get('reason_text'),
+            'external_requested' if requested else 'external_sync',
+            requested.get('reason_code') or (prior or {}).get('reason_code'),
+            requested.get('reason_text') or (prior or {}).get('reason_text'),
             booking_id=booking_id, counts_entry=True if confirmed_late else None)
         await self.expire_prompts(sid, ('attendance', 'attendance_reason'))
         await self.log_event('warn', 'booking',
             'זוהה ביטול מאוחר ב־Arbox' if confirmed_late else 'הרשמה נעלמה — נדרש בירור',
+            'נמצאה בקשת ביטול מאושרת במערכת; זהו מועד הגילוי בארבוקס' if requested else
             'מועד הגילוי בלבד; מבצע הביטול ומועד הביטול אינם ידועים', sid)
 
     async def record_studio_cancellation(self, sid: int, booking_id: int | None,

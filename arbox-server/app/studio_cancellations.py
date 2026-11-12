@@ -76,7 +76,7 @@ async def reconcile_recent(engine):
     """Resolve delayed/previous-version detections, including yesterday's class."""
     store = engine.store
     for outcome in await store.training_history():
-        if (outcome['status'] != 'cancelled_unknown' or outcome.get('source') != 'external_sync'
+        if (outcome['status'] != 'cancelled_unknown' or outcome.get('source') not in ('external_sync', 'external_requested')
                 or outcome['date'] < (date.today() - timedelta(days=7)).isoformat()):
             continue
         sid = outcome['schedule_id']

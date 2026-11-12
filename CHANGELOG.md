@@ -3,6 +3,13 @@
 This file describes user-facing changes. Published artifacts and generated commit
 lists are available in [GitHub Releases](https://github.com/roeidalm/arbox-companion/releases).
 
+## 1.65.4
+
+- Check cancellation conditions before the single confirmation in the website and Home Assistant. Include the late-entry warning there, carry the approved booking ID to the write, and reject changed booking identities or a newly crossed cancellation deadline.
+- Recognize Arbox's verified late-cancellation refusal from `checkLateCancel` as a late window instead of a server outage. Unrelated failures still block cancellation.
+- Persist authenticated cancellation intent before upstream I/O, scoped to the studio and exact booking. When sync later observes that cancellation, retain the supplied reason without asking who cancelled again; intent alone never proves cancellation or a fee.
+- Home Assistant integration 3.6.3 adds the same one-confirmation flow. Existing HA installations require the HACS update to display it.
+
 ## 1.65.3
 
 - Start recurring-rule monitoring at the validated anchor week instead of reporting missing classes before a new rule begins. Keep vacation exclusions and detection of later schedule gaps intact.

@@ -376,11 +376,23 @@ class ArboxClient:
 
     async def check_late_cancel(self, schedule_id: int) -> bool:
         """True when cancelling now is free; False inside the late window."""
-        r = await self._request(
-            "POST", "/api/v2/scheduleUser/checkLateCancel",
-            {"schedule_id": schedule_id},
-        )
-        return r == "OK"
+        try:
+            r = await self._request(
+                "POST", "/api/v2/scheduleUser/checkLateCancel",
+                {"schedule_id": schedule_id},
+            )
+        except ArboxError as err:
+            # Verified native refusal on 2026-11-12: this endpoint uses HTTP
+            # 513 for the late window. Other 513/5xx errors must still fail.
+            error = err.body.get('error') if isinstance(err.body, dict) else None
+            message = error.get('messageToUser') if isinstance(error, dict) else None
+            if (err.status == 513 and isinstance(error, dict) and error.get('code') == 513
+                    and isinstance(message, str) and 'too late to cancel' in message.casefold()):
+                return False
+            raise
+        if r == "OK":
+            return True
+        raise ArboxError('Unexpected cancellation eligibility response')
 
     async def cancel(
         self, schedule_user_id: int, schedule_id: int, late_cancel: bool = False

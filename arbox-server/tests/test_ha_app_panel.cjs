@@ -165,6 +165,22 @@ test("late cancellation waits for explicit confirmation", async () => {
   assert.equal(calls[1].data.late_cancel, true);
   assert.equal(calls[1].data.reason_code, "illness");
 });
+test('HA reads cancellation conditions before one explicit confirmation and one mutation', async()=>{
+  const {panel,context,calls}=harness();
+  context.ArboxCancellation=require('../frontend/cancel-confirmation.js');
+  panel.context=()=>({studio_id:7});
+  const session={schedule_id:1,user_booked:22,category_name:'HS',date:'2026-11-12',start_time:'18:30'};
+  panel.read=async(resource,params)=>{
+    assert.equal(resource,'cancellation_preview');assert.equal(params.studio_id,7);
+    return {context:{studio_id:7},data:{studio_id:7,schedule_id:1,booking_id:22,late_cancel:true,standby:false}};
+  };
+  let confirmations=0,confirm;
+  panel.confirm=(text,run)=>{confirmations++;assert.match(text,/ביטול מאוחר/);confirm=run;};
+  await panel.cancelSession(session,()=>({reason_code:'illness'}),{studio_id:7});
+  assert.equal(confirmations,1);assert.equal(calls.length,0);
+  await confirm();assert.equal(calls.length,1);assert.equal(calls[0].data.late_cancel,true);
+  assert.equal(calls[0].data.booking_id,22);assert.equal(confirmations,1);
+});
 test("hidden pages do not read or redraw", async () => {
   const { panel, context, calls } = harness();
   panel.load = Object.getPrototypeOf(panel).load;

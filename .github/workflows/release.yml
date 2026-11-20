@@ -57,7 +57,7 @@ jobs:
   test-ha:
     name: test (Home Assistant)
     # This pinned HA manifest is arm64; run it natively like the local check.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
     steps:
